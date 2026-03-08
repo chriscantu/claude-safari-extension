@@ -66,6 +66,7 @@
 		652C99F1EAD7FA1BDBF44D9D /* MessageFramer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessageFramer.swift; sourceTree = "<group>"; };
 		658074861C8C0C7933646343 /* FileService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileService.swift; sourceTree = "<group>"; };
 		729FD9AEFD8D3ED0949DE6F3 /* SafariWebExtensionHandler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SafariWebExtensionHandler.swift; sourceTree = "<group>"; };
+		EE112233445566778899AABB /* ClaudeInSafariExtension.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = ClaudeInSafariExtension.entitlements; sourceTree = "<group>"; };
 		7A6086210D19D2B963968546 /* ClaudeInSafariTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ClaudeInSafariTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		896C584EA45AB96EAA96797F /* MCPMessage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MCPMessage.swift; sourceTree = "<group>"; };
 		9C607E28344D2484CB81B6FD /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
@@ -170,6 +171,7 @@
 			isa = PBXGroup;
 			children = (
 				9C607E28344D2484CB81B6FD /* Info.plist */,
+				EE112233445566778899AABB /* ClaudeInSafariExtension.entitlements */,
 				729FD9AEFD8D3ED0949DE6F3 /* SafariWebExtensionHandler.swift */,
 			);
 			path = "ClaudeInSafari Extension";
@@ -489,6 +491,7 @@
 		5190CE0397B2F2491993CF2F /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = "ClaudeInSafari Extension/ClaudeInSafariExtension.entitlements";
 				COMBINE_HIDPI_IMAGES = YES;
 				INFOPLIST_FILE = "ClaudeInSafari Extension/Info.plist";
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -509,6 +512,7 @@
 		778C896E216A918F7F3B3110 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = "ClaudeInSafari Extension/ClaudeInSafariExtension.entitlements";
 				COMBINE_HIDPI_IMAGES = YES;
 				INFOPLIST_FILE = "ClaudeInSafari Extension/Info.plist";
 				LD_RUNPATH_SEARCH_PATHS = (
