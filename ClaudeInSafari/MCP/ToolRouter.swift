@@ -86,9 +86,18 @@ class ToolRouter: MCPSocketServerDelegate {
     /// Write a QueuedToolRequest (as a JSON string) to the tail of the App Group FIFO queue file.
     @discardableResult
     private func enqueueToolRequest(_ queued: QueuedToolRequest) -> Bool {
-        guard let url = AppConstants.pendingRequestsQueueURL,
-              let itemData = try? JSONEncoder().encode(queued),
-              let itemString = String(data: itemData, encoding: .utf8) else { return false }
+        guard let url = AppConstants.pendingRequestsQueueURL else {
+            NSLog("enqueueToolRequest: pendingRequestsQueueURL is nil (App Group unavailable)")
+            return false
+        }
+        guard let itemData = try? JSONEncoder().encode(queued) else {
+            NSLog("enqueueToolRequest: failed to encode QueuedToolRequest for tool '\(queued.tool)'")
+            return false
+        }
+        guard let itemString = String(data: itemData, encoding: .utf8) else {
+            NSLog("enqueueToolRequest: encoded JSON is not valid UTF-8")
+            return false
+        }
 
         var queue: [String] = []
         if let existing = try? Data(contentsOf: url) {
@@ -124,7 +133,11 @@ class ToolRouter: MCPSocketServerDelegate {
         }
 
         DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + 0.05) { [weak self] in
-            self?.pollForExtensionResponse(requestId: requestId, clientId: clientId, deadline: deadline)
+            guard let self = self else {
+                NSLog("pollForExtensionResponse: ToolRouter deallocated, client \(clientId) will hang for requestId \(requestId)")
+                return
+            }
+            self.pollForExtensionResponse(requestId: requestId, clientId: clientId, deadline: deadline)
         }
     }
 
@@ -151,15 +164,23 @@ class ToolRouter: MCPSocketServerDelegate {
     }
 
     private func sendResponse(_ response: ToolResponse, to clientId: String) {
-        guard let data = try? JSONEncoder().encode(response) else { return }
-        server?.send(data: data, to: clientId)
+        do {
+            let data = try JSONEncoder().encode(response)
+            server?.send(data: data, to: clientId)
+        } catch {
+            NSLog("sendResponse: failed to encode ToolResponse for client \(clientId): \(error)")
+        }
     }
 }
 
 private extension ContentBlock {
     init?(from dict: [String: Any]) {
-        guard let type = dict["type"] as? String,
-              let text = dict["text"] as? String else { return nil }
-        self.init(type: type, text: text)
+        guard let type = dict["type"] as? String else { return nil }
+        self.init(
+            type: type,
+            text: dict["text"] as? String,
+            data: dict["data"] as? String,
+            mediaType: dict["mediaType"] as? String
+        )
     }
 }

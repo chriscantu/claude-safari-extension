@@ -125,6 +125,7 @@ class MCPSocketServer {
 
     /// Send framed data to a specific client.
     /// Loops until all bytes are written or the connection is closed (handles partial writes).
+    /// Disconnects the client if a write error occurs to avoid framing corruption.
     func send(data: Data, to clientId: String) {
         clientsLock.lock()
         let client = clients[clientId]
@@ -133,14 +134,24 @@ class MCPSocketServer {
         guard let client = client else { return }
 
         let framed = framer.frame(data)
-        framed.withUnsafeBytes { ptr in
-            guard var base = ptr.baseAddress else { return }
+        let writeError = framed.withUnsafeBytes { ptr -> Bool in
+            guard var base = ptr.baseAddress else { return false }
             var remaining = framed.count
             while remaining > 0 {
                 let written = Darwin.write(client.fd, base, remaining)
-                if written <= 0 { break }   // connection closed or error
+                if written <= 0 { return true }  // connection closed or error
                 remaining -= written
                 base = base.advanced(by: written)
+            }
+            return false
+        }
+
+        if writeError {
+            NSLog("MCPSocketServer: write error for client \(clientId), disconnecting")
+            client.readSource?.cancel()
+            delegateQueue.async { [weak self] in
+                guard let self = self else { return }
+                self.delegate?.socketServer(self, didDisconnect: clientId)
             }
         }
     }

@@ -47,7 +47,26 @@ struct ToolResponseContent: Codable {
 
 struct ContentBlock: Codable {
     let type: String
-    let text: String
+    let text: String?       // present for type "text"
+    let data: String?       // base64 payload for type "image"
+    let mediaType: String?  // MIME type for type "image"
+
+    init(type: String, text: String? = nil, data: String? = nil, mediaType: String? = nil) {
+        self.type = type
+        self.text = text
+        self.data = data
+        self.mediaType = mediaType
+    }
+
+    enum CodingKeys: String, CodingKey { case type, text, data, mediaType }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(type, forKey: .type)
+        try c.encodeIfPresent(text, forKey: .text)
+        try c.encodeIfPresent(data, forKey: .data)
+        try c.encodeIfPresent(mediaType, forKey: .mediaType)
+    }
 }
 
 /// A tool request queued in the App Group FIFO file for the extension to pick up.

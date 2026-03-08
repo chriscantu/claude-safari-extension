@@ -29,6 +29,7 @@ async function executeTool(toolName, args, context) {
 
         return { result: { content } };
     } catch (error) {
+        console.error(`[tool-registry] ${toolName} threw:`, error);
         return {
             error: {
                 content: [{ type: "text", text: error.message || String(error) }],

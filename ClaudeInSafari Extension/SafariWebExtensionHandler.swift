@@ -49,12 +49,21 @@ class SafariWebExtensionHandler: NSObject, NSExtensionRequestHandling {
             return
         }
 
-        let defaults = UserDefaults(suiteName: AppConstants.appGroupId)
-        if let responseData = try? JSONSerialization.data(withJSONObject: message),
-           let responseString = String(data: responseData, encoding: .utf8) {
-            let key = AppConstants.UserDefaultsKeys.toolResponsePrefix + requestId
-            defaults?.set(responseString, forKey: key)
+        guard let defaults = UserDefaults(suiteName: AppConstants.appGroupId) else {
+            Self.logger.error("tool_response: failed to open App Group UserDefaults suite")
+            respond(with: ["status": "error", "message": "App Group unavailable"], context: context)
+            return
         }
+
+        guard let responseData = try? JSONSerialization.data(withJSONObject: message),
+              let responseString = String(data: responseData, encoding: .utf8) else {
+            Self.logger.error("tool_response: failed to serialize response for requestId \(requestId)")
+            respond(with: ["status": "error", "message": "Response serialization failed"], context: context)
+            return
+        }
+
+        let key = AppConstants.UserDefaultsKeys.toolResponsePrefix + requestId
+        defaults.set(responseString, forKey: key)
         respond(with: ["status": "ok"], context: context)
     }
 
@@ -67,7 +76,8 @@ class SafariWebExtensionHandler: NSObject, NSExtensionRequestHandling {
     // MARK: - Helpers
 
     /// Remove and return the first JSON string from the App Group FIFO queue file.
-    /// Returns nil if the queue is empty or the file does not exist.
+    /// Returns nil if the queue is empty, the file does not exist, or the write-back fails.
+    /// Write-back failure returns nil to prevent double-execution of the same request.
     private func dequeueToolRequest() -> String? {
         guard let url = AppConstants.pendingRequestsQueueURL,
               let data = try? Data(contentsOf: url),
@@ -75,8 +85,19 @@ class SafariWebExtensionHandler: NSObject, NSExtensionRequestHandling {
               !queue.isEmpty else { return nil }
 
         let first = queue.removeFirst()
-        let updated = (try? JSONEncoder().encode(queue)) ?? Data("[]".utf8)
-        try? updated.write(to: url, options: .atomic)
+
+        guard let updated = try? JSONEncoder().encode(queue) else {
+            Self.logger.error("dequeueToolRequest: failed to encode updated queue")
+            return nil
+        }
+
+        do {
+            try updated.write(to: url, options: .atomic)
+        } catch {
+            Self.logger.error("dequeueToolRequest: failed to write updated queue: \(error)")
+            return nil
+        }
+
         return first
     }
 

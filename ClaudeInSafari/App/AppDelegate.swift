@@ -19,7 +19,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         toolRouter = ToolRouter()
 
         mcpServer?.delegate = toolRouter
-        toolRouter?.setServer(mcpServer!)
+        if let server = mcpServer {
+            toolRouter?.setServer(server)
+        }
 
         do {
             try mcpServer?.start()

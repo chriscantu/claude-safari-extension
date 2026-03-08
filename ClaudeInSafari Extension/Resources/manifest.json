@@ -9,6 +9,7 @@
         "tabs",
         "storage",
         "nativeMessaging",
+        "alarms",
         "<all_urls>"
     ],
 
