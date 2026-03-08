@@ -7,18 +7,25 @@ on:
 permissions:
   contents: read
   pull-requests: write
+  id-token: write
 
 jobs:
   review:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
 
       - uses: anthropics/claude-code-action@v1
         with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          claude_args: |
+            --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*)"
           prompt: |
+            REPO: ${{ github.repository }}
+            PR NUMBER: ${{ github.event.pull_request.number }}
+
             Review this PR against the three areas defined in CLAUDE.md:
 
             1. Safari Extension Best Practices
@@ -47,3 +54,5 @@ jobs:
 
             Flag only real issues. Skip style nits. For each finding, cite the specific
             file and line number and explain the impact.
+            Use `gh pr comment` for top-level feedback and
+            `mcp__github_inline_comment__create_inline_comment` for inline code issues.
