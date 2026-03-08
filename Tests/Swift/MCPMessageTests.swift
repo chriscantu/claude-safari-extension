@@ -222,4 +222,14 @@ final class MCPMessageTests: XCTestCase {
         XCTAssertNotNil(response.error)
         XCTAssertEqual(response.error?.content.first?.text, "Malformed extension response")
     }
+
+    func testDecodeExtensionResponseAllBlocksMalformed() {
+        let router = ToolRouter()
+        // Content array exists but all blocks are missing the required "type" key
+        let json = #"{"result":{"content":[{"bad":"block"},{"also":"bad"}]}}"#
+        let response = router.decodeExtensionResponse(json)
+        XCTAssertNil(response.result)
+        XCTAssertNotNil(response.error)
+        XCTAssertEqual(response.error?.content.first?.text, "Extension response contained no valid content blocks")
+    }
 }

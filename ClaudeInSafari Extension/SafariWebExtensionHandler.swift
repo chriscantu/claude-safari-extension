@@ -80,7 +80,7 @@ class SafariWebExtensionHandler: NSObject, NSExtensionRequestHandling {
     // MARK: - Helpers
 
     /// Remove and return the first JSON string from the App Group FIFO queue file.
-    /// Uses NSFileCoordinator to prevent cross-process read-modify-write races with ToolRouter.
+    /// Uses NSFileCoordinator to reduce the risk of cross-process read-modify-write races with ToolRouter.
     /// Returns nil if the queue is empty, the file does not exist, or write-back fails.
     /// Write-back failure returns nil to prevent double-execution of the same request.
     private func dequeueToolRequest() -> String? {
@@ -93,8 +93,14 @@ class SafariWebExtensionHandler: NSObject, NSExtensionRequestHandling {
         let coordinator = NSFileCoordinator()
         var coordinatorError: NSError?
         coordinator.coordinate(writingItemAt: url, options: .forMerging, error: &coordinatorError) { writingURL in
-            guard let data = try? Data(contentsOf: writingURL) else {
+            let data: Data
+            do {
+                data = try Data(contentsOf: writingURL)
+            } catch let error as NSError where error.code == NSFileReadNoSuchFileError {
                 // File doesn't exist yet — queue is empty, this is normal
+                return
+            } catch {
+                Self.logger.error("dequeueToolRequest: failed to read queue file: \(error.localizedDescription)")
                 return
             }
             guard var queue = try? JSONDecoder().decode([String].self, from: data) else {

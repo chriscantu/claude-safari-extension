@@ -33,6 +33,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             alert.informativeText = "Could not start the MCP socket server:\n\(error.localizedDescription)\n\nThe extension will not function. Check Console for details."
             alert.alertStyle = .critical
             alert.runModal()
+            NSApplication.shared.terminate(nil)
         }
     }
 }

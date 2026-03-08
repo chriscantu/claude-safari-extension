@@ -72,6 +72,7 @@ claude-safari-extension/
 │   │
 │   └── Tests/                               # All test files
 │       ├── Swift/                            # XCTest suites for native app
+│       │   ├── MCPMessageTests.swift
 │       │   ├── MCPSocketServerTests.swift
 │       │   ├── MessageFramerTests.swift
 │       │   ├── ToolRouterTests.swift

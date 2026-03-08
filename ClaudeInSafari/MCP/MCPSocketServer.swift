@@ -152,11 +152,15 @@ class MCPSocketServer {
             // to this client before the readSource cancel handler fires.
             clientsLock.lock()
             clients.removeValue(forKey: clientId)
+            let shouldNotifyWrite = !client.disconnectNotified
+            if shouldNotifyWrite { client.disconnectNotified = true }
             clientsLock.unlock()
             client.readSource?.cancel()
-            delegateQueue.async { [weak self] in
-                guard let self = self else { return }
-                self.delegate?.socketServer(self, didDisconnect: clientId)
+            if shouldNotifyWrite {
+                delegateQueue.async { [weak self] in
+                    guard let self = self else { return }
+                    self.delegate?.socketServer(self, didDisconnect: clientId)
+                }
             }
         }
     }
@@ -217,9 +221,15 @@ class MCPSocketServer {
         if bytesRead <= 0 {
             // Client disconnected or error
             client.readSource?.cancel()
-            delegateQueue.async { [weak self] in
-                guard let self = self else { return }
-                self.delegate?.socketServer(self, didDisconnect: clientId)
+            clientsLock.lock()
+            let shouldNotifyRead = !client.disconnectNotified
+            if shouldNotifyRead { client.disconnectNotified = true }
+            clientsLock.unlock()
+            if shouldNotifyRead {
+                delegateQueue.async { [weak self] in
+                    guard let self = self else { return }
+                    self.delegate?.socketServer(self, didDisconnect: clientId)
+                }
             }
             return
         }
@@ -239,9 +249,15 @@ class MCPSocketServer {
             // Malformed data — disconnect client
             NSLog("Malformed data from client \(clientId): \(error)")
             client.readSource?.cancel()
-            delegateQueue.async { [weak self] in
-                guard let self = self else { return }
-                self.delegate?.socketServer(self, didDisconnect: clientId)
+            clientsLock.lock()
+            let shouldNotifyMalformed = !client.disconnectNotified
+            if shouldNotifyMalformed { client.disconnectNotified = true }
+            clientsLock.unlock()
+            if shouldNotifyMalformed {
+                delegateQueue.async { [weak self] in
+                    guard let self = self else { return }
+                    self.delegate?.socketServer(self, didDisconnect: clientId)
+                }
             }
         }
     }
@@ -252,6 +268,7 @@ class ClientConnection {
     let fd: Int32
     var buffer: Data
     var readSource: DispatchSourceRead?
+    var disconnectNotified = false
 
     init(fd: Int32, buffer: Data) {
         self.fd = fd

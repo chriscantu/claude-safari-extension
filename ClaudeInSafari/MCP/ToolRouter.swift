@@ -11,8 +11,9 @@ class ToolRouter: MCPSocketServerDelegate {
         "resize_window"
     ]
 
-    /// Tracks which client IDs have active polls so disconnects can cancel them.
-    private var activePolls = Set<String>()
+    /// Maps clientId → set of active requestIds so disconnects can stop all pending polls for a client.
+    /// Note: one already-queued asyncAfter may fire after a disconnect before the guard check stops it.
+    private var activePolls = [String: Set<String>]()
     private let activePollsLock = NSLock()
 
     func setServer(_ server: MCPSocketServer) {
@@ -46,7 +47,7 @@ class ToolRouter: MCPSocketServerDelegate {
     func socketServer(_ server: MCPSocketServer, didDisconnect clientId: String) {
         NSLog("MCP client disconnected: \(clientId)")
         activePollsLock.lock()
-        activePolls.remove(clientId)
+        activePolls.removeValue(forKey: clientId)
         activePollsLock.unlock()
     }
 
@@ -88,14 +89,14 @@ class ToolRouter: MCPSocketServerDelegate {
         }
 
         activePollsLock.lock()
-        activePolls.insert(clientId)
+        activePolls[clientId, default: Set()].insert(requestId)
         activePollsLock.unlock()
 
         pollForExtensionResponse(requestId: requestId, clientId: clientId, deadline: Date().addingTimeInterval(30))
     }
 
     /// Write a QueuedToolRequest (as a JSON string) to the tail of the App Group FIFO queue file.
-    /// Uses NSFileCoordinator to prevent cross-process read-modify-write races with SafariWebExtensionHandler.
+    /// Uses NSFileCoordinator to reduce the risk of cross-process read-modify-write races with SafariWebExtensionHandler.
     @discardableResult
     private func enqueueToolRequest(_ queued: QueuedToolRequest) -> Bool {
         guard let url = AppConstants.pendingRequestsQueueURL else {
@@ -116,8 +117,14 @@ class ToolRouter: MCPSocketServerDelegate {
         var coordinatorError: NSError?
         coordinator.coordinate(writingItemAt: url, options: .forMerging, error: &coordinatorError) { writingURL in
             var queue: [String] = []
-            if let existing = try? Data(contentsOf: writingURL) {
+            do {
+                let existing = try Data(contentsOf: writingURL)
                 queue = (try? JSONDecoder().decode([String].self, from: existing)) ?? []
+            } catch let error as NSError where error.code == NSFileReadNoSuchFileError {
+                // File doesn't exist yet — queue is empty, this is normal
+            } catch {
+                NSLog("enqueueToolRequest: failed to read request queue: \(error.localizedDescription)")
+                return
             }
             queue.append(itemString)
             guard let encoded = try? JSONEncoder().encode(queue) else {
@@ -128,7 +135,7 @@ class ToolRouter: MCPSocketServerDelegate {
                 try encoded.write(to: writingURL, options: .atomic)
                 success = true
             } catch {
-                NSLog("enqueueToolRequest: failed to write request queue: \(error)")
+                NSLog("enqueueToolRequest: failed to write request queue: \(error.localizedDescription)")
             }
         }
         if let err = coordinatorError {
@@ -140,13 +147,21 @@ class ToolRouter: MCPSocketServerDelegate {
     /// Recursively poll UserDefaults for the extension's response to `requestId`.
     /// Schedules itself every 50 ms on a background queue; gives up after `deadline` or client disconnect.
     private func pollForExtensionResponse(requestId: String, clientId: String, deadline: Date) {
-        let key = AppConstants.UserDefaultsKeys.toolResponsePrefix + requestId
-        let defaults = UserDefaults(suiteName: AppConstants.appGroupId)
-
-        if let responseString = defaults?.string(forKey: key) {
-            defaults?.removeObject(forKey: key)
+        guard let defaults = UserDefaults(suiteName: AppConstants.appGroupId) else {
+            NSLog("pollForExtensionResponse: App Group UserDefaults unavailable, failing immediately for requestId \(requestId)")
             activePollsLock.lock()
-            activePolls.remove(clientId)
+            activePolls[clientId]?.remove(requestId)
+            activePollsLock.unlock()
+            sendResponse(ToolResponse.failure(message: "App Group unavailable"), to: clientId)
+            return
+        }
+
+        let key = AppConstants.UserDefaultsKeys.toolResponsePrefix + requestId
+
+        if let responseString = defaults.string(forKey: key) {
+            defaults.removeObject(forKey: key)
+            activePollsLock.lock()
+            activePolls[clientId]?.remove(requestId)
             activePollsLock.unlock()
             sendResponse(decodeExtensionResponse(responseString), to: clientId)
             return
@@ -154,7 +169,7 @@ class ToolRouter: MCPSocketServerDelegate {
 
         guard Date() < deadline else {
             activePollsLock.lock()
-            activePolls.remove(clientId)
+            activePolls[clientId]?.remove(requestId)
             activePollsLock.unlock()
             sendResponse(ToolResponse.failure(message: "Extension response timeout (30s)"), to: clientId)
             return
@@ -166,7 +181,7 @@ class ToolRouter: MCPSocketServerDelegate {
                 return
             }
             self.activePollsLock.lock()
-            let isActive = self.activePolls.contains(clientId)
+            let isActive = self.activePolls[clientId]?.contains(requestId) == true
             self.activePollsLock.unlock()
             guard isActive else {
                 NSLog("pollForExtensionResponse: client \(clientId) disconnected, cancelling poll for requestId \(requestId)")
@@ -190,6 +205,9 @@ class ToolRouter: MCPSocketServerDelegate {
                 NSLog("decodeExtensionResponse: dropped malformed content block: \(rawBlock)")
                 return nil
             }
+            if blocks.isEmpty && !contentArray.isEmpty {
+                return ToolResponse.failure(message: "Extension response contained no valid content blocks")
+            }
             return ToolResponse(type: "tool_response", result: ToolResponseContent(content: blocks), error: nil)
         }
 
@@ -199,6 +217,9 @@ class ToolRouter: MCPSocketServerDelegate {
                 if let block = ContentBlock(from: rawBlock) { return block }
                 NSLog("decodeExtensionResponse: dropped malformed content block: \(rawBlock)")
                 return nil
+            }
+            if blocks.isEmpty && !contentArray.isEmpty {
+                return ToolResponse.failure(message: "Extension response contained no valid content blocks")
             }
             return ToolResponse(type: "tool_response", result: nil, error: ToolResponseContent(content: blocks))
         }
