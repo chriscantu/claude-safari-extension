@@ -12,6 +12,8 @@ protocol MCPSocketServerDelegate: AnyObject {
 class MCPSocketServer {
     weak var delegate: MCPSocketServerDelegate?
 
+    private static let readBufferSize = 65_536
+
     private let framer: MessageFramer
     private let delegateQueue = DispatchQueue(label: "com.chriscantu.claudeinsafari.mcpserver.delegate")
     private let ioQueue = DispatchQueue(label: "com.chriscantu.claudeinsafari.mcpserver.io", attributes: .concurrent)
@@ -122,6 +124,7 @@ class MCPSocketServer {
     }
 
     /// Send framed data to a specific client.
+    /// Loops until all bytes are written or the connection is closed (handles partial writes).
     func send(data: Data, to clientId: String) {
         clientsLock.lock()
         let client = clients[clientId]
@@ -131,7 +134,14 @@ class MCPSocketServer {
 
         let framed = framer.frame(data)
         framed.withUnsafeBytes { ptr in
-            _ = Darwin.write(client.fd, ptr.baseAddress!, framed.count)
+            guard var base = ptr.baseAddress else { return }
+            var remaining = framed.count
+            while remaining > 0 {
+                let written = Darwin.write(client.fd, base, remaining)
+                if written <= 0 { break }   // connection closed or error
+                remaining -= written
+                base = base.advanced(by: written)
+            }
         }
     }
 
@@ -185,7 +195,7 @@ class MCPSocketServer {
         }
         clientsLock.unlock()
 
-        var buf = [UInt8](repeating: 0, count: 65536)
+        var buf = [UInt8](repeating: 0, count: MCPSocketServer.readBufferSize)
         let bytesRead = read(client.fd, &buf, buf.count)
 
         if bytesRead <= 0 {

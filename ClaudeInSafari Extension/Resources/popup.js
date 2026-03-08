@@ -7,7 +7,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 
     try {
         const response = await browser.runtime.sendNativeMessage(
-            "com.chriscantu.claudeinsafari",
+            NATIVE_APP_ID,
             { type: "status" }
         );
 

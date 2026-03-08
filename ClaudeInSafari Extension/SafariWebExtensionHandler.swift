@@ -32,22 +32,28 @@ class SafariWebExtensionHandler: NSObject, NSExtensionRequestHandling {
 
     // MARK: - Message Handlers
 
+    /// Dequeue the next pending tool request from the App Group FIFO file.
     private func handlePoll(context: NSExtensionContext) {
-        let defaults = UserDefaults(suiteName: AppConstants.appGroupId)
-        if let requestJSON = defaults?.string(forKey: AppConstants.UserDefaultsKeys.pendingToolRequest) {
-            // Clear the pending request
-            defaults?.removeObject(forKey: AppConstants.UserDefaultsKeys.pendingToolRequest)
-            respond(with: ["type": "tool_request", "payload": requestJSON], context: context)
+        if let payload = dequeueToolRequest() {
+            respond(with: ["type": "tool_request", "payload": payload], context: context)
         } else {
             respond(with: ["type": "no_request"], context: context)
         }
     }
 
+    /// Store the tool response in UserDefaults keyed by requestId so ToolRouter can pick it up.
     private func handleToolResponse(message: [String: Any], context: NSExtensionContext) {
+        guard let requestId = message["requestId"] as? String else {
+            Self.logger.warning("tool_response missing requestId")
+            respond(with: ["status": "error", "message": "Missing requestId"], context: context)
+            return
+        }
+
         let defaults = UserDefaults(suiteName: AppConstants.appGroupId)
         if let responseData = try? JSONSerialization.data(withJSONObject: message),
            let responseString = String(data: responseData, encoding: .utf8) {
-            defaults?.set(responseString, forKey: AppConstants.UserDefaultsKeys.pendingToolResponse)
+            let key = AppConstants.UserDefaultsKeys.toolResponsePrefix + requestId
+            defaults?.set(responseString, forKey: key)
         }
         respond(with: ["status": "ok"], context: context)
     }
@@ -59,6 +65,20 @@ class SafariWebExtensionHandler: NSObject, NSExtensionRequestHandling {
     }
 
     // MARK: - Helpers
+
+    /// Remove and return the first JSON string from the App Group FIFO queue file.
+    /// Returns nil if the queue is empty or the file does not exist.
+    private func dequeueToolRequest() -> String? {
+        guard let url = AppConstants.pendingRequestsQueueURL,
+              let data = try? Data(contentsOf: url),
+              var queue = try? JSONDecoder().decode([String].self, from: data),
+              !queue.isEmpty else { return nil }
+
+        let first = queue.removeFirst()
+        let updated = (try? JSONEncoder().encode(queue)) ?? Data("[]".utf8)
+        try? updated.write(to: url, options: .atomic)
+        return first
+    }
 
     private func respond(with payload: [String: Any], context: NSExtensionContext) {
         let response = NSExtensionItem()

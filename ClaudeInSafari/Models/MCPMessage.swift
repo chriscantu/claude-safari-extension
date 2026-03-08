@@ -50,6 +50,16 @@ struct ContentBlock: Codable {
     let text: String
 }
 
+/// A tool request queued in the App Group FIFO file for the extension to pick up.
+/// Encoded as a JSON string in the pending_requests.json array.
+/// The extension JS reads requestId, tool, args, and context from the decoded payload.
+struct QueuedToolRequest: Codable {
+    let requestId: String
+    let tool: String
+    let args: [String: AnyCodable]
+    let context: NativeMessageContext?
+}
+
 /// Type-erased Codable wrapper for heterogeneous JSON values.
 struct AnyCodable: Codable {
     let value: Any

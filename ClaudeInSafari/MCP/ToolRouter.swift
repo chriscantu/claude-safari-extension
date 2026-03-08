@@ -1,20 +1,14 @@
 import Foundation
 
 /// Routes incoming MCP tool requests to the appropriate handler.
-/// Native-handled tools (screenshot, resize, file read) are executed directly.
-/// Extension-handled tools are forwarded to the Safari extension via App Group.
-class ToolRouter: NSObject, MCPSocketServerDelegate {
+/// Native-handled tools (screenshot, resize) are executed directly.
+/// Extension-handled tools are forwarded via the App Group FIFO queue file.
+class ToolRouter: MCPSocketServerDelegate {
     private weak var server: MCPSocketServer?
 
     /// Tools that are handled natively by the Swift app (not forwarded to the extension).
     private let nativeTools: Set<String> = [
         "resize_window"
-    ]
-
-    /// Tools where the native app handles part of the work (e.g., screenshot capture)
-    /// but the extension handles the rest.
-    private let hybridTools: Set<String> = [
-        "file_upload"
     ]
 
     func setServer(_ server: MCPSocketServer) {
@@ -60,25 +54,112 @@ class ToolRouter: NSObject, MCPSocketServerDelegate {
     }
 
     private func handleScreenshot(clientId: String) {
-        // TODO: Implement via ScreenshotService (Phase 4)
+        // TODO: Implement via ScreenshotService (Phase 5)
         let response = ToolResponse.failure(message: "Screenshot not yet implemented")
         sendResponse(response, to: clientId)
     }
 
     private func handleNativeTool(_ request: ToolRequest, clientId: String) {
-        // TODO: Implement native tool handlers (Phase 5)
+        // TODO: Implement native tool handlers (Phase 5/6)
         let response = ToolResponse.failure(message: "Native tool '\(request.params.tool)' not yet implemented")
         sendResponse(response, to: clientId)
     }
 
+    /// Enqueue the request in the App Group FIFO file and poll asynchronously for the extension's response.
     private func forwardToExtension(_ request: ToolRequest, clientId: String) {
-        // TODO: Implement App Group forwarding to Safari extension (Phase 2 completion)
-        let response = ToolResponse.failure(message: "Extension forwarding not yet implemented")
-        sendResponse(response, to: clientId)
+        let requestId = UUID().uuidString
+        let queued = QueuedToolRequest(
+            requestId: requestId,
+            tool: request.params.tool,
+            args: request.params.args,
+            context: NativeMessageContext(clientId: request.params.clientId, tabGroupId: nil)
+        )
+
+        guard enqueueToolRequest(queued) else {
+            sendResponse(ToolResponse.failure(message: "Failed to enqueue tool request"), to: clientId)
+            return
+        }
+
+        pollForExtensionResponse(requestId: requestId, clientId: clientId, deadline: Date().addingTimeInterval(30))
+    }
+
+    /// Write a QueuedToolRequest (as a JSON string) to the tail of the App Group FIFO queue file.
+    @discardableResult
+    private func enqueueToolRequest(_ queued: QueuedToolRequest) -> Bool {
+        guard let url = AppConstants.pendingRequestsQueueURL,
+              let itemData = try? JSONEncoder().encode(queued),
+              let itemString = String(data: itemData, encoding: .utf8) else { return false }
+
+        var queue: [String] = []
+        if let existing = try? Data(contentsOf: url) {
+            queue = (try? JSONDecoder().decode([String].self, from: existing)) ?? []
+        }
+        queue.append(itemString)
+
+        guard let encoded = try? JSONEncoder().encode(queue) else { return false }
+        do {
+            try encoded.write(to: url, options: .atomic)
+            return true
+        } catch {
+            NSLog("Failed to write request queue: \(error)")
+            return false
+        }
+    }
+
+    /// Recursively poll UserDefaults for the extension's response to `requestId`.
+    /// Schedules itself every 50 ms on a background queue; gives up after `deadline`.
+    private func pollForExtensionResponse(requestId: String, clientId: String, deadline: Date) {
+        let key = AppConstants.UserDefaultsKeys.toolResponsePrefix + requestId
+        let defaults = UserDefaults(suiteName: AppConstants.appGroupId)
+
+        if let responseString = defaults?.string(forKey: key) {
+            defaults?.removeObject(forKey: key)
+            sendResponse(decodeExtensionResponse(responseString), to: clientId)
+            return
+        }
+
+        guard Date() < deadline else {
+            sendResponse(ToolResponse.failure(message: "Extension response timeout (30s)"), to: clientId)
+            return
+        }
+
+        DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + 0.05) { [weak self] in
+            self?.pollForExtensionResponse(requestId: requestId, clientId: clientId, deadline: deadline)
+        }
+    }
+
+    /// Decode the JSON string stored by SafariWebExtensionHandler into a ToolResponse.
+    private func decodeExtensionResponse(_ json: String) -> ToolResponse {
+        guard let data = json.data(using: .utf8),
+              let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return ToolResponse.failure(message: "Failed to decode extension response")
+        }
+
+        if let resultDict = dict["result"] as? [String: Any],
+           let contentArray = resultDict["content"] as? [[String: Any]] {
+            let blocks = contentArray.compactMap { ContentBlock(from: $0) }
+            return ToolResponse(type: "tool_response", result: ToolResponseContent(content: blocks), error: nil)
+        }
+
+        if let errorDict = dict["error"] as? [String: Any],
+           let contentArray = errorDict["content"] as? [[String: Any]] {
+            let blocks = contentArray.compactMap { ContentBlock(from: $0) }
+            return ToolResponse(type: "tool_response", result: nil, error: ToolResponseContent(content: blocks))
+        }
+
+        return ToolResponse.failure(message: "Malformed extension response")
     }
 
     private func sendResponse(_ response: ToolResponse, to clientId: String) {
         guard let data = try? JSONEncoder().encode(response) else { return }
         server?.send(data: data, to: clientId)
+    }
+}
+
+private extension ContentBlock {
+    init?(from dict: [String: Any]) {
+        guard let type = dict["type"] as? String,
+              let text = dict["text"] as? String else { return nil }
+        self.init(type: type, text: text)
     }
 }

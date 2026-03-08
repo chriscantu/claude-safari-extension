@@ -4,10 +4,11 @@
  * See Spec 003 (native-extension-bridge) and Spec 004 (tool-registry).
  *
  * Load order (declared in manifest.json background.scripts):
- *   1. tools/tool-registry.js  — defines registerTool / executeTool on globalThis
- *   2. tools/tabs-manager.js   — registers tabs_context_mcp, tabs_create_mcp; exports resolveTab
- *   3. tools/navigate.js       — registers navigate
- *   4. background.js           — this file; starts the poll loop
+ *   1. tools/constants.js      — defines NATIVE_APP_ID
+ *   2. tools/tool-registry.js  — defines registerTool / executeTool on globalThis
+ *   3. tools/tabs-manager.js   — registers tabs_context_mcp, tabs_create_mcp; exports resolveTab
+ *   4. tools/navigate.js       — registers navigate
+ *   5. background.js           — this file; starts the poll loop
  */
 
 const POLL_INTERVAL_MS = 100;
@@ -21,7 +22,7 @@ let pollTimer = null;
 async function pollForRequests() {
     try {
         const response = await browser.runtime.sendNativeMessage(
-            "com.chriscantu.claudeinsafari",
+            NATIVE_APP_ID,
             { type: "poll" }
         );
 
@@ -35,7 +36,7 @@ async function pollForRequests() {
             const result = await globalThis.executeTool(payload.tool, payload.args, payload.context);
 
             await browser.runtime.sendNativeMessage(
-                "com.chriscantu.claudeinsafari",
+                NATIVE_APP_ID,
                 {
                     type: "tool_response",
                     requestId: payload.requestId,
