@@ -13,7 +13,12 @@
     ],
 
     "background": {
-        "scripts": ["background.js"],
+        "scripts": [
+            "tools/tool-registry.js",
+            "tools/tabs-manager.js",
+            "tools/navigate.js",
+            "background.js"
+        ],
         "persistent": false
     },
 

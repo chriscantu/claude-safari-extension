@@ -2,10 +2,13 @@
  * Background script for Claude in Safari extension.
  * Handles tool dispatch, native app communication, and tab group management.
  * See Spec 003 (native-extension-bridge) and Spec 004 (tool-registry).
+ *
+ * Load order (declared in manifest.json background.scripts):
+ *   1. tools/tool-registry.js  — defines registerTool / executeTool on globalThis
+ *   2. tools/tabs-manager.js   — registers tabs_context_mcp, tabs_create_mcp; exports resolveTab
+ *   3. tools/navigate.js       — registers navigate
+ *   4. background.js           — this file; starts the poll loop
  */
-
-// Import tool handlers (will be loaded via manifest background.scripts or ES modules)
-// For now, tools are registered inline; will be refactored to separate files in Phase 3.
 
 const POLL_INTERVAL_MS = 100;
 const POLL_IDLE_INTERVAL_MS = 5000;
@@ -28,7 +31,8 @@ async function pollForRequests() {
                 ? JSON.parse(response.payload)
                 : response.payload;
 
-            const result = await executeTool(payload.tool, payload.args, payload.context);
+            // Delegate to the tool registry (tool-registry.js sets globalThis.executeTool)
+            const result = await globalThis.executeTool(payload.tool, payload.args, payload.context);
 
             await browser.runtime.sendNativeMessage(
                 "com.chriscantu.claudeinsafari",
@@ -49,19 +53,6 @@ async function pollForRequests() {
     // Schedule next poll (faster when active, slower when idle)
     const interval = isActive ? POLL_INTERVAL_MS : POLL_IDLE_INTERVAL_MS;
     pollTimer = setTimeout(pollForRequests, interval);
-}
-
-/**
- * Execute a tool by name with the given arguments and context.
- */
-async function executeTool(toolName, args, context) {
-    // TODO: Implement tool registry dispatch (Phase 3)
-    // For now, return a placeholder response
-    return {
-        result: {
-            content: [{ type: "text", text: `Tool '${toolName}' not yet implemented` }],
-        },
-    };
 }
 
 // Keep the background script alive with periodic alarms

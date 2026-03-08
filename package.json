@@ -1,0 +1,19 @@
+{
+  "name": "claude-in-safari-tests",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "test": "jest --testPathPattern='Tests/JS'",
+    "test:watch": "jest --testPathPattern='Tests/JS' --watch"
+  },
+  "devDependencies": {
+    "jest": "^29.7.0"
+  },
+  "jest": {
+    "testEnvironment": "node",
+    "testMatch": [
+      "**/Tests/JS/**/*.test.js"
+    ],
+    "clearMocks": true
+  }
+}
