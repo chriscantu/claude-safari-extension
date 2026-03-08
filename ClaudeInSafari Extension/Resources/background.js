@@ -5,8 +5,9 @@
  *
  * Load order (declared in manifest.json background.scripts):
  *   1. tools/tool-registry.js  — defines registerTool / executeTool on globalThis
- *   2. tools/tabs-manager.js   — registers tabs_context_mcp, tabs_create_mcp
- *   3. background.js           — this file; starts the poll loop
+ *   2. tools/tabs-manager.js   — registers tabs_context_mcp, tabs_create_mcp; exports resolveTab
+ *   3. tools/navigate.js       — registers navigate
+ *   4. background.js           — this file; starts the poll loop
  */
 
 const POLL_INTERVAL_MS = 100;
