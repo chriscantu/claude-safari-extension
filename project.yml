@@ -1,0 +1,99 @@
+name: ClaudeInSafari
+options:
+  bundleIdPrefix: com.chriscantu
+  deploymentTarget:
+    macOS: "13.0"
+  xcodeVersion: "16.0"
+  createIntermediateGroups: true
+  groupSortPosition: top
+
+settings:
+  base:
+    SWIFT_VERSION: "5.9"
+    MACOSX_DEPLOYMENT_TARGET: "13.0"
+
+targets:
+  ClaudeInSafari:
+    type: application
+    platform: macOS
+    sources:
+      - path: ClaudeInSafari
+        excludes:
+          - "**/*.test.*"
+      - path: Shared
+    dependencies:
+      - target: "ClaudeInSafari Extension"
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.chriscantu.claudeinsafari
+        INFOPLIST_FILE: ClaudeInSafari/Info.plist
+        CODE_SIGN_ENTITLEMENTS: ClaudeInSafari/ClaudeInSafari.entitlements
+        PRODUCT_NAME: "Claude in Safari"
+        PRODUCT_MODULE_NAME: ClaudeInSafari
+        COMBINE_HIDPI_IMAGES: true
+    entitlements:
+      path: ClaudeInSafari/ClaudeInSafari.entitlements
+      properties:
+        com.apple.security.app-sandbox: true
+        com.apple.security.network.client: true
+        com.apple.security.network.server: true
+        com.apple.security.files.user-selected.read-write: true
+        com.apple.security.temporary-exception.apple-events:
+          - com.apple.Safari
+    info:
+      path: ClaudeInSafari/Info.plist
+      properties:
+        CFBundleName: "Claude in Safari"
+        CFBundleDisplayName: "Claude in Safari"
+        CFBundleShortVersionString: "1.0.0"
+        CFBundleVersion: "1"
+        LSMinimumSystemVersion: "13.0"
+        LSUIElement: false
+        NSMainStoryboardFile: ""
+        NSPrincipalClass: NSApplication
+
+  "ClaudeInSafari Extension":
+    type: app-extension
+    platform: macOS
+    sources:
+      - path: "ClaudeInSafari Extension"
+        excludes:
+          - Resources/**
+      - path: Shared
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.chriscantu.claudeinsafari.extension
+        INFOPLIST_FILE: "ClaudeInSafari Extension/Info.plist"
+        PRODUCT_NAME: "ClaudeInSafari Extension"
+        OTHER_LDFLAGS: ["-framework", "SafariServices"]
+    dependencies: []
+    info:
+      path: "ClaudeInSafari Extension/Info.plist"
+      properties:
+        CFBundleName: "ClaudeInSafari Extension"
+        CFBundleDisplayName: "Claude in Safari Extension"
+        CFBundleShortVersionString: "1.0.0"
+        CFBundleVersion: "1"
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.Safari.web-extension
+          NSExtensionPrincipalClass: "$(PRODUCT_MODULE_NAME).SafariWebExtensionHandler"
+    postBuildScripts:
+      - name: "Copy Extension Resources"
+        script: |
+          rsync -av "${SRCROOT}/ClaudeInSafari Extension/Resources/" "${BUILT_PRODUCTS_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/"
+        basedOnDependencyAnalysis: false
+
+  ClaudeInSafariTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - path: Tests/Swift
+      - path: Shared
+    dependencies:
+      - target: ClaudeInSafari
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.chriscantu.claudeinsafari.tests
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/Claude in Safari.app/Contents/MacOS/Claude in Safari"
+        BUNDLE_LOADER: "$(TEST_HOST)"

@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <style>
+        body {
+            width: 280px;
+            padding: 16px;
+            font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+            font-size: 13px;
+            color: #1a1a1a;
+            margin: 0;
+        }
+        .header {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 12px;
+        }
+        .header h1 {
+            font-size: 15px;
+            font-weight: 600;
+            margin: 0;
+        }
+        .status {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 8px 12px;
+            border-radius: 8px;
+            background: #f5f5f5;
+        }
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #ccc;
+        }
+        .status-dot.connected {
+            background: #34c759;
+        }
+        .status-dot.disconnected {
+            background: #ff3b30;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>Claude in Safari</h1>
+    </div>
+    <div class="status">
+        <div class="status-dot" id="statusDot"></div>
+        <span id="statusText">Checking connection...</span>
+    </div>
+    <script src="popup.js"></script>
+</body>
+</html>
