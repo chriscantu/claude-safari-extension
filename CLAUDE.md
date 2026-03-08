@@ -8,6 +8,20 @@ A macOS Safari Web Extension that replicates the "Claude in Chrome" browser auto
 - **Safari Web Extension** (`ClaudeInSafari Extension/`): Background script, content scripts, tool handlers
 - Communication: CLI → Unix domain socket → Native App → `browser.runtime.sendNativeMessage()` → Extension → Content Scripts → Web Page
 
+## Shell Environment
+- User runs **fish shell** — all terminal commands must be fish-compatible
+- No bash heredocs (`<<'EOF'`): write multiline git commit messages to a temp file instead
+  ```fish
+  echo "subject line
+
+  Body paragraph.
+
+  Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>" > /tmp/commitmsg
+  git commit -F /tmp/commitmsg
+  ```
+- No `$(...)` command substitution: use `(...)` in fish
+- `&&` chaining works in fish 3.0+; `;` is fine for unconditional sequencing
+
 ## Rules
 - Always read PRINCIPLES.md before implementing any feature
 - Always check STRUCTURE.md before creating or moving files
