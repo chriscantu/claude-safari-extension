@@ -47,7 +47,14 @@ async function pollForRequests() {
             isActive = false;
         }
     } catch (error) {
-        console.error("Poll error:", error);
+        const msg = error?.message || String(error);
+        if (msg.includes("Could not establish connection") || msg.includes("native host") || msg.includes("No native messaging host")) {
+            console.warn("Poll: native app not running or disconnected:", msg);
+        } else if (msg.includes("timeout") || msg.includes("timed out")) {
+            console.warn("Poll: native message timed out:", msg);
+        } else {
+            console.error("Poll error:", error);
+        }
         isActive = false;
     }
 

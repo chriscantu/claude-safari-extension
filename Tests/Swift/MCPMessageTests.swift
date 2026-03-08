@@ -158,4 +158,68 @@ final class MCPMessageTests: XCTestCase {
         XCTAssertNil(json["data"])
         XCTAssertNil(json["mediaType"])
     }
+
+    // MARK: - NativeMessage unknown type rejection
+
+    func testNativeMessageUnknownTypeThrows() throws {
+        let json = #"{"type":"unknown_type","requestId":"r99"}"#.data(using: .utf8)!
+        XCTAssertThrowsError(try JSONDecoder().decode(NativeMessage.self, from: json))
+    }
+
+    // MARK: - NativeMessageContext snake_case wire format
+
+    func testNativeMessageContextUsesSnakeCaseWireFormat() throws {
+        let ctx = NativeMessageContext(clientId: "client-1", tabGroupId: "group-2")
+        let data = try JSONEncoder().encode(ctx)
+        let json = try JSONSerialization.jsonObject(with: data) as! [String: Any]
+
+        XCTAssertEqual(json["client_id"] as? String, "client-1")
+        XCTAssertEqual(json["tab_group_id"] as? String, "group-2")
+        XCTAssertNil(json["clientId"])
+        XCTAssertNil(json["tabGroupId"])
+    }
+
+    func testNativeMessageContextNilTabGroupIdRoundTrips() throws {
+        let ctx = NativeMessageContext(clientId: "c1", tabGroupId: nil)
+        let data = try JSONEncoder().encode(ctx)
+        let decoded = try JSONDecoder().decode(NativeMessageContext.self, from: data)
+        XCTAssertEqual(decoded.clientId, "c1")
+        XCTAssertNil(decoded.tabGroupId)
+    }
+
+    // MARK: - ToolRouter.decodeExtensionResponse
+
+    func testDecodeExtensionResponseSuccess() {
+        let router = ToolRouter()
+        let json = #"{"result":{"content":[{"type":"text","text":"hello"}]}}"#
+        let response = router.decodeExtensionResponse(json)
+        XCTAssertNotNil(response.result)
+        XCTAssertNil(response.error)
+        XCTAssertEqual(response.result?.content.first?.text, "hello")
+    }
+
+    func testDecodeExtensionResponseError() {
+        let router = ToolRouter()
+        let json = #"{"error":{"content":[{"type":"text","text":"something went wrong"}]}}"#
+        let response = router.decodeExtensionResponse(json)
+        XCTAssertNil(response.result)
+        XCTAssertNotNil(response.error)
+        XCTAssertEqual(response.error?.content.first?.text, "something went wrong")
+    }
+
+    func testDecodeExtensionResponseMalformedJson() {
+        let router = ToolRouter()
+        let response = router.decodeExtensionResponse("not-valid-json{{{")
+        XCTAssertNil(response.result)
+        XCTAssertNotNil(response.error)
+        XCTAssertEqual(response.error?.content.first?.text, "Failed to decode extension response")
+    }
+
+    func testDecodeExtensionResponseMalformedStructure() {
+        let router = ToolRouter()
+        let response = router.decodeExtensionResponse(#"{"unexpected":"format"}"#)
+        XCTAssertNil(response.result)
+        XCTAssertNotNil(response.error)
+        XCTAssertEqual(response.error?.content.first?.text, "Malformed extension response")
+    }
 }

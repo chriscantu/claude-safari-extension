@@ -41,6 +41,7 @@ claude-safari-extension/
 │   │       │   └── agent-visual-indicator.js # Orange pulsing border + "Stop Claude" button
 │   │       │
 │   │       ├── tools/                       # Tool handler modules (one per MCP tool)
+│   │       │   ├── constants.js             # Shared JS constants (NATIVE_APP_ID, etc.)
 │   │       │   ├── tool-registry.js         # Tool name -> handler dispatch map
 │   │       │   ├── read-page.js             # read_page: accessibility tree extraction
 │   │       │   ├── find.js                  # find: natural language element search

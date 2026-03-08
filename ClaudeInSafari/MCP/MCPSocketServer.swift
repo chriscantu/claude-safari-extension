@@ -148,6 +148,11 @@ class MCPSocketServer {
 
         if writeError {
             NSLog("MCPSocketServer: write error for client \(clientId), disconnecting")
+            // Remove from clients dict first so no subsequent send() call can obtain a reference
+            // to this client before the readSource cancel handler fires.
+            clientsLock.lock()
+            clients.removeValue(forKey: clientId)
+            clientsLock.unlock()
             client.readSource?.cancel()
             delegateQueue.async { [weak self] in
                 guard let self = self else { return }

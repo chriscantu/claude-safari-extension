@@ -28,6 +28,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             NSLog("MCP Socket Server started at: \(mcpServer?.socketPath ?? "unknown")")
         } catch {
             NSLog("Failed to start MCP Socket Server: \(error)")
+            let alert = NSAlert()
+            alert.messageText = "Claude in Safari: MCP Server Failed to Start"
+            alert.informativeText = "Could not start the MCP socket server:\n\(error.localizedDescription)\n\nThe extension will not function. Check Console for details."
+            alert.alertStyle = .critical
+            alert.runModal()
         }
     }
 }

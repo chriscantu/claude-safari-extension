@@ -11,6 +11,10 @@ class ToolRouter: MCPSocketServerDelegate {
         "resize_window"
     ]
 
+    /// Tracks which client IDs have active polls so disconnects can cancel them.
+    private var activePolls = Set<String>()
+    private let activePollsLock = NSLock()
+
     func setServer(_ server: MCPSocketServer) {
         self.server = server
     }
@@ -41,6 +45,9 @@ class ToolRouter: MCPSocketServerDelegate {
 
     func socketServer(_ server: MCPSocketServer, didDisconnect clientId: String) {
         NSLog("MCP client disconnected: \(clientId)")
+        activePollsLock.lock()
+        activePolls.remove(clientId)
+        activePollsLock.unlock()
     }
 
     // MARK: - Private
@@ -80,10 +87,15 @@ class ToolRouter: MCPSocketServerDelegate {
             return
         }
 
+        activePollsLock.lock()
+        activePolls.insert(clientId)
+        activePollsLock.unlock()
+
         pollForExtensionResponse(requestId: requestId, clientId: clientId, deadline: Date().addingTimeInterval(30))
     }
 
     /// Write a QueuedToolRequest (as a JSON string) to the tail of the App Group FIFO queue file.
+    /// Uses NSFileCoordinator to prevent cross-process read-modify-write races with SafariWebExtensionHandler.
     @discardableResult
     private func enqueueToolRequest(_ queued: QueuedToolRequest) -> Bool {
         guard let url = AppConstants.pendingRequestsQueueURL else {
@@ -99,42 +111,65 @@ class ToolRouter: MCPSocketServerDelegate {
             return false
         }
 
-        var queue: [String] = []
-        if let existing = try? Data(contentsOf: url) {
-            queue = (try? JSONDecoder().decode([String].self, from: existing)) ?? []
+        var success = false
+        let coordinator = NSFileCoordinator()
+        var coordinatorError: NSError?
+        coordinator.coordinate(writingItemAt: url, options: .forMerging, error: &coordinatorError) { writingURL in
+            var queue: [String] = []
+            if let existing = try? Data(contentsOf: writingURL) {
+                queue = (try? JSONDecoder().decode([String].self, from: existing)) ?? []
+            }
+            queue.append(itemString)
+            guard let encoded = try? JSONEncoder().encode(queue) else {
+                NSLog("enqueueToolRequest: failed to encode updated queue for tool '\(queued.tool)'")
+                return
+            }
+            do {
+                try encoded.write(to: writingURL, options: .atomic)
+                success = true
+            } catch {
+                NSLog("enqueueToolRequest: failed to write request queue: \(error)")
+            }
         }
-        queue.append(itemString)
-
-        guard let encoded = try? JSONEncoder().encode(queue) else { return false }
-        do {
-            try encoded.write(to: url, options: .atomic)
-            return true
-        } catch {
-            NSLog("Failed to write request queue: \(error)")
-            return false
+        if let err = coordinatorError {
+            NSLog("enqueueToolRequest: file coordination failed: \(err.localizedDescription)")
         }
+        return success
     }
 
     /// Recursively poll UserDefaults for the extension's response to `requestId`.
-    /// Schedules itself every 50 ms on a background queue; gives up after `deadline`.
+    /// Schedules itself every 50 ms on a background queue; gives up after `deadline` or client disconnect.
     private func pollForExtensionResponse(requestId: String, clientId: String, deadline: Date) {
         let key = AppConstants.UserDefaultsKeys.toolResponsePrefix + requestId
         let defaults = UserDefaults(suiteName: AppConstants.appGroupId)
 
         if let responseString = defaults?.string(forKey: key) {
             defaults?.removeObject(forKey: key)
+            activePollsLock.lock()
+            activePolls.remove(clientId)
+            activePollsLock.unlock()
             sendResponse(decodeExtensionResponse(responseString), to: clientId)
             return
         }
 
         guard Date() < deadline else {
+            activePollsLock.lock()
+            activePolls.remove(clientId)
+            activePollsLock.unlock()
             sendResponse(ToolResponse.failure(message: "Extension response timeout (30s)"), to: clientId)
             return
         }
 
         DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + 0.05) { [weak self] in
             guard let self = self else {
-                NSLog("pollForExtensionResponse: ToolRouter deallocated, client \(clientId) will hang for requestId \(requestId)")
+                NSLog("pollForExtensionResponse: ToolRouter deallocated, aborting poll for requestId \(requestId)")
+                return
+            }
+            self.activePollsLock.lock()
+            let isActive = self.activePolls.contains(clientId)
+            self.activePollsLock.unlock()
+            guard isActive else {
+                NSLog("pollForExtensionResponse: client \(clientId) disconnected, cancelling poll for requestId \(requestId)")
                 return
             }
             self.pollForExtensionResponse(requestId: requestId, clientId: clientId, deadline: deadline)
@@ -142,7 +177,7 @@ class ToolRouter: MCPSocketServerDelegate {
     }
 
     /// Decode the JSON string stored by SafariWebExtensionHandler into a ToolResponse.
-    private func decodeExtensionResponse(_ json: String) -> ToolResponse {
+    func decodeExtensionResponse(_ json: String) -> ToolResponse {
         guard let data = json.data(using: .utf8),
               let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             return ToolResponse.failure(message: "Failed to decode extension response")
@@ -150,13 +185,21 @@ class ToolRouter: MCPSocketServerDelegate {
 
         if let resultDict = dict["result"] as? [String: Any],
            let contentArray = resultDict["content"] as? [[String: Any]] {
-            let blocks = contentArray.compactMap { ContentBlock(from: $0) }
+            let blocks = contentArray.compactMap { rawBlock -> ContentBlock? in
+                if let block = ContentBlock(from: rawBlock) { return block }
+                NSLog("decodeExtensionResponse: dropped malformed content block: \(rawBlock)")
+                return nil
+            }
             return ToolResponse(type: "tool_response", result: ToolResponseContent(content: blocks), error: nil)
         }
 
         if let errorDict = dict["error"] as? [String: Any],
            let contentArray = errorDict["content"] as? [[String: Any]] {
-            let blocks = contentArray.compactMap { ContentBlock(from: $0) }
+            let blocks = contentArray.compactMap { rawBlock -> ContentBlock? in
+                if let block = ContentBlock(from: rawBlock) { return block }
+                NSLog("decodeExtensionResponse: dropped malformed content block: \(rawBlock)")
+                return nil
+            }
             return ToolResponse(type: "tool_response", result: nil, error: ToolResponseContent(content: blocks))
         }
 
