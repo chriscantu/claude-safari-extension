@@ -11,7 +11,8 @@
  *   5. tools/read-page.js      — registers read_page
  *   6. tools/find.js           — registers find
  *   7. tools/form-input.js    — registers form_input
- *   8. background.js           — this file; starts the poll loop
+ *   8. tools/get-page-text.js — registers get_page_text
+ *   9. background.js           — this file; starts the poll loop
  */
 
 const POLL_INTERVAL_MS = 100;

@@ -22,6 +22,7 @@
             "tools/read-page.js",
             "tools/find.js",
             "tools/form-input.js",
+            "tools/get-page-text.js",
             "background.js"
         ],
         "persistent": false
