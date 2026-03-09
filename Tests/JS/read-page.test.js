@@ -2,14 +2,18 @@
  * Tests for tools/read_page.js
  *
  * Covers:
- *   T1 — happy path: accessibility tree returned successfully
- *   T2 — content script not loaded (function missing)
- *   T3 — content script returns an error
- *   T4 — executeScript rejects (permission / tab gone)
- *   T5 — null result from executeScript (no frames)
- *   T6 — args forwarded correctly (filter, depth, max_chars, ref_id)
- *   T7 — virtualTabId=null resolves to active tab via resolveTab
- *   T8 — virtualTabId provided resolves via resolveTab
+ *   T1  — happy path: accessibility tree returned successfully
+ *   T2  — content script not loaded (function missing)
+ *   T3  — content script returns an error
+ *   T4  — executeScript rejects (permission / tab gone)
+ *   T5  — null result from executeScript (no frames)
+ *   T6  — args forwarded correctly (filter, depth, max_chars, ref_id)
+ *   T7  — virtualTabId=null resolves to active tab via resolveTab
+ *   T8  — virtualTabId provided resolves via resolveTab
+ *   T9  — resolveTab rejects: error is wrapped with actionable guidance
+ *   T10 — executeScript returns [null] (truthy array, falsy first element)
+ *   T11 — handler called with no arguments (args || {} guard)
+ *   T12 — viewport dimensions of 0 render as "0x0", not "?x?"
  */
 
 "use strict";
@@ -106,9 +110,18 @@ describe("read_page tool", () => {
         await expect(handler({})).rejects.toThrow("Output exceeds 50000 character limit");
     });
 
-    test("T4 — throws when executeScript rejects", async () => {
+    test("T4 — throws when executeScript rejects with stale tab error", async () => {
         const resolveTab = jest.fn(async () => 42);
         const browser = makeBrowserMock({ scriptError: new Error("No tab with id: 42") });
+        const handler = loadReadPage({ browser, resolveTab });
+
+        await expect(handler({})).rejects.toThrow("no longer exists");
+        await expect(handler({})).rejects.toThrow("tabs_context_mcp");
+    });
+
+    test("T4b — throws 'executeScript failed' for generic (non-tab) errors", async () => {
+        const resolveTab = jest.fn(async () => 42);
+        const browser = makeBrowserMock({ scriptError: new Error("Extension context invalidated") });
         const handler = loadReadPage({ browser, resolveTab });
 
         await expect(handler({})).rejects.toThrow("executeScript failed");
@@ -122,7 +135,11 @@ describe("read_page tool", () => {
         await expect(handler({})).rejects.toThrow("No result from accessibility tree script");
     });
 
-    test("T6 — forwards filter, depth, max_chars, ref_id into executeScript code", async () => {
+    test("T6 — args are serialized safely and forwarded into executeScript code", async () => {
+        // This test inspects the injected code string because the bridge between
+        // the background tool handler and the content script is a serialized code
+        // string — there is no other observable contract to test here without a
+        // full browser environment. The assertions verify JSON-safe serialization.
         const resolveTab = jest.fn(async () => 99);
         const browser = makeBrowserMock();
         const handler = loadReadPage({ browser, resolveTab });
@@ -135,7 +152,7 @@ describe("read_page tool", () => {
         });
 
         const call = browser.tabs.executeScript.mock.calls[0];
-        expect(call[0]).toBe(99);           // real tab ID
+        expect(call[0]).toBe(99);
         const code = call[1].code;
         expect(code).toContain('"interactive"');
         expect(code).toContain("5");
@@ -163,6 +180,42 @@ describe("read_page tool", () => {
 
         expect(resolveTab).toHaveBeenCalledWith(3);
         expect(browser.tabs.executeScript).toHaveBeenCalledWith(77, expect.any(Object));
+    });
+
+    test("T9 — resolveTab rejection is wrapped with an actionable error message", async () => {
+        const resolveTab = jest.fn(async () => { throw new Error("Tab not found: 5"); });
+        const browser = makeBrowserMock();
+        const handler = loadReadPage({ browser, resolveTab });
+
+        await expect(handler({ tabId: 5 })).rejects.toThrow("could not resolve tab");
+        await expect(handler({ tabId: 5 })).rejects.toThrow("tabs_context_mcp");
+    });
+
+    test("T10 — throws when executeScript returns a truthy array with a null first element", async () => {
+        const resolveTab = jest.fn(async () => 42);
+        const browser = makeBrowserMock({ scriptResult: [null] });
+        const handler = loadReadPage({ browser, resolveTab });
+
+        await expect(handler({})).rejects.toThrow("No result from accessibility tree script");
+    });
+
+    test("T11 — succeeds when called with no arguments (args || {} guard)", async () => {
+        const resolveTab = jest.fn(async () => 42);
+        const browser = makeBrowserMock();
+        const handler = loadReadPage({ browser, resolveTab });
+
+        await expect(handler()).resolves.toContain("Viewport:");
+    });
+
+    test("T12 — viewport dimensions of 0 render as '0x0', not '?x?'", async () => {
+        const resolveTab = jest.fn(async () => 42);
+        const browser = makeBrowserMock({
+            scriptResult: [makeTreeResult({ viewport: { width: 0, height: 0 } })],
+        });
+        const handler = loadReadPage({ browser, resolveTab });
+
+        const result = await handler({});
+        expect(result).toContain("Viewport: 0x0");
     });
 
     test("registers itself under the name 'read_page'", () => {

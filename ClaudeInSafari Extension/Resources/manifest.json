@@ -22,7 +22,7 @@
             "tools/read-page.js",
             "background.js"
         ],
-        "persistent": true
+        "persistent": false
     },
 
     "content_scripts": [

@@ -8,8 +8,8 @@
  * Args:
  *   tabId      (number|null)  – virtual tab ID; null → active tab
  *   filter     (string)       – "all" | "interactive" (default: "all")
- *   depth      (number|null)  – max tree depth (default: 15)
- *   max_chars  (number|null)  – character cap on output (default: 50000)
+ *   depth      (number|null)  – max tree depth; null uses content-script default (15)
+ *   max_chars  (number|null)  – character cap on output; null means unlimited
  *   ref_id     (string|null)  – focus on a specific element ref
  *
  * See Spec 005 (read-page).
@@ -26,9 +26,29 @@ async function handleReadPage(args) {
         ref_id: refId = null,
     } = args || {};
 
-    const realTabId = await globalThis.resolveTab(virtualTabId);
+    if (filter !== "all" && filter !== "interactive") {
+        throw new Error(`read_page: filter must be "all" or "interactive", got: ${JSON.stringify(filter)}`);
+    }
+    if (depth !== null && (!Number.isInteger(depth) || depth < 1)) {
+        throw new Error(`read_page: depth must be a positive integer, got: ${JSON.stringify(depth)}`);
+    }
+    if (maxChars !== null && (!Number.isInteger(maxChars) || maxChars < 1)) {
+        throw new Error(`read_page: max_chars must be a positive integer, got: ${JSON.stringify(maxChars)}`);
+    }
 
-    // Call the function installed by the content script.
+    let realTabId;
+    try {
+        realTabId = await globalThis.resolveTab(virtualTabId);
+    } catch (err) {
+        throw new Error(
+            `read_page: could not resolve tab (tabId=${virtualTabId}): ${err.message || String(err)}. ` +
+            `Use tabs_context_mcp to list available tabs.`
+        );
+    }
+
+    // Call the function installed by the content script at document_start.
+    // runAt: "document_idle" ensures the DOM is queryable; __generateAccessibilityTree
+    // is installed earlier at document_start so it is always available by this point.
     // executeScript returns an array of per-frame results; index 0 is the top frame.
     let results;
     try {
@@ -39,15 +59,28 @@ async function handleReadPage(args) {
                 }
                 return window.__generateAccessibilityTree(
                     ${JSON.stringify(filter)},
-                    ${depth === null ? "undefined" : depth},
-                    ${maxChars === null ? "null" : maxChars},
-                    ${refId === null ? "undefined" : JSON.stringify(refId)}
+                    ${JSON.stringify(depth === null ? undefined : depth)},
+                    ${JSON.stringify(maxChars)},
+                    ${JSON.stringify(refId === null ? undefined : refId)}
                 );
             })()`,
             runAt: "document_idle",
         });
     } catch (err) {
-        throw new Error(`executeScript failed: ${err.message || String(err)}`);
+        const msg = err.message || String(err);
+        if (/cannot access|scheme|about:|chrome:|file:/i.test(msg)) {
+            throw new Error(
+                `read_page: cannot inject into this page (restricted URL or scheme). ` +
+                `Navigate to an http/https page first. (${msg})`
+            );
+        }
+        if (/no tab with id|invalid tab/i.test(msg)) {
+            throw new Error(
+                `read_page: tab ${realTabId} no longer exists. ` +
+                `Use tabs_context_mcp to list available tabs. (${msg})`
+            );
+        }
+        throw new Error(`read_page: executeScript failed: ${msg}`);
     }
 
     const result = results && results[0];
@@ -60,12 +93,9 @@ async function handleReadPage(args) {
     }
 
     const { pageContent = "", viewport = {} } = result;
-    const lines = [
-        `Viewport: ${viewport.width || "?"}x${viewport.height || "?"}`,
-        "",
-        pageContent,
-    ];
-    return lines.join("\n");
+    const w = viewport.width != null ? viewport.width : "?";
+    const h = viewport.height != null ? viewport.height : "?";
+    return [`Viewport: ${w}x${h}`, "", pageContent].join("\n");
 }
 
 globalThis.registerTool("read_page", handleReadPage);

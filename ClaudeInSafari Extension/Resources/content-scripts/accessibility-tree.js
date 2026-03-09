@@ -2,9 +2,13 @@
  * Accessibility tree generator for read_page and find tools.
  * See Spec 005 (read-page).
  *
- * Ported verbatim from the Chrome extension source (pure DOM traversal,
- * zero Chrome-specific APIs). Sets window.__generateAccessibilityTree
- * so the background script can call it via browser.tabs.executeScript.
+ * Adapted from the Chrome extension source (pure DOM traversal, zero
+ * Chrome-specific APIs). Sets window.__generateAccessibilityTree so the
+ * background script can call it via browser.tabs.executeScript.
+ *
+ * Note: the re-injection guard (window.__claudeAccessibilityTreeInstalled)
+ * from the Chrome source was intentionally removed. The function definition
+ * is stateless, so overwriting it on each injection (all_frames: true) is safe.
  */
 (function () {
     window.__claudeElementMap || (window.__claudeElementMap = {});
@@ -77,7 +81,12 @@
                 var u = l.deref();
                 if (!u) return { error: "Element with ref_id '" + i + "' no longer exists. It may have been removed from the page. Use read_page without ref_id to get the current page state.", pageContent: "", viewport: { width: window.innerWidth, height: window.innerHeight } };
                 b(u, 0, o)
-            } else document.body && b(document.body, 0, o);
+            } else {
+                if (!document.body) {
+                    return { error: "Page body is not available. The page may still be loading, or may be a non-HTML document (XML, SVG, PDF). Try reloading the page or navigating to an HTML page.", pageContent: "", viewport: { width: window.innerWidth, height: window.innerHeight } };
+                }
+                b(document.body, 0, o);
+            }
             for (var d in window.__claudeElementMap) window.__claudeElementMap[d].deref() || delete window.__claudeElementMap[d];
             var c = n.join("\n");
             if (null != r && c.length > r) {
@@ -85,8 +94,11 @@
                 return { error: f += i ? "The specified element has too much content. Try specifying a smaller depth parameter or focus on a more specific child element." : void 0 !== t ? "Try specifying an even smaller depth parameter or use ref_id to focus on a specific element." : "Try specifying a depth parameter (e.g., depth: 5) or use ref_id to focus on a specific element from the page.", pageContent: "", viewport: { width: window.innerWidth, height: window.innerHeight } }
             }
             return { pageContent: c, viewport: { width: window.innerWidth, height: window.innerHeight } }
-        } catch (h) {
-            throw new Error("Error generating accessibility tree: " + (h.message || "Unknown error"))
+        } catch (domErr) {
+            const msg = domErr instanceof Error ? domErr.message : String(domErr);
+            const wrapped = new Error("Error generating accessibility tree: " + msg);
+            wrapped.cause = domErr;
+            throw wrapped;
         }
     };
 })();
