@@ -9,7 +9,8 @@
  *   3. tools/tabs-manager.js   — registers tabs_context_mcp, tabs_create_mcp; exports resolveTab
  *   4. tools/navigate.js       — registers navigate
  *   5. tools/read-page.js      — registers read_page
- *   6. background.js           — this file; starts the poll loop
+ *   6. tools/find.js           — registers find
+ *   7. background.js           — this file; starts the poll loop
  */
 
 const POLL_INTERVAL_MS = 100;

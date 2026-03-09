@@ -54,6 +54,12 @@ function loadReadPage({ browser, resolveTab }) {
     globalThis.browser = browser;
     globalThis.resolveTab = resolveTab;
 
+    // Load the real classifyExecuteScriptError from tool-registry.js so tests
+    // exercise the production implementation rather than an inlined copy.
+    jest.isolateModules(() => {
+        require("../../ClaudeInSafari Extension/Resources/tools/tool-registry.js");
+    });
+
     // registerTool captures the handler so we can call it directly
     let handler = null;
     globalThis.registerTool = jest.fn((_name, fn) => { handler = fn; });
@@ -76,6 +82,8 @@ describe("read_page tool", () => {
         delete globalThis.browser;
         delete globalThis.resolveTab;
         delete globalThis.registerTool;
+        delete globalThis.classifyExecuteScriptError;
+        delete globalThis.executeTool;
     });
 
     test("T1 — returns formatted accessibility tree on success", async () => {
@@ -121,7 +129,7 @@ describe("read_page tool", () => {
 
     test("T4b — throws 'executeScript failed' for generic (non-tab) errors", async () => {
         const resolveTab = jest.fn(async () => 42);
-        const browser = makeBrowserMock({ scriptError: new Error("Extension context invalidated") });
+        const browser = makeBrowserMock({ scriptError: new Error("some unexpected WebKit error") });
         const handler = loadReadPage({ browser, resolveTab });
 
         await expect(handler({})).rejects.toThrow("executeScript failed");

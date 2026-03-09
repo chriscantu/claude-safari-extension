@@ -2,18 +2,20 @@
 
 /**
  * Tests for tools/tool-registry.js
- * Covers Spec 004: registration, dispatch, result shaping, and error handling.
+ * Covers Spec 004: registration, dispatch, result shaping, error handling,
+ * and classifyExecuteScriptError.
  */
 
 function loadModule() {
     jest.resetModules();
-    const registrations = {};
     globalThis.registerTool = undefined;
     globalThis.executeTool = undefined;
+    globalThis.classifyExecuteScriptError = undefined;
     require("../../ClaudeInSafari Extension/Resources/tools/tool-registry.js");
     return {
         registerTool: globalThis.registerTool,
         executeTool: globalThis.executeTool,
+        classifyExecuteScriptError: globalThis.classifyExecuteScriptError,
     };
 }
 
@@ -138,5 +140,69 @@ describe("tool-registry", () => {
 
         const out = await executeTool("dup", {});
         expect(out.result.content[0].text).toBe("second");
+    });
+});
+
+// ---------------------------------------------------------------------------
+// classifyExecuteScriptError
+// ---------------------------------------------------------------------------
+
+describe("classifyExecuteScriptError", () => {
+    afterEach(() => {
+        delete globalThis.classifyExecuteScriptError;
+    });
+
+    test("is exported on globalThis after require", () => {
+        loadModule();
+        expect(typeof globalThis.classifyExecuteScriptError).toBe("function");
+    });
+
+    test("restricted URL error returns injection guidance with toolName", () => {
+        loadModule();
+        const err = globalThis.classifyExecuteScriptError("find", 7, new Error("Cannot access contents of the page"));
+        expect(err.message).toMatch(/cannot inject into this page/);
+        expect(err.message).toContain("find");
+    });
+
+    test("Safari WKWebExtensionError matches restricted-URL pattern", () => {
+        loadModule();
+        const err = globalThis.classifyExecuteScriptError("find", 1, new Error("WKWebExtensionError error 4."));
+        expect(err.message).toMatch(/cannot inject into this page/);
+    });
+
+    test("Permission denied matches restricted-URL pattern", () => {
+        loadModule();
+        const err = globalThis.classifyExecuteScriptError("find", 1, new Error("Permission denied"));
+        expect(err.message).toMatch(/cannot inject into this page/);
+    });
+
+    test("stale tab error returns tab-gone message with tabId and tabs_context_mcp", () => {
+        loadModule();
+        const err = globalThis.classifyExecuteScriptError("find", 7, new Error("No tab with id: 7"));
+        expect(err.message).toContain("7");
+        expect(err.message).toMatch(/tabs_context_mcp/);
+    });
+
+    test("extension context invalidated returns context-invalid message", () => {
+        loadModule();
+        const err = globalThis.classifyExecuteScriptError("find", 1, new Error("Extension context invalidated"));
+        expect(err.message).toMatch(/extension context is no longer valid/);
+    });
+
+    test("generic error is prefixed with toolName: executeScript failed", () => {
+        loadModule();
+        const err = globalThis.classifyExecuteScriptError("mytool", 1, new Error("some other failure"));
+        expect(err.message).toMatch(/^mytool: executeScript failed/);
+    });
+
+    test("null err does not throw", () => {
+        loadModule();
+        expect(() => globalThis.classifyExecuteScriptError("t", 1, null)).not.toThrow();
+    });
+
+    test("string rejection (non-Error) is handled without throwing", () => {
+        loadModule();
+        const err = globalThis.classifyExecuteScriptError("find", 1, "Permission denied");
+        expect(err.message).toMatch(/cannot inject into this page/);
     });
 });

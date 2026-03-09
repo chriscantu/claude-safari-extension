@@ -87,24 +87,27 @@ This project follows the principles in [PRINCIPLES.md](PRINCIPLES.md):
 4. Register the tool in `tool-registry.js`
 5. Run tests, commit
 
-## Features (Target)
+## Features
 
 | Tool | Status |
 |------|--------|
-| `read_page` — accessibility tree snapshot | Planned |
-| `find` — find elements by natural language | Planned |
-| `form_input` — fill inputs, checkboxes, selects | Planned |
-| `navigate` — navigate tabs, history | Planned |
-| `get_page_text` — extract article/main text | Planned |
-| `javascript_tool` — run JS in page context | Planned |
-| `computer` — mouse, keyboard, scroll | Planned |
-| `computer` (screenshot) — ScreenCaptureKit | Planned |
-| `resize_window` — AppleScript window management | Planned |
-| `tabs_context_mcp` / `tabs_create_mcp` | Planned |
-| `read_console_messages` | Planned |
-| `read_network_requests` | Planned |
-| `gif_creator` | Planned |
-| `file_upload` / `upload_image` | Planned |
+| MCP socket server + message framing | ✅ Done |
+| Native ↔ extension bridge | ✅ Done |
+| Tool registry + tabs manager | ✅ Done |
+| `read_page` — accessibility tree snapshot | ✅ Done |
+| `navigate` — URL navigation & history traversal | ✅ Done |
+| `find` — find elements by natural language | ✅ Done |
+| `form_input` — fill inputs, checkboxes, selects | 🔲 Planned |
+| `get_page_text` — extract article/main text | 🔲 Planned |
+| `javascript_tool` — run JS in page context | 🔲 Planned |
+| `read_console_messages` — captured console logs | 🔲 Planned (content script scaffolded) |
+| `read_network_requests` — captured network log | 🔲 Planned (content script scaffolded) |
+| `computer` — mouse, keyboard, scroll | 🔲 Planned |
+| `computer` (screenshot) — ScreenCaptureKit | 🔲 Planned |
+| `resize_window` — AppleScript window management | 🔲 Planned |
+| `tabs_context_mcp` / `tabs_create_mcp` | 🔲 Planned |
+| `gif_creator` | 🔲 Planned |
+| `file_upload` / `upload_image` | 🔲 Planned |
 
 ## License
 

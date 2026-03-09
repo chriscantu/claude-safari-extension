@@ -21,7 +21,22 @@ jobs:
       - name: Show Xcode version
         run: xcodebuild -version
 
-      - name: Build
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install JS dependencies
+        run: npm ci
+
+      - name: Run JS unit tests
+        run: npm test
+
+      - name: Validate injected scripts syntax
+        run: node scripts/validate-injected-scripts.js
+
+      - name: Build (Xcode)
         run: |
           set -o pipefail
           xcodebuild build \
@@ -33,7 +48,7 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
           | xcpretty
 
-      - name: Run Tests
+      - name: Run Swift tests
         run: |
           set -o pipefail
           xcodebuild test \

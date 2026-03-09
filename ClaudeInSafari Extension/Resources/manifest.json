@@ -20,6 +20,7 @@
             "tools/tabs-manager.js",
             "tools/navigate.js",
             "tools/read-page.js",
+            "tools/find.js",
             "background.js"
         ],
         "persistent": false

@@ -16,7 +16,7 @@ claude-safari-extension/
 │   │   │   └── AppDelegate.swift            # App lifecycle, menu bar status item, setup wizard
 │   │   ├── MCP/
 │   │   │   ├── MCPSocketServer.swift        # Unix domain socket server (GCD-based)
-│   │   │   ├── MessageFramer.swift          # 4-byte big-endian length-prefix framing
+│   │   │   ├── MessageFramer.swift          # Newline-delimited JSON framing (MCP stdio transport)
 │   │   │   └── ToolRouter.swift             # Routes tool requests: native-handled vs extension-handled
 │   │   ├── Services/
 │   │   │   ├── ScreenshotService.swift      # ScreenCaptureKit-based screenshot capture
@@ -92,6 +92,11 @@ claude-safari-extension/
 │           ├── console-monitor.test.js
 │           ├── network-monitor.test.js
 │           └── gif-creator.test.js
+│
+├── Makefile                                 # Dev workflow: build, run, test, send tool calls
+├── scripts/                                 # Development and testing scripts
+│   ├── mcp-test.py                          # MCP socket test client (handshake + tool calls)
+│   └── validate-injected-scripts.js         # CI: syntax-check IIFE code strings in tool files
 │
 └── Specs/                                   # Feature specifications (one per feature)
     ├── 001-mcp-socket-server.md             # Unix domain socket server
