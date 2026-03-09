@@ -95,7 +95,8 @@ claude-safari-extension/
 │
 ├── Makefile                                 # Dev workflow: build, run, test, send tool calls
 ├── scripts/                                 # Development and testing scripts
-│   └── mcp-test.py                          # MCP socket test client (handshake + tool calls)
+│   ├── mcp-test.py                          # MCP socket test client (handshake + tool calls)
+│   └── validate-injected-scripts.js         # CI: syntax-check IIFE code strings in tool files
 │
 └── Specs/                                   # Feature specifications (one per feature)
     ├── 001-mcp-socket-server.md             # Unix domain socket server
