@@ -41,7 +41,9 @@ class SafariWebExtensionHandler: NSObject, NSExtensionRequestHandling {
         }
     }
 
-    /// Store the tool response in UserDefaults keyed by requestId so ToolRouter can pick it up.
+    /// Write the tool response to a file in the App Group responses directory so ToolRouter can pick it up.
+    /// Uses file-based IPC instead of UserDefaults because UserDefaults(suiteName:) fails on macOS
+    /// development builds due to cfprefsd rejecting App Group container access.
     private func handleToolResponse(message: [String: Any], context: NSExtensionContext) {
         guard let requestId = message["requestId"] as? String else {
             Self.logger.warning("tool_response missing requestId")
@@ -49,31 +51,42 @@ class SafariWebExtensionHandler: NSObject, NSExtensionRequestHandling {
             return
         }
 
-        guard let defaults = UserDefaults(suiteName: AppConstants.appGroupId) else {
-            Self.logger.error("tool_response: failed to open App Group UserDefaults suite")
+        guard let responseURL = AppConstants.responseFileURL(for: requestId) else {
+            Self.logger.error("tool_response: responseFileURL is nil (App Group unavailable)")
             respond(with: ["status": "error", "message": "App Group unavailable"], context: context)
             return
         }
 
-        guard let responseData = try? JSONSerialization.data(withJSONObject: message),
-              let responseString = String(data: responseData, encoding: .utf8) else {
+        guard let responseData = try? JSONSerialization.data(withJSONObject: message) else {
             Self.logger.error("tool_response: failed to serialize response for requestId \(requestId)")
             respond(with: ["status": "error", "message": "Response serialization failed"], context: context)
             return
         }
 
-        let key = AppConstants.UserDefaultsKeys.toolResponsePrefix + requestId
-        defaults.set(responseString, forKey: key)
+        do {
+            // Create the responses directory if it doesn't exist yet.
+            let dir = responseURL.deletingLastPathComponent()
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            try responseData.write(to: responseURL, options: .atomic)
+        } catch {
+            Self.logger.error("tool_response: failed to write response file for \(requestId): \(error.localizedDescription)")
+            respond(with: ["status": "error", "message": "Failed to write response file"], context: context)
+            return
+        }
+
         respond(with: ["status": "ok"], context: context)
     }
 
     private func handleStatusRequest(context: NSExtensionContext) {
-        guard let defaults = UserDefaults(suiteName: AppConstants.appGroupId) else {
-            Self.logger.error("handleStatusRequest: App Group UserDefaults unavailable")
-            respond(with: ["status": "error", "message": "App Group unavailable"], context: context)
-            return
+        // Read connection status from the App Group container file to avoid cfprefsd issues.
+        // Fall back to true (connected) if the file is unreadable — if the socket is alive,
+        // the native app is running and effectively connected.
+        var isConnected = true
+        if let url = AppConstants.appGroupContainerURL?.appendingPathComponent("mcp_connected"),
+           let data = try? Data(contentsOf: url),
+           let value = String(data: data, encoding: .utf8) {
+            isConnected = value.trimmingCharacters(in: .whitespacesAndNewlines) == "1"
         }
-        let isConnected = defaults.bool(forKey: AppConstants.UserDefaultsKeys.mcpConnectionStatus)
         respond(with: ["status": "ok", "mcpConnected": isConnected], context: context)
     }
 

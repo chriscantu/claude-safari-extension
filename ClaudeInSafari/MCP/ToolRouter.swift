@@ -1,20 +1,16 @@
 import Foundation
 
-/// Routes incoming MCP tool requests to the appropriate handler.
-/// Native-handled tools (screenshot, resize) are executed directly.
-/// Extension-handled tools are forwarded via the App Group FIFO queue file.
+/// Routes incoming MCP JSON-RPC 2.0 requests to the appropriate handler.
+/// Implements the MCP stdio transport protocol: initialize handshake, tools/list, and tools/call.
 class ToolRouter: MCPSocketServerDelegate {
     private weak var server: MCPSocketServer?
 
-    /// Tools that are handled natively by the Swift app (not forwarded to the extension).
-    private let nativeTools: Set<String> = [
-        "resize_window"
-    ]
+    /// Tools handled natively by the Swift app (not forwarded to the extension).
+    private let nativeTools: Set<String> = ["resize_window"]
 
-    /// Maps clientId → set of active requestIds so disconnects can stop all pending polls for a client.
-    /// Note: one already-queued asyncAfter may fire after a disconnect before the guard check stops it.
-    private var activePolls = [String: Set<String>]()
-    private let activePollsLock = NSLock()
+    /// Maps requestId → (clientId, jsonrpcId) for in-flight extension calls.
+    private var pendingRequests = [String: (clientId: String, jsonrpcId: Any?)]()
+    private let pendingRequestsLock = NSLock()
 
     func setServer(_ server: MCPSocketServer) {
         self.server = server
@@ -23,20 +19,27 @@ class ToolRouter: MCPSocketServerDelegate {
     // MARK: - MCPSocketServerDelegate
 
     func socketServer(_ server: MCPSocketServer, didReceiveMessage data: Data, from clientId: String) {
-        do {
-            let request = try JSONDecoder().decode(ToolRequest.self, from: data)
-            let toolName = request.params.tool
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let method = json["method"] as? String else {
+            NSLog("ToolRouter: received non-JSON-RPC message from \(clientId)")
+            return
+        }
 
-            if isNativeScreenshot(request) {
-                handleScreenshot(clientId: clientId)
-            } else if nativeTools.contains(toolName) {
-                handleNativeTool(request, clientId: clientId)
-            } else {
-                forwardToExtension(request, clientId: clientId)
+        let id = json["id"] // nil for notifications (no "id" key in JSON)
+
+        switch method {
+        case "initialize":
+            handleInitialize(id: id, clientId: clientId)
+        case "notifications/initialized":
+            break // Notification — no response required
+        case "tools/list":
+            handleToolsList(id: id, clientId: clientId)
+        case "tools/call":
+            handleToolCall(id: id, params: json["params"] as? [String: Any], clientId: clientId)
+        default:
+            if id != nil {
+                sendError(id: id, code: -32601, message: "Method not found: \(method)", to: clientId)
             }
-        } catch {
-            let response = ToolResponse.failure(message: "Failed to decode tool request: \(error.localizedDescription)")
-            sendResponse(response, to: clientId)
         }
     }
 
@@ -46,69 +49,121 @@ class ToolRouter: MCPSocketServerDelegate {
 
     func socketServer(_ server: MCPSocketServer, didDisconnect clientId: String) {
         NSLog("MCP client disconnected: \(clientId)")
-        activePollsLock.lock()
-        activePolls.removeValue(forKey: clientId)
-        activePollsLock.unlock()
+        pendingRequestsLock.lock()
+        let toCancel = pendingRequests.filter { $0.value.clientId == clientId }.map { $0.key }
+        toCancel.forEach { pendingRequests.removeValue(forKey: $0) }
+        pendingRequestsLock.unlock()
     }
 
-    // MARK: - Private
+    // MARK: - MCP Protocol Handlers
 
-    private func isNativeScreenshot(_ request: ToolRequest) -> Bool {
-        guard request.params.tool == "computer" else { return false }
-        if let action = request.params.args["action"]?.value as? String {
-            return action == "screenshot" || action == "zoom"
-        }
-        return false
+    private func handleInitialize(id: Any?, clientId: String) {
+        sendResult(id: id, result: [
+            "protocolVersion": "2025-11-25",
+            "capabilities": ["tools": [String: Any]()],
+            "serverInfo": ["name": "claude-safari", "version": "1.0.0"]
+        ], to: clientId)
     }
 
-    private func handleScreenshot(clientId: String) {
-        // TODO: Implement via ScreenshotService (Phase 5)
-        let response = ToolResponse.failure(message: "Screenshot not yet implemented")
-        sendResponse(response, to: clientId)
+    private func handleToolsList(id: Any?, clientId: String) {
+        sendResult(id: id, result: ["tools": Self.toolDefinitions], to: clientId)
     }
 
-    private func handleNativeTool(_ request: ToolRequest, clientId: String) {
-        // TODO: Implement native tool handlers (Phase 5/6)
-        let response = ToolResponse.failure(message: "Native tool '\(request.params.tool)' not yet implemented")
-        sendResponse(response, to: clientId)
-    }
-
-    /// Enqueue the request in the App Group FIFO file and poll asynchronously for the extension's response.
-    private func forwardToExtension(_ request: ToolRequest, clientId: String) {
-        let requestId = UUID().uuidString
-        let queued = QueuedToolRequest(
-            requestId: requestId,
-            tool: request.params.tool,
-            args: request.params.args,
-            context: NativeMessageContext(clientId: request.params.clientId, tabGroupId: nil)
-        )
-
-        guard enqueueToolRequest(queued) else {
-            sendResponse(ToolResponse.failure(message: "Failed to enqueue tool request"), to: clientId)
+    private func handleToolCall(id: Any?, params: [String: Any]?, clientId: String) {
+        guard let toolName = params?["name"] as? String else {
+            sendError(id: id, code: -32602, message: "Missing tool name in tools/call", to: clientId)
             return
         }
 
-        activePollsLock.lock()
-        activePolls[clientId, default: Set()].insert(requestId)
-        activePollsLock.unlock()
+        let arguments = (params?["arguments"] as? [String: Any]) ?? [:]
+        let requestId = UUID().uuidString
+        let queued = QueuedToolRequest(
+            requestId: requestId,
+            tool: toolName,
+            args: arguments.mapValues { AnyCodable($0) },
+            context: NativeMessageContext(clientId: clientId, tabGroupId: nil)
+        )
 
-        pollForExtensionResponse(requestId: requestId, clientId: clientId, deadline: Date().addingTimeInterval(30))
+        if toolName == "computer",
+           let action = arguments["action"] as? String,
+           action == "screenshot" || action == "zoom" {
+            sendError(id: id, code: -32000, message: "Screenshot not yet implemented", to: clientId)
+        } else if nativeTools.contains(toolName) {
+            sendError(id: id, code: -32000, message: "Native tool '\(toolName)' not yet implemented", to: clientId)
+        } else {
+            forwardToExtension(queued, id: id, clientId: clientId)
+        }
     }
 
-    /// Write a QueuedToolRequest (as a JSON string) to the tail of the App Group FIFO queue file.
-    /// Uses NSFileCoordinator to reduce the risk of cross-process read-modify-write races with SafariWebExtensionHandler.
+    // MARK: - Extension Forwarding
+
+    private func forwardToExtension(_ queued: QueuedToolRequest, id: Any?, clientId: String) {
+        guard enqueueToolRequest(queued) else {
+            sendError(id: id, code: -32000, message: "Failed to enqueue tool request", to: clientId)
+            return
+        }
+
+        pendingRequestsLock.lock()
+        pendingRequests[queued.requestId] = (clientId: clientId, jsonrpcId: id)
+        pendingRequestsLock.unlock()
+
+        pollForExtensionResponse(requestId: queued.requestId, deadline: Date().addingTimeInterval(30))
+    }
+
+    private func pollForExtensionResponse(requestId: String, deadline: Date) {
+        guard let fileURL = AppConstants.responseFileURL(for: requestId) else {
+            failPendingRequest(requestId: requestId, message: "App Group unavailable")
+            return
+        }
+
+        if let data = try? Data(contentsOf: fileURL),
+           let responseString = String(data: data, encoding: .utf8) {
+            // Delete the file so it isn't processed twice.
+            try? FileManager.default.removeItem(at: fileURL)
+            pendingRequestsLock.lock()
+            let pending = pendingRequests.removeValue(forKey: requestId)
+            pendingRequestsLock.unlock()
+            if let pending = pending {
+                deliverExtensionResponse(responseString, id: pending.jsonrpcId, to: pending.clientId)
+            }
+            return
+        }
+
+        guard Date() < deadline else {
+            failPendingRequest(requestId: requestId, message: "Extension response timeout (30s)")
+            return
+        }
+
+        pendingRequestsLock.lock()
+        let isActive = pendingRequests[requestId] != nil
+        pendingRequestsLock.unlock()
+        guard isActive else { return }
+
+        DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + 0.05) { [weak self] in
+            self?.pollForExtensionResponse(requestId: requestId, deadline: deadline)
+        }
+    }
+
+    private func failPendingRequest(requestId: String, message: String) {
+        pendingRequestsLock.lock()
+        let pending = pendingRequests.removeValue(forKey: requestId)
+        pendingRequestsLock.unlock()
+        if let pending = pending {
+            sendError(id: pending.jsonrpcId, code: -32000, message: message, to: pending.clientId)
+        }
+    }
+
+    // MARK: - Extension Queue
+
     @discardableResult
     private func enqueueToolRequest(_ queued: QueuedToolRequest) -> Bool {
         guard let url = AppConstants.pendingRequestsQueueURL else {
             NSLog("enqueueToolRequest: pendingRequestsQueueURL is nil (App Group unavailable)")
             return false
         }
-        guard let itemData = try? JSONEncoder().encode(queued) else {
+        guard let itemData = try? JSONEncoder().encode(queued),
+              let itemString = String(data: itemData, encoding: .utf8) else {
             NSLog("enqueueToolRequest: failed to encode QueuedToolRequest for tool '\(queued.tool)'")
-            return false
-        }
-        guard let itemString = String(data: itemData, encoding: .utf8) else {
-            NSLog("enqueueToolRequest: encoded JSON is not valid UTF-8")
             return false
         }
 
@@ -123,19 +178,16 @@ class ToolRouter: MCPSocketServerDelegate {
             } catch let error as NSError where error.code == NSFileReadNoSuchFileError {
                 // File doesn't exist yet — queue is empty, this is normal
             } catch {
-                NSLog("enqueueToolRequest: failed to read request queue: \(error.localizedDescription)")
+                NSLog("enqueueToolRequest: failed to read queue: \(error.localizedDescription)")
                 return
             }
             queue.append(itemString)
-            guard let encoded = try? JSONEncoder().encode(queue) else {
-                NSLog("enqueueToolRequest: failed to encode updated queue for tool '\(queued.tool)'")
-                return
-            }
+            guard let encoded = try? JSONEncoder().encode(queue) else { return }
             do {
                 try encoded.write(to: writingURL, options: .atomic)
                 success = true
             } catch {
-                NSLog("enqueueToolRequest: failed to write request queue: \(error.localizedDescription)")
+                NSLog("enqueueToolRequest: failed to write queue: \(error.localizedDescription)")
             }
         }
         if let err = coordinatorError {
@@ -144,107 +196,172 @@ class ToolRouter: MCPSocketServerDelegate {
         return success
     }
 
-    /// Recursively poll UserDefaults for the extension's response to `requestId`.
-    /// Schedules itself every 50 ms on a background queue; gives up after `deadline` or client disconnect.
-    private func pollForExtensionResponse(requestId: String, clientId: String, deadline: Date) {
-        guard let defaults = UserDefaults(suiteName: AppConstants.appGroupId) else {
-            NSLog("pollForExtensionResponse: App Group UserDefaults unavailable, failing immediately for requestId \(requestId)")
-            activePollsLock.lock()
-            activePolls[clientId]?.remove(requestId)
-            activePollsLock.unlock()
-            sendResponse(ToolResponse.failure(message: "App Group unavailable"), to: clientId)
-            return
-        }
+    // MARK: - Extension Response Decoding
 
-        let key = AppConstants.UserDefaultsKeys.toolResponsePrefix + requestId
-
-        if let responseString = defaults.string(forKey: key) {
-            defaults.removeObject(forKey: key)
-            activePollsLock.lock()
-            activePolls[clientId]?.remove(requestId)
-            activePollsLock.unlock()
-            sendResponse(decodeExtensionResponse(responseString), to: clientId)
-            return
-        }
-
-        guard Date() < deadline else {
-            activePollsLock.lock()
-            activePolls[clientId]?.remove(requestId)
-            activePollsLock.unlock()
-            sendResponse(ToolResponse.failure(message: "Extension response timeout (30s)"), to: clientId)
-            return
-        }
-
-        DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + 0.05) { [weak self] in
-            guard let self = self else {
-                NSLog("pollForExtensionResponse: ToolRouter deallocated, aborting poll for requestId \(requestId)")
-                return
-            }
-            self.activePollsLock.lock()
-            let isActive = self.activePolls[clientId]?.contains(requestId) == true
-            self.activePollsLock.unlock()
-            guard isActive else {
-                NSLog("pollForExtensionResponse: client \(clientId) disconnected, cancelling poll for requestId \(requestId)")
-                return
-            }
-            self.pollForExtensionResponse(requestId: requestId, clientId: clientId, deadline: deadline)
-        }
-    }
-
-    /// Decode the JSON string stored by SafariWebExtensionHandler into a ToolResponse.
-    func decodeExtensionResponse(_ json: String) -> ToolResponse {
+    /// Parse an extension response JSON string into a typed result.
+    /// Separated from deliverExtensionResponse so it can be unit-tested without a live client.
+    func decodeExtensionResponse(_ json: String) -> DecodedExtensionResponse {
         guard let data = json.data(using: .utf8),
               let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            return ToolResponse.failure(message: "Failed to decode extension response")
+            return .failure("Failed to decode extension response")
+        }
+
+        func parseValidBlocks(_ array: [[String: Any]]) -> [ContentBlock]? {
+            let blocks = array.compactMap { block -> ContentBlock? in
+                guard let type = block["type"] as? String else { return nil }
+                return ContentBlock(
+                    type: type,
+                    text: block["text"] as? String,
+                    data: block["data"] as? String,
+                    mediaType: block["mediaType"] as? String
+                )
+            }
+            return blocks.isEmpty ? nil : blocks
         }
 
         if let resultDict = dict["result"] as? [String: Any],
-           let contentArray = resultDict["content"] as? [[String: Any]] {
-            let blocks = contentArray.compactMap { rawBlock -> ContentBlock? in
-                if let block = ContentBlock(from: rawBlock) { return block }
-                NSLog("decodeExtensionResponse: dropped malformed content block: \(rawBlock)")
-                return nil
+           let rawContent = resultDict["content"] as? [[String: Any]] {
+            guard let blocks = parseValidBlocks(rawContent) else {
+                return .failure("Extension response contained no valid content blocks")
             }
-            if blocks.isEmpty && !contentArray.isEmpty {
-                return ToolResponse.failure(message: "Extension response contained no valid content blocks")
-            }
-            return ToolResponse(type: "tool_response", result: ToolResponseContent(content: blocks), error: nil)
+            return .success(ToolResponseContent(content: blocks))
         }
 
         if let errorDict = dict["error"] as? [String: Any],
-           let contentArray = errorDict["content"] as? [[String: Any]] {
-            let blocks = contentArray.compactMap { rawBlock -> ContentBlock? in
-                if let block = ContentBlock(from: rawBlock) { return block }
-                NSLog("decodeExtensionResponse: dropped malformed content block: \(rawBlock)")
-                return nil
-            }
-            if blocks.isEmpty && !contentArray.isEmpty {
-                return ToolResponse.failure(message: "Extension response contained no valid content blocks")
-            }
-            return ToolResponse(type: "tool_response", result: nil, error: ToolResponseContent(content: blocks))
+           let rawContent = errorDict["content"] as? [[String: Any]],
+           let blocks = parseValidBlocks(rawContent) {
+            return DecodedExtensionResponse(result: nil, error: ToolResponseContent(content: blocks))
         }
 
-        return ToolResponse.failure(message: "Malformed extension response")
+        return .failure("Malformed extension response")
     }
 
-    private func sendResponse(_ response: ToolResponse, to clientId: String) {
-        do {
-            let data = try JSONEncoder().encode(response)
-            server?.send(data: data, to: clientId)
-        } catch {
-            NSLog("sendResponse: failed to encode ToolResponse for client \(clientId): \(error)")
+    private func deliverExtensionResponse(_ json: String, id: Any?, to clientId: String) {
+        let decoded = decodeExtensionResponse(json)
+        if let result = decoded.result {
+            let contentDicts = result.content.map { block -> [String: Any] in
+                var out: [String: Any] = ["type": block.type]
+                if let text = block.text { out["text"] = text }
+                if let data = block.data { out["data"] = data }
+                if let mime = block.mediaType { out["mimeType"] = mime }
+                return out
+            }
+            sendResult(id: id, result: ["content": contentDicts], to: clientId)
+        } else {
+            let message = decoded.error?.content.first?.text ?? "Malformed extension response"
+            sendError(id: id, code: -32000, message: message, to: clientId)
         }
     }
-}
 
-private extension ContentBlock {
-    init?(from dict: [String: Any]) {
-        guard let type = dict["type"] as? String else { return nil }
-        self.init(
-            type: type,
-            text: dict["text"] as? String,
-            data: dict["data"] as? String,
-            mediaType: dict["mediaType"] as? String
-        )
+    // MARK: - JSON-RPC Response Helpers
+
+    private func sendResult(id: Any?, result: [String: Any], to clientId: String) {
+        var response: [String: Any] = ["jsonrpc": "2.0", "result": result]
+        if let id = id { response["id"] = id }
+        sendJSON(response, to: clientId)
+    }
+
+    private func sendError(id: Any?, code: Int, message: String, to clientId: String) {
+        var response: [String: Any] = [
+            "jsonrpc": "2.0",
+            "error": ["code": code, "message": message]
+        ]
+        if let id = id { response["id"] = id }
+        sendJSON(response, to: clientId)
+    }
+
+    private func sendJSON(_ dict: [String: Any], to clientId: String) {
+        guard let data = try? JSONSerialization.data(withJSONObject: dict) else {
+            NSLog("ToolRouter: failed to serialize JSON response")
+            return
+        }
+        server?.send(data: data, to: clientId)
+    }
+
+    // MARK: - Tool Definitions
+
+    private static let toolDefinitions: [[String: Any]] = [
+        tool("tabs_context_mcp", "Get context information about the current MCP tab group.", [:]),
+        tool("tabs_create_mcp", "Creates a new empty tab in the MCP tab group.", [:]),
+        tool("switch_browser", "Switch which browser is used for browser automation.", [:]),
+        tool("navigate", "Navigate to a URL, or go forward/back in browser history.", [
+            "url": prop("string", "The URL to navigate to, or 'forward'/'back'"),
+            "tabId": prop("number", "Tab ID to navigate")
+        ]),
+        tool("read_page", "Get an accessibility tree of elements on the page.", [
+            "tabId": prop("number", "Tab ID to read from"),
+            "filter": prop("string", "'interactive' or 'all'"),
+            "depth": prop("number", "Maximum tree depth"),
+            "ref_id": prop("string", "Reference ID of a parent element"),
+            "max_chars": prop("number", "Maximum characters for output")
+        ]),
+        tool("find", "Find elements on the page using natural language.", [
+            "query": prop("string", "Natural language description of what to find"),
+            "tabId": prop("number", "Tab ID to search in")
+        ]),
+        tool("form_input", "Set values in form elements.", [
+            "ref": prop("string", "Element reference ID from read_page"),
+            "value": prop("string", "The value to set"),
+            "tabId": prop("number", "Tab ID")
+        ]),
+        tool("computer", "Use mouse and keyboard to interact with a web browser, and take screenshots.", [
+            "action": prop("string", "left_click, right_click, double_click, triple_click, type, screenshot, wait, scroll, key, left_click_drag, zoom, scroll_to, hover"),
+            "tabId": prop("number", "Tab ID")
+        ]),
+        tool("javascript_tool", "Execute JavaScript in the context of the current page.", [
+            "action": prop("string", "Must be 'javascript_exec'"),
+            "text": prop("string", "The JavaScript code to execute"),
+            "tabId": prop("number", "Tab ID")
+        ]),
+        tool("get_page_text", "Extract raw text content from the page.", [
+            "tabId": prop("number", "Tab ID")
+        ]),
+        tool("resize_window", "Resize the current browser window to specified dimensions.", [
+            "width": prop("number", "Target window width in pixels"),
+            "height": prop("number", "Target window height in pixels"),
+            "tabId": prop("number", "Tab ID")
+        ]),
+        tool("read_console_messages", "Read browser console messages from a specific tab.", [
+            "tabId": prop("number", "Tab ID"),
+            "pattern": prop("string", "Regex pattern to filter messages"),
+            "limit": prop("number", "Maximum number of messages to return"),
+            "onlyErrors": prop("boolean", "If true, only return error messages"),
+            "clear": prop("boolean", "If true, clear messages after reading")
+        ]),
+        tool("read_network_requests", "Read HTTP network requests from a specific tab.", [
+            "tabId": prop("number", "Tab ID"),
+            "urlPattern": prop("string", "URL pattern to filter requests"),
+            "limit": prop("number", "Maximum number of requests to return"),
+            "clear": prop("boolean", "If true, clear requests after reading")
+        ]),
+        tool("upload_image", "Upload a previously captured screenshot to a file input or drag & drop target.", [
+            "imageId": prop("string", "ID of a previously captured screenshot"),
+            "tabId": prop("number", "Tab ID"),
+            "ref": prop("string", "Element reference ID for file inputs"),
+            "filename": prop("string", "Optional filename for the uploaded file")
+        ]),
+        tool("file_upload", "Upload one or multiple files from the local filesystem to a file input element.", [
+            "paths": prop("array", "Absolute paths to the files to upload"),
+            "ref": prop("string", "Element reference ID of the file input"),
+            "tabId": prop("number", "Tab ID")
+        ]),
+        tool("gif_creator", "Manage GIF recording and export for browser automation sessions.", [
+            "action": prop("string", "start_recording, stop_recording, export, or clear"),
+            "tabId": prop("number", "Tab ID"),
+            "filename": prop("string", "Optional filename for exported GIF"),
+            "download": prop("boolean", "Set to true to download the GIF")
+        ])
+    ]
+
+    private static func tool(_ name: String, _ desc: String, _ properties: [String: [String: Any]]) -> [String: Any] {
+        return [
+            "name": name,
+            "description": desc,
+            "inputSchema": ["type": "object", "properties": properties]
+        ]
+    }
+
+    private static func prop(_ type: String, _ description: String) -> [String: Any] {
+        return ["type": type, "description": description]
     }
 }

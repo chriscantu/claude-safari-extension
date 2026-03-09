@@ -18,13 +18,20 @@ enum AppConstants {
         appGroupContainerURL?.appendingPathComponent(UserDefaultsKeys.pendingRequestsFile)
     }
 
-    /// UserDefaults keys and file names for App Group communication.
+    /// URL to the directory where extension writes per-request response files.
+    static var responsesDirectoryURL: URL? {
+        appGroupContainerURL?.appendingPathComponent("responses", isDirectory: true)
+    }
+
+    /// URL for a specific tool response file, keyed by requestId.
+    static func responseFileURL(for requestId: String) -> URL? {
+        responsesDirectoryURL?.appendingPathComponent("\(requestId).json")
+    }
+
+    /// File names for App Group communication.
     enum UserDefaultsKeys {
         /// File name for the FIFO queue of pending tool requests (within the App Group container).
         static let pendingRequestsFile = "pending_requests.json"
-
-        /// UserDefaults key prefix for per-request tool responses; append the requestId to form the full key.
-        static let toolResponsePrefix = "toolResponse_"
 
         static let mcpConnectionStatus = "mcpConnectionStatus"
     }

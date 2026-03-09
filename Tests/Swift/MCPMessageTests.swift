@@ -69,20 +69,22 @@ final class MCPMessageTests: XCTestCase {
         XCTAssertEqual(decodedItems[2].requestId, "req-C")
     }
 
-    // MARK: - Per-request UserDefaults key isolation
+    // MARK: - Per-request response file isolation
 
-    /// Two different requestIds produce distinct UserDefaults keys — no cross-request collision.
-    func testToolResponseKeysAreRequestScoped() {
-        let prefix = AppConstants.UserDefaultsKeys.toolResponsePrefix
-        let key1 = prefix + "req-111"
-        let key2 = prefix + "req-222"
-        XCTAssertNotEqual(key1, key2)
+    /// Two different requestIds produce distinct response file URLs — no cross-request collision.
+    func testResponseFileURLsAreRequestScoped() {
+        let url1 = AppConstants.responseFileURL(for: "req-111")
+        let url2 = AppConstants.responseFileURL(for: "req-222")
+        XCTAssertNotNil(url1)
+        XCTAssertNotNil(url2)
+        XCTAssertNotEqual(url1, url2)
     }
 
-    func testToolResponseKeyIncludesRequestId() {
+    func testResponseFileURLIncludesRequestId() {
         let requestId = "unique-uuid-xyz"
-        let key = AppConstants.UserDefaultsKeys.toolResponsePrefix + requestId
-        XCTAssertTrue(key.hasSuffix(requestId))
+        let url = AppConstants.responseFileURL(for: requestId)
+        XCTAssertNotNil(url)
+        XCTAssertTrue(url?.lastPathComponent.contains(requestId) == true)
     }
 
     // MARK: - NativeMessage enum Codable round-trip

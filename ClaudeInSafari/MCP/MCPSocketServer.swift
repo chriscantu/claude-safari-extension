@@ -48,8 +48,12 @@ class MCPSocketServer {
             attributes: [.posixPermissions: 0o700]
         )
 
-        // Remove stale socket file
-        unlink(socketPath)
+        // Remove any stale socket files from previous processes
+        if let contents = try? FileManager.default.contentsOfDirectory(atPath: directory) {
+            for file in contents where file.hasSuffix(".sock") {
+                try? FileManager.default.removeItem(atPath: "\(directory)/\(file)")
+            }
+        }
 
         // Create socket
         serverFD = socket(AF_UNIX, SOCK_STREAM, 0)

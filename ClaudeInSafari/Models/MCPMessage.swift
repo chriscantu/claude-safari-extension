@@ -45,6 +45,24 @@ struct ToolResponseContent: Codable {
     let content: [ContentBlock]
 }
 
+/// The decoded result of parsing an extension response JSON string.
+/// Used by ToolRouter.decodeExtensionResponse and its tests.
+struct DecodedExtensionResponse {
+    var result: ToolResponseContent?
+    var error: ToolResponseContent?
+
+    static func success(_ content: ToolResponseContent) -> DecodedExtensionResponse {
+        DecodedExtensionResponse(result: content, error: nil)
+    }
+
+    static func failure(_ message: String) -> DecodedExtensionResponse {
+        DecodedExtensionResponse(
+            result: nil,
+            error: ToolResponseContent(content: [ContentBlock(type: "text", text: message)])
+        )
+    }
+}
+
 struct ContentBlock: Codable {
     let type: String
     let text: String?       // present for type "text"
