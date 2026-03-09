@@ -26,15 +26,20 @@
  *   1. Exact accessible name (case-insensitive)
  *   2. Partial accessible name
  *   3. placeholder attribute contains query
- *   4. aria-label / aria-labelledby contains query
+ *   4. aria-labelledby referenced text contains query (secondary pass — only catches
+ *      elements whose aria-labelledby text was not already returned as the accessible
+ *      name, e.g. when aria-label takes priority in getAccessibleName)
  *   5. Role keyword in query + partial name match
  *
- * @param {string} query - already-trimmed search string
+ * @param {string} query - search string, must already be trimmed; the IIFE uses
+ *   strict equality for exact-match (nl === q) so leading/trailing spaces prevent
+ *   exact hits.
  * @returns {string} JS source to pass to browser.tabs.executeScript
  */
 function buildFindScript(query) {
     return `(function(query) {
         "use strict";
+        try {
         window.__claudeRefCounter = window.__claudeRefCounter || 0;
         window.__claudeElementMap = window.__claudeElementMap || {};
 
@@ -115,7 +120,9 @@ function buildFindScript(query) {
         }
 
         var seen = new Set();
-        // Five priority buckets: exact, partial, placeholder, aria-labelledby (secondary), role+keyword
+        // Five priority buckets. Buckets 0-1 already capture aria-label matches
+        // via getAccessibleName; bucket 3 is a secondary pass for aria-labelledby
+        // text not returned as the primary accessible name.
         var b = [[], [], [], [], []];
 
         var all = document.querySelectorAll("*");
@@ -171,6 +178,9 @@ function buildFindScript(query) {
         });
 
         return { matches: matches, total: total };
+        } catch (e) {
+            return { __error: e.message || String(e) };
+        }
     })(${JSON.stringify(query)})`;
 }
 
@@ -213,11 +223,11 @@ function formatMatches(query, matches, total) {
 // ---------------------------------------------------------------------------
 
 /**
- * @param {{ query: string, tabId?: number }} args
+ * @param {{ query: string, tabId?: number|null }} args
  * @returns {Promise<string>} formatted match list
  * @throws {Error} "query must be a non-empty string"
- * @throws {Error} "Cannot access tab <tabId>: ..." when resolveTab fails
- * @throws {Error} "find: ..." on executeScript failure
+ * @throws {Error} from resolveTab when tab resolution fails
+ * @throws {Error} "find: ..." on executeScript failure or page script error
  */
 async function handleFind(args) {
     const { query, tabId: virtualTabId = null } = args || {};
@@ -226,14 +236,7 @@ async function handleFind(args) {
         throw new Error("query must be a non-empty string");
     }
 
-    let realTabId;
-    try {
-        realTabId = await globalThis.resolveTab(virtualTabId);
-    } catch (err) {
-        throw new Error(
-            `Cannot access tab ${virtualTabId}: ${err.message || String(err)}`
-        );
-    }
+    const realTabId = await globalThis.resolveTab(virtualTabId);
 
     const q = query.trim();
     let results;
@@ -246,9 +249,18 @@ async function handleFind(args) {
         throw globalThis.classifyExecuteScriptError("find", realTabId, err);
     }
 
-    const result = results && results[0];
-    if (!result) {
+    if (!results) {
+        throw new Error("find: executeScript returned no result (unexpected)");
+    }
+    if (results.length === 0) {
+        throw new Error("find: executeScript returned empty results (no frames matched)");
+    }
+    const result = results[0];
+    if (result === undefined || result === null) {
         throw new Error("find: no result from page script");
+    }
+    if (result.__error) {
+        throw new Error(`find: page script error: ${result.__error}`);
     }
 
     const { matches, total } = result;

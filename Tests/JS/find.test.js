@@ -22,6 +22,13 @@
  *   T17 — CSS.escape used for el.id in label selector (injection safety)
  *   T18 — "select" role keyword alias: injected code maps detectedRole "select" to combobox
  *   T19 — aria-labelledby multi-ID: injected code splits space-separated IDs
+ *   T20 — whitespace-only query throws "query must be a non-empty string"
+ *   T21 — injected code guards all five buckets with seen.has(el) check
+ *   T22 — injected code excludes zero-size non-hidden elements
+ *   T23 — executeScript returns [undefined]: throws no-result error
+ *   T24 — IIFE __error response surfaces as "page script error"
+ *   T25 — executeScript is called with runAt: "document_idle"
+ *   T26 — injection safety: query JSON-serialized to prevent interpolation attacks
  */
 
 "use strict";
@@ -64,23 +71,11 @@ function loadFind({ browser, resolveTab }) {
     globalThis.browser = browser;
     globalThis.resolveTab = resolveTab;
 
-    // Provide the real classifyExecuteScriptError logic (normally from tool-registry.js)
-    globalThis.classifyExecuteScriptError = function(toolName, realTabId, err) {
-        const msg = (err && err.message) || String(err);
-        if (/cannot access|scheme|about:|chrome:|file:/i.test(msg)) {
-            return new Error(
-                `${toolName}: cannot inject into this page (restricted URL or scheme). ` +
-                `Navigate to an http/https page first. (${msg})`
-            );
-        }
-        if (/no tab with id|invalid tab/i.test(msg)) {
-            return new Error(
-                `${toolName}: tab ${realTabId} no longer exists. ` +
-                `Use tabs_context_mcp to list available tabs. (${msg})`
-            );
-        }
-        return new Error(`${toolName}: executeScript failed: ${msg}`);
-    };
+    // Load the real classifyExecuteScriptError from tool-registry.js so tests
+    // exercise the production implementation rather than an inlined copy.
+    jest.isolateModules(() => {
+        require("../../ClaudeInSafari Extension/Resources/tools/tool-registry.js");
+    });
 
     let handler = null;
     globalThis.registerTool = jest.fn((_name, fn) => { handler = fn; });
@@ -103,6 +98,7 @@ describe("find tool", () => {
         delete globalThis.resolveTab;
         delete globalThis.registerTool;
         delete globalThis.classifyExecuteScriptError;
+        delete globalThis.executeTool;
     });
 
     test("T1 — formats a single match with role, name, ref, and rect", async () => {
@@ -193,12 +189,12 @@ describe("find tool", () => {
         expect(browser.tabs.executeScript).toHaveBeenCalledWith(77, expect.any(Object));
     });
 
-    test("T9 — resolveTab rejection produces an error mentioning the tab id", async () => {
+    test("T9 — resolveTab rejection propagates the original error message", async () => {
         const resolveTab = jest.fn(async () => { throw new Error("Tab not found: 5"); });
         const browser = makeBrowserMock({ scriptResult: makeScriptResult([], 0) });
         const handler = loadFind({ browser, resolveTab });
 
-        await expect(handler({ query: "foo", tabId: 5 })).rejects.toThrow(/Cannot access tab/);
+        await expect(handler({ query: "foo", tabId: 5 })).rejects.toThrow(/Tab not found: 5/);
     });
 
     test("T10 — executeScript rejects with restricted-URL error: wrapped with guidance", async () => {
@@ -217,7 +213,7 @@ describe("find tool", () => {
         await expect(handler({ query: "foo" })).rejects.toThrow(/tabs_context_mcp/);
     });
 
-    test("T12 — executeScript returns null: throws", async () => {
+    test("T12 — executeScript returns null: throws no-result error", async () => {
         const resolveTab = jest.fn(async () => 42);
         const browser = makeBrowserMock({ scriptResult: null });
         const handler = loadFind({ browser, resolveTab });
@@ -301,19 +297,74 @@ describe("find tool", () => {
         expect(code).toContain('document.getElementById');
     });
 
-    test("query is JSON-serialized safely into injected code", async () => {
+    test("T20 — whitespace-only query throws 'query must be a non-empty string'", async () => {
         const resolveTab = jest.fn(async () => 42);
         const browser = makeBrowserMock({ scriptResult: makeScriptResult([], 0) });
         const handler = loadFind({ browser, resolveTab });
 
-        // Query with special characters that could break naive string interpolation
+        await expect(handler({ query: "   " })).rejects.toThrow("query must be a non-empty string");
+        await expect(handler({ query: "\t" })).rejects.toThrow("query must be a non-empty string");
+    });
+
+    test("T21 — injected code guards all five bucket insertions with seen.has(el)", async () => {
+        const resolveTab = jest.fn(async () => 42);
+        const browser = makeBrowserMock({ scriptResult: makeScriptResult([], 0) });
+        const handler = loadFind({ browser, resolveTab });
+
+        await handler({ query: "test" });
+
+        const code = browser.tabs.executeScript.mock.calls[0][1].code;
+        const guardCount = (code.match(/!seen\.has\(el\)/g) || []).length;
+        expect(guardCount).toBeGreaterThanOrEqual(5);
+    });
+
+    test("T22 — injected code excludes elements with zero width and height", async () => {
+        const resolveTab = jest.fn(async () => 42);
+        const browser = makeBrowserMock({ scriptResult: makeScriptResult([], 0) });
+        const handler = loadFind({ browser, resolveTab });
+
+        await handler({ query: "test" });
+
+        const code = browser.tabs.executeScript.mock.calls[0][1].code;
+        expect(code).toMatch(/r\.width === 0 && r\.height === 0/);
+    });
+
+    test("T23 — executeScript returns [undefined]: throws no-result error", async () => {
+        const resolveTab = jest.fn(async () => 42);
+        const browser = makeBrowserMock({ scriptResult: [undefined] });
+        const handler = loadFind({ browser, resolveTab });
+
+        await expect(handler({ query: "foo" })).rejects.toThrow(/no result from page script/);
+    });
+
+    test("T24 — IIFE __error response surfaces as page script error", async () => {
+        const resolveTab = jest.fn(async () => 42);
+        const browser = makeBrowserMock({ scriptResult: [{ __error: "CSS.escape is not a function" }] });
+        const handler = loadFind({ browser, resolveTab });
+
+        await expect(handler({ query: "foo" })).rejects.toThrow(/page script error: CSS\.escape is not a function/);
+    });
+
+    test("T25 — executeScript is called with runAt: document_idle", async () => {
+        const resolveTab = jest.fn(async () => 42);
+        const browser = makeBrowserMock({ scriptResult: makeScriptResult([], 0) });
+        const handler = loadFind({ browser, resolveTab });
+
+        await handler({ query: "foo" });
+
+        const options = browser.tabs.executeScript.mock.calls[0][1];
+        expect(options.runAt).toBe("document_idle");
+    });
+
+    test("T26 — query is JSON-serialized safely into injected code", async () => {
+        const resolveTab = jest.fn(async () => 42);
+        const browser = makeBrowserMock({ scriptResult: makeScriptResult([], 0) });
+        const handler = loadFind({ browser, resolveTab });
+
         const trickyQuery = 'he said "hello" and it\'s fine';
         await handler({ query: trickyQuery });
 
-        const call = browser.tabs.executeScript.mock.calls[0];
-        expect(call[0]).toBe(42);
-        const code = call[1].code;
-        // JSON.stringify ensures the string is safely embedded
+        const code = browser.tabs.executeScript.mock.calls[0][1].code;
         expect(code).toContain(JSON.stringify(trickyQuery));
     });
 });

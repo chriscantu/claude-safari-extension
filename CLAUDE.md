@@ -20,7 +20,7 @@ A macOS Safari Web Extension that replicates the "Claude in Chrome" browser auto
 - **AppleScript** for window management (Safari's `browser.windows` API is limited)
 - **Virtual tab groups** via `browser.storage.session` (no `browser.tabGroups` API in Safari)
 - **GCD-based Unix domain socket** for MCP server (NWListener doesn't support UDS)
-- **Newline-delimited JSON** framing (MCP stdio transport) — note: CLAUDE.md previously said "4-byte big-endian length-prefix" but MessageFramer.swift uses newline framing
+- **Newline-delimited JSON** framing (MCP stdio transport) — matches `MessageFramer.swift` and the MCP stdio spec
 
 ## Socket Path Convention
 `/tmp/claude-mcp-browser-bridge-<username>/<pid>.sock` — must match Claude Code CLI expectations
