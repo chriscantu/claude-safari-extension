@@ -56,7 +56,7 @@ function loadReadPage({ browser, resolveTab }) {
 
     // Load (isolate module state between tests)
     jest.isolateModules(() => {
-        require("../../ClaudeInSafari Extension/Resources/tools/read_page.js");
+        require("../../ClaudeInSafari Extension/Resources/tools/read-page.js");
     });
 
     return handler;

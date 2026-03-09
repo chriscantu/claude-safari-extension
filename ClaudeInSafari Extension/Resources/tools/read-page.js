@@ -68,4 +68,4 @@ async function handleReadPage(args) {
     return lines.join("\n");
 }
 
-registerTool("read_page", handleReadPage);
+globalThis.registerTool("read_page", handleReadPage);
