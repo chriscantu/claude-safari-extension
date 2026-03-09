@@ -21,6 +21,7 @@
             "tools/navigate.js",
             "tools/read-page.js",
             "tools/find.js",
+            "tools/form-input.js",
             "background.js"
         ],
         "persistent": false
