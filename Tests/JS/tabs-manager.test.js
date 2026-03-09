@@ -192,6 +192,22 @@ describe("tabs-manager", () => {
         expect(result).toContain("[STALE]");
     });
 
+    // T9: resolveTab(null) throws when browser.tabs.query returns no active tab
+    test("T9: resolveTab(null) throws when no active tab is found", async () => {
+        const browser = makeBrowserMock({ activeTabId: 99 });
+        // Override query to return an empty array (no active tab)
+        browser.tabs.query = jest.fn(async () => []);
+        jest.resetModules();
+        globalThis.browser = browser;
+        const registrations = {};
+        globalThis.registerTool = (name, handler) => { registrations[name] = handler; };
+        let resolveTabFn;
+        globalThis.__captureResolveTab = (fn) => { resolveTabFn = fn; };
+        require("../../ClaudeInSafari Extension/Resources/tools/tabs-manager.js");
+
+        await expect(resolveTabFn(null)).rejects.toThrow("No active tab found in the current window");
+    });
+
     // T8: two sequential tabs_create_mcp calls produce different virtual tab IDs
     test("T8: two sequential tabs_create_mcp calls get different virtual tab IDs", async () => {
         const browser = makeBrowserMock({ nextRealTabId: 500 });

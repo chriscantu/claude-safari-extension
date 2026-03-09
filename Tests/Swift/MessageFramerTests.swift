@@ -1,7 +1,7 @@
 import XCTest
 @testable import ClaudeInSafari
 
-/// Tests for MessageFramer per Spec 002.
+/// Tests for MessageFramer — newline-delimited MCP stdio transport.
 final class MessageFramerTests: XCTestCase {
     let framer = MessageFramer()
 
@@ -9,54 +9,49 @@ final class MessageFramerTests: XCTestCase {
 
     func testFrameEmptyData() {
         let result = framer.frame(Data())
-        XCTAssertEqual(result, Data([0x00, 0x00, 0x00, 0x00]))
+        XCTAssertEqual(result, Data([0x0A])) // just a newline
     }
 
     func testFrameSmallMessage() {
         let data = "hello".data(using: .utf8)!
         let result = framer.frame(data)
-        let expected = Data([0x00, 0x00, 0x00, 0x05]) + data
+        let expected = data + Data([0x0A])
         XCTAssertEqual(result, expected)
     }
 
-    func testFrameLargeMessage() {
-        let data = Data(repeating: 0xFF, count: 1000)
+    func testFrameAppendsNewline() {
+        let data = "{}".data(using: .utf8)!
         let result = framer.frame(data)
-        // 1000 = 0x000003E8 in big-endian
-        let expected = Data([0x00, 0x00, 0x03, 0xE8]) + data
-        XCTAssertEqual(result, expected)
+        XCTAssertEqual(result.last, 0x0A)
+        XCTAssertEqual(result.count, data.count + 1)
     }
 
-    func testFrameEndianness() {
-        let data = Data(repeating: 0xAA, count: 256)
-        let result = framer.frame(data)
-        // 256 = 0x00000100 in big-endian
-        let header = Array(result.prefix(4))
-        XCTAssertEqual(header, [0x00, 0x00, 0x01, 0x00])
+    func testFrameJSONMessage() {
+        let json = #"{"jsonrpc":"2.0","method":"initialize","id":0}"#.data(using: .utf8)!
+        let result = framer.frame(json)
+        XCTAssertEqual(result, json + Data([0x0A]))
     }
 
     // MARK: - deframe() tests
 
     func testDeframeCompleteMessage() throws {
-        var buffer = Data([0x00, 0x00, 0x00, 0x05]) + "hello".data(using: .utf8)!
+        var buffer = "hello".data(using: .utf8)! + Data([0x0A])
         let result = try framer.deframe(&buffer)
         XCTAssertEqual(result, "hello".data(using: .utf8)!)
         XCTAssertTrue(buffer.isEmpty)
     }
 
-    func testDeframeIncompleteHeader() throws {
-        var buffer = Data([0x00, 0x00, 0x00]) // only 3 bytes
+    func testDeframeIncompleteMessage() throws {
+        var buffer = "hello".data(using: .utf8)! // no newline yet
         let result = try framer.deframe(&buffer)
         XCTAssertNil(result)
-        XCTAssertEqual(buffer.count, 3) // buffer unchanged
+        XCTAssertEqual(buffer.count, 5) // buffer unchanged
     }
 
-    func testDeframeIncompleteBody() throws {
-        // Header says 10 bytes, but only 5 present
-        var buffer = Data([0x00, 0x00, 0x00, 0x0A]) + Data(repeating: 0x42, count: 5)
+    func testDeframeEmptyBuffer() throws {
+        var buffer = Data()
         let result = try framer.deframe(&buffer)
         XCTAssertNil(result)
-        XCTAssertEqual(buffer.count, 9) // buffer unchanged
     }
 
     func testDeframeMultipleMessages() throws {
@@ -73,39 +68,40 @@ final class MessageFramerTests: XCTestCase {
         XCTAssertTrue(buffer.isEmpty)
     }
 
+    func testDeframeConsumesNewline() throws {
+        var buffer = "hi".data(using: .utf8)! + Data([0x0A]) + "there".data(using: .utf8)!
+        _ = try framer.deframe(&buffer)
+        XCTAssertEqual(buffer, "there".data(using: .utf8)!)
+    }
+
     func testDeframeOversizedMessage() {
-        // Length prefix > 10 MB
-        let hugeLength: UInt32 = 11_000_000
-        var lengthBytes = hugeLength.bigEndian
-        var buffer = Data(bytes: &lengthBytes, count: 4)
-        buffer.append(Data(repeating: 0x00, count: 10))
+        let bigPayload = Data(repeating: 0x41, count: MessageFramer.maxMessageSize + 1)
+        var buffer = bigPayload + Data([0x0A])
 
         XCTAssertThrowsError(try framer.deframe(&buffer)) { error in
-            guard case MessageFramerError.messageTooLarge(let size) = error else {
+            guard case MessageFramerError.messageTooLarge = error else {
                 XCTFail("Expected messageTooLarge error, got \(error)")
                 return
             }
-            XCTAssertEqual(size, hugeLength)
         }
-    }
-
-    func testDeframeEmptyBuffer() throws {
-        var buffer = Data()
-        let result = try framer.deframe(&buffer)
-        XCTAssertNil(result)
     }
 
     // MARK: - Round-trip tests
 
     func testRoundTrip() throws {
-        let original = "{\"tool\": \"read_page\", \"args\": {}}".data(using: .utf8)!
+        let original = #"{"tool":"read_page","args":{}}"#.data(using: .utf8)!
         var buffer = framer.frame(original)
         let result = try framer.deframe(&buffer)
         XCTAssertEqual(result, original)
     }
 
     func testRoundTripWithJSON() throws {
-        let json: [String: Any] = ["method": "execute_tool", "params": ["tool": "navigate", "args": ["url": "https://example.com"]]]
+        let json: [String: Any] = [
+            "jsonrpc": "2.0",
+            "method": "tools/call",
+            "params": ["name": "navigate", "arguments": ["url": "https://example.com"]],
+            "id": 1
+        ]
         let original = try JSONSerialization.data(withJSONObject: json)
         var buffer = framer.frame(original)
         let result = try framer.deframe(&buffer)

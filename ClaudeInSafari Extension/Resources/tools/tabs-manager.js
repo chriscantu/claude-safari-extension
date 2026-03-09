@@ -81,6 +81,9 @@ async function resolveTab(virtualTabId) {
     // null / undefined → active tab
     if (virtualTabId == null) {
         const [activeTab] = await browser.tabs.query({ active: true, currentWindow: true });
+        if (!activeTab) {
+            throw new Error("No active tab found in the current window");
+        }
         return activeTab.id;
     }
 

@@ -9,17 +9,19 @@
         "tabs",
         "storage",
         "nativeMessaging",
+        "alarms",
         "<all_urls>"
     ],
 
     "background": {
         "scripts": [
+            "tools/constants.js",
             "tools/tool-registry.js",
             "tools/tabs-manager.js",
             "tools/navigate.js",
             "background.js"
         ],
-        "persistent": false
+        "persistent": true
     },
 
     "content_scripts": [

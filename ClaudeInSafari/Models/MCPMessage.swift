@@ -45,9 +45,56 @@ struct ToolResponseContent: Codable {
     let content: [ContentBlock]
 }
 
+/// The decoded result of parsing an extension response JSON string.
+/// Used by ToolRouter.decodeExtensionResponse and its tests.
+struct DecodedExtensionResponse {
+    var result: ToolResponseContent?
+    var error: ToolResponseContent?
+
+    static func success(_ content: ToolResponseContent) -> DecodedExtensionResponse {
+        DecodedExtensionResponse(result: content, error: nil)
+    }
+
+    static func failure(_ message: String) -> DecodedExtensionResponse {
+        DecodedExtensionResponse(
+            result: nil,
+            error: ToolResponseContent(content: [ContentBlock(type: "text", text: message)])
+        )
+    }
+}
+
 struct ContentBlock: Codable {
     let type: String
-    let text: String
+    let text: String?       // present for type "text"
+    let data: String?       // base64 payload for type "image"
+    let mediaType: String?  // MIME type for type "image"
+
+    init(type: String, text: String? = nil, data: String? = nil, mediaType: String? = nil) {
+        self.type = type
+        self.text = text
+        self.data = data
+        self.mediaType = mediaType
+    }
+
+    enum CodingKeys: String, CodingKey { case type, text, data, mediaType }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(type, forKey: .type)
+        try c.encodeIfPresent(text, forKey: .text)
+        try c.encodeIfPresent(data, forKey: .data)
+        try c.encodeIfPresent(mediaType, forKey: .mediaType)
+    }
+}
+
+/// A tool request queued in the App Group FIFO file for the extension to pick up.
+/// Encoded as a JSON string in the pending_requests.json array.
+/// The extension JS reads requestId, tool, args, and context from the decoded payload.
+struct QueuedToolRequest: Codable {
+    let requestId: String
+    let tool: String
+    let args: [String: AnyCodable]
+    let context: NativeMessageContext?
 }
 
 /// Type-erased Codable wrapper for heterogeneous JSON values.

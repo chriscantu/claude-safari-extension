@@ -12,6 +12,8 @@ protocol MCPSocketServerDelegate: AnyObject {
 class MCPSocketServer {
     weak var delegate: MCPSocketServerDelegate?
 
+    private static let readBufferSize = 65_536
+
     private let framer: MessageFramer
     private let delegateQueue = DispatchQueue(label: "com.chriscantu.claudeinsafari.mcpserver.delegate")
     private let ioQueue = DispatchQueue(label: "com.chriscantu.claudeinsafari.mcpserver.io", attributes: .concurrent)
@@ -46,8 +48,12 @@ class MCPSocketServer {
             attributes: [.posixPermissions: 0o700]
         )
 
-        // Remove stale socket file
-        unlink(socketPath)
+        // Remove any stale socket files from previous processes
+        if let contents = try? FileManager.default.contentsOfDirectory(atPath: directory) {
+            for file in contents where file.hasSuffix(".sock") {
+                try? FileManager.default.removeItem(atPath: "\(directory)/\(file)")
+            }
+        }
 
         // Create socket
         serverFD = socket(AF_UNIX, SOCK_STREAM, 0)
@@ -122,6 +128,8 @@ class MCPSocketServer {
     }
 
     /// Send framed data to a specific client.
+    /// Loops until all bytes are written or the connection is closed (handles partial writes).
+    /// Disconnects the client if a write error occurs to avoid framing corruption.
     func send(data: Data, to clientId: String) {
         clientsLock.lock()
         let client = clients[clientId]
@@ -130,8 +138,34 @@ class MCPSocketServer {
         guard let client = client else { return }
 
         let framed = framer.frame(data)
-        framed.withUnsafeBytes { ptr in
-            _ = Darwin.write(client.fd, ptr.baseAddress!, framed.count)
+        let writeError = framed.withUnsafeBytes { ptr -> Bool in
+            guard var base = ptr.baseAddress else { return false }
+            var remaining = framed.count
+            while remaining > 0 {
+                let written = Darwin.write(client.fd, base, remaining)
+                if written <= 0 { return true }  // connection closed or error
+                remaining -= written
+                base = base.advanced(by: written)
+            }
+            return false
+        }
+
+        if writeError {
+            NSLog("MCPSocketServer: write error for client \(clientId), disconnecting")
+            // Remove from clients dict first so no subsequent send() call can obtain a reference
+            // to this client before the readSource cancel handler fires.
+            clientsLock.lock()
+            clients.removeValue(forKey: clientId)
+            let shouldNotifyWrite = !client.disconnectNotified
+            if shouldNotifyWrite { client.disconnectNotified = true }
+            clientsLock.unlock()
+            client.readSource?.cancel()
+            if shouldNotifyWrite {
+                delegateQueue.async { [weak self] in
+                    guard let self = self else { return }
+                    self.delegate?.socketServer(self, didDisconnect: clientId)
+                }
+            }
         }
     }
 
@@ -185,15 +219,21 @@ class MCPSocketServer {
         }
         clientsLock.unlock()
 
-        var buf = [UInt8](repeating: 0, count: 65536)
+        var buf = [UInt8](repeating: 0, count: MCPSocketServer.readBufferSize)
         let bytesRead = read(client.fd, &buf, buf.count)
 
         if bytesRead <= 0 {
             // Client disconnected or error
             client.readSource?.cancel()
-            delegateQueue.async { [weak self] in
-                guard let self = self else { return }
-                self.delegate?.socketServer(self, didDisconnect: clientId)
+            clientsLock.lock()
+            let shouldNotifyRead = !client.disconnectNotified
+            if shouldNotifyRead { client.disconnectNotified = true }
+            clientsLock.unlock()
+            if shouldNotifyRead {
+                delegateQueue.async { [weak self] in
+                    guard let self = self else { return }
+                    self.delegate?.socketServer(self, didDisconnect: clientId)
+                }
             }
             return
         }
@@ -213,9 +253,15 @@ class MCPSocketServer {
             // Malformed data — disconnect client
             NSLog("Malformed data from client \(clientId): \(error)")
             client.readSource?.cancel()
-            delegateQueue.async { [weak self] in
-                guard let self = self else { return }
-                self.delegate?.socketServer(self, didDisconnect: clientId)
+            clientsLock.lock()
+            let shouldNotifyMalformed = !client.disconnectNotified
+            if shouldNotifyMalformed { client.disconnectNotified = true }
+            clientsLock.unlock()
+            if shouldNotifyMalformed {
+                delegateQueue.async { [weak self] in
+                    guard let self = self else { return }
+                    self.delegate?.socketServer(self, didDisconnect: clientId)
+                }
             }
         }
     }
@@ -226,6 +272,7 @@ class ClientConnection {
     let fd: Int32
     var buffer: Data
     var readSource: DispatchSourceRead?
+    var disconnectNotified = false
 
     init(fd: Int32, buffer: Data) {
         self.fd = fd

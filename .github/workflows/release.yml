@@ -1,0 +1,66 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
+
+jobs:
+  build-and-release:
+    name: Build & Publish Release
+    runs-on: macos-15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode_16.app/Contents/Developer
+
+      - name: Show Xcode version
+        run: xcodebuild -version
+
+      - name: Build (unsigned)
+        run: |
+          set -o pipefail
+          xcodebuild build \
+            -project ClaudeInSafari.xcodeproj \
+            -scheme ClaudeInSafari \
+            -destination "platform=macOS" \
+            -derivedDataPath build/DerivedData \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+          | xcpretty
+
+      - name: Run Tests
+        run: |
+          set -o pipefail
+          xcodebuild test \
+            -project ClaudeInSafari.xcodeproj \
+            -scheme ClaudeInSafariTests \
+            -destination "platform=macOS" \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+          | xcpretty
+
+      - name: Archive .app
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          APP_PATH=$(find build/DerivedData -name "ClaudeInSafari.app" -maxdepth 6 | head -1)
+          ditto -c -k --sequesterRsrc --keepParent "$APP_PATH" "ClaudeInSafari-${TAG}.zip"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "Claude in Safari ${{ github.ref_name }}"
+          body: |
+            ## Claude in Safari ${{ github.ref_name }}
+
+            > **Pre-release build** — unsigned, for developers only. Requires Gatekeeper bypass to run (`xattr -cr ClaudeInSafari.app`).
+
+            See [ROADMAP.md](https://github.com/${{ github.repository }}/blob/main/ROADMAP.md) for what's included in this version.
+          prerelease: ${{ startsWith(github.ref_name, 'v0.') }}
+          files: "ClaudeInSafari-${{ github.ref_name }}.zip"

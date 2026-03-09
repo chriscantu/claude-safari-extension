@@ -24,8 +24,6 @@
 	<string>13.0</string>
 	<key>LSUIElement</key>
 	<false/>
-	<key>NSMainStoryboardFile</key>
-	<string></string>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
 </dict>
