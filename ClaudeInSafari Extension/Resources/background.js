@@ -8,7 +8,8 @@
  *   2. tools/tool-registry.js  — defines registerTool / executeTool on globalThis
  *   3. tools/tabs-manager.js   — registers tabs_context_mcp, tabs_create_mcp; exports resolveTab
  *   4. tools/navigate.js       — registers navigate
- *   5. background.js           — this file; starts the poll loop
+ *   5. tools/read_page.js      — registers read_page
+ *   6. background.js           — this file; starts the poll loop
  */
 
 const POLL_INTERVAL_MS = 100;
