@@ -98,10 +98,12 @@ test-swift: ## Run Swift unit tests
 test-all: test test-swift ## Run all tests (JS + Swift)
 
 # Tool invocation — usage: make send TOOL=find ARGS='{"query":"Submit"}'
+# Safari MV2 requires the app to be frontmost for executeScript to work.
+# The osascript activation + brief pause ensures the permission grant is active.
 TOOL ?= read_page
 ARGS ?= {}
 send: ## Send a tool call (TOOL=name ARGS='{}')
-	@python3 scripts/mcp-test.py call $(TOOL) '$(ARGS)'
+	@osascript -e 'tell application "Safari" to activate' 2>/dev/null; sleep 0.3; python3 scripts/mcp-test.py call $(TOOL) '$(ARGS)'
 
 list-tools: ## List all registered MCP tools
 	@python3 scripts/mcp-test.py list
