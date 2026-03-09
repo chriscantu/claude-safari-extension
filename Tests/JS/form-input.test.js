@@ -278,7 +278,7 @@ describe("form_input tool", () => {
             .rejects.toThrow(/no result/);
     });
 
-    test("T20 — ref and value JSON-serialized safely into injected code", async () => {
+    test("T20 — ref JSON-serialized and CSS.escape used in selector (injection safety)", async () => {
         const resolveTab = jest.fn(async () => 42);
         const browser = makeBrowserMock({ scriptResult: [{ success: true }] });
         const handler = loadFormInput({ browser, resolveTab });
@@ -287,6 +287,11 @@ describe("form_input tool", () => {
         await handler({ ref: trickyRef, value: "x" }).catch(() => {});
 
         const code = browser.tabs.executeScript.mock.calls[0][1].code;
+        // ref is JSON-serialized into the IIFE arg (JS injection safety)
         expect(code).toContain(JSON.stringify(trickyRef));
+        // CSS selector uses CSS.escape (CSS injection safety)
+        expect(code).toContain("CSS.escape(ref)");
+        // Manual quote-escaping must NOT be present
+        expect(code).not.toContain('ref.replace(/"/g');
     });
 });

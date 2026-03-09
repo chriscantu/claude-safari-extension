@@ -32,7 +32,7 @@ function buildFormInputScript(ref, value) {
     return `(function(ref, value) {
         "use strict";
         try {
-            var el = document.querySelector('[data-claude-ref="' + ref.replace(/"/g, '\\\\"') + '"]');
+            var el = document.querySelector('[data-claude-ref="' + CSS.escape(ref) + '"]');
             if (!el) return { error: "Element '" + ref + "' not found" };
             if (el.disabled) return { error: "Element is disabled" };
             if (el.readOnly) return { error: "Element is readonly" };
