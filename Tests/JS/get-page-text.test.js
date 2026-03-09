@@ -18,6 +18,11 @@
  *   T13 — registers itself under the name "get_page_text"
  *   T14 — [role="main"] used when no <main> exists
  *   T15 — nav/header/footer excluded in body-fallback mode
+ *   T16 — resolveTab failure: rejects with tabs_context_mcp guidance
+ *   T17 — executeScript returns [null]: throws no-result error
+ *   T18 — result.text not a string: throws unexpected shape error
+ *   T19 — result.__error empty string (falsy) still surfaces as rejection
+ *   T20 — injected code uses try/finally to clean up DOM container
  */
 
 "use strict";
@@ -244,5 +249,50 @@ describe("get_page_text tool", () => {
         expect(code).toContain('"nav"');
         expect(code).toContain('"header"');
         expect(code).toContain('"footer"');
+    });
+
+    test("T16 — resolveTab failure: rejects with tabs_context_mcp guidance", async () => {
+        const resolveTab = jest.fn(async () => { throw new Error("No active tab found"); });
+        const browser = makeBrowserMock({ scriptResult: [{ text: "" }] });
+        const handler = loadGetPageText({ browser, resolveTab });
+
+        await expect(handler({})).rejects.toThrow(/tabs_context_mcp/);
+        await expect(handler({})).rejects.toThrow(/could not resolve tab/);
+    });
+
+    test("T17 — executeScript returns [null]: throws no-result error", async () => {
+        const resolveTab = jest.fn(async () => 42);
+        const browser = makeBrowserMock({ scriptResult: [null] });
+        const handler = loadGetPageText({ browser, resolveTab });
+
+        await expect(handler({})).rejects.toThrow(/no result from page script/);
+    });
+
+    test("T18 — result.text is not a string: throws unexpected shape error", async () => {
+        const resolveTab = jest.fn(async () => 42);
+        const browser = makeBrowserMock({ scriptResult: [{ text: 42 }] });
+        const handler = loadGetPageText({ browser, resolveTab });
+
+        await expect(handler({})).rejects.toThrow(/unexpected result shape/);
+    });
+
+    test("T19 — result.__error empty string (falsy) still surfaces as rejection", async () => {
+        const resolveTab = jest.fn(async () => 42);
+        const browser = makeBrowserMock({ scriptResult: [{ __error: "" }] });
+        const handler = loadGetPageText({ browser, resolveTab });
+
+        await expect(handler({})).rejects.toThrow(/page script error/);
+    });
+
+    test("T20 — injected code uses try/finally to clean up DOM container", async () => {
+        const resolveTab = jest.fn(async () => 42);
+        const browser = makeBrowserMock({ scriptResult: [{ text: "ok" }] });
+        const handler = loadGetPageText({ browser, resolveTab });
+
+        await handler({});
+
+        const code = browser.tabs.executeScript.mock.calls[0][1].code;
+        expect(code).toContain("finally");
+        expect(code).toContain("removeChild(container)");
     });
 });
