@@ -54,6 +54,24 @@ function loadReadPage({ browser, resolveTab }) {
     globalThis.browser = browser;
     globalThis.resolveTab = resolveTab;
 
+    // Provide the real classifyExecuteScriptError logic (normally from tool-registry.js)
+    globalThis.classifyExecuteScriptError = function(toolName, realTabId, err) {
+        const msg = (err && err.message) || String(err);
+        if (/cannot access|scheme|about:|chrome:|file:/i.test(msg)) {
+            return new Error(
+                `${toolName}: cannot inject into this page (restricted URL or scheme). ` +
+                `Navigate to an http/https page first. (${msg})`
+            );
+        }
+        if (/no tab with id|invalid tab/i.test(msg)) {
+            return new Error(
+                `${toolName}: tab ${realTabId} no longer exists. ` +
+                `Use tabs_context_mcp to list available tabs. (${msg})`
+            );
+        }
+        return new Error(`${toolName}: executeScript failed: ${msg}`);
+    };
+
     // registerTool captures the handler so we can call it directly
     let handler = null;
     globalThis.registerTool = jest.fn((_name, fn) => { handler = fn; });
@@ -76,6 +94,7 @@ describe("read_page tool", () => {
         delete globalThis.browser;
         delete globalThis.resolveTab;
         delete globalThis.registerTool;
+        delete globalThis.classifyExecuteScriptError;
     });
 
     test("T1 — returns formatted accessibility tree on success", async () => {

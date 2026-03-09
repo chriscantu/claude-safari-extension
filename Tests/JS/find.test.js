@@ -21,6 +21,7 @@
  *   T16 — single match uses "match" not "matches" (grammar)
  *   T17 — CSS.escape used for el.id in label selector (injection safety)
  *   T18 — "select" role keyword alias: injected code maps detectedRole "select" to combobox
+ *   T19 — aria-labelledby multi-ID: injected code splits space-separated IDs
  */
 
 "use strict";
@@ -63,6 +64,24 @@ function loadFind({ browser, resolveTab }) {
     globalThis.browser = browser;
     globalThis.resolveTab = resolveTab;
 
+    // Provide the real classifyExecuteScriptError logic (normally from tool-registry.js)
+    globalThis.classifyExecuteScriptError = function(toolName, realTabId, err) {
+        const msg = (err && err.message) || String(err);
+        if (/cannot access|scheme|about:|chrome:|file:/i.test(msg)) {
+            return new Error(
+                `${toolName}: cannot inject into this page (restricted URL or scheme). ` +
+                `Navigate to an http/https page first. (${msg})`
+            );
+        }
+        if (/no tab with id|invalid tab/i.test(msg)) {
+            return new Error(
+                `${toolName}: tab ${realTabId} no longer exists. ` +
+                `Use tabs_context_mcp to list available tabs. (${msg})`
+            );
+        }
+        return new Error(`${toolName}: executeScript failed: ${msg}`);
+    };
+
     let handler = null;
     globalThis.registerTool = jest.fn((_name, fn) => { handler = fn; });
 
@@ -83,6 +102,7 @@ describe("find tool", () => {
         delete globalThis.browser;
         delete globalThis.resolveTab;
         delete globalThis.registerTool;
+        delete globalThis.classifyExecuteScriptError;
     });
 
     test("T1 — formats a single match with role, name, ref, and rect", async () => {
@@ -266,6 +286,19 @@ describe("find tool", () => {
 
         const code = browser.tabs.executeScript.mock.calls[0][1].code;
         expect(code).toContain('detectedRole === "select" && elRole === "combobox"');
+    });
+
+    test("T19 — injected code splits aria-labelledby space-separated IDs", async () => {
+        const resolveTab = jest.fn(async () => 42);
+        const browser = makeBrowserMock({ scriptResult: makeScriptResult([], 0) });
+        const handler = loadFind({ browser, resolveTab });
+
+        await handler({ query: "label test" });
+
+        const code = browser.tabs.executeScript.mock.calls[0][1].code;
+        // Multi-ID support requires splitting on whitespace before getElementById
+        expect(code).toContain('split(/\\s+/)');
+        expect(code).toContain('document.getElementById');
     });
 
     test("query is JSON-serialized safely into injected code", async () => {

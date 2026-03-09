@@ -67,7 +67,12 @@ function buildFindScript(query) {
             var v;
             v = el.getAttribute("aria-label"); if (v && v.trim()) return v.trim();
             v = el.getAttribute("aria-labelledby");
-            if (v) { var le = document.getElementById(v); if (le && le.textContent.trim()) return le.textContent.trim(); }
+            if (v) {
+                var albJoined = v.trim().split(/\\s+/).map(function(id) {
+                    var ref = document.getElementById(id); return ref ? ref.textContent.trim() : "";
+                }).join(" ").trim();
+                if (albJoined) return albJoined;
+            }
             v = el.getAttribute("placeholder"); if (v && v.trim()) return v.trim();
             v = el.getAttribute("alt");         if (v && v.trim()) return v.trim();
             v = el.getAttribute("title");       if (v && v.trim()) return v.trim();
@@ -110,7 +115,7 @@ function buildFindScript(query) {
         }
 
         var seen = new Set();
-        // Five priority buckets: exact, partial, placeholder, aria-label, role+keyword
+        // Five priority buckets: exact, partial, placeholder, aria-labelledby (secondary), role+keyword
         var b = [[], [], [], [], []];
 
         var all = document.querySelectorAll("*");
@@ -134,10 +139,11 @@ function buildFindScript(query) {
             var ph = el.getAttribute("placeholder");
             if (!seen.has(el) && ph && ph.toLowerCase().includes(q)) { seen.add(el); b[2].push(el); continue; }
 
-            var al = el.getAttribute("aria-label");
             var alb = el.getAttribute("aria-labelledby");
-            var albText = alb ? (function(id) { var e = document.getElementById(id); return e ? e.textContent.trim() : ""; })(alb) : "";
-            if (!seen.has(el) && ((al && al.toLowerCase().includes(q)) || albText.toLowerCase().includes(q))) {
+            var albText = alb ? alb.trim().split(/\\s+/).map(function(id) {
+                var e = document.getElementById(id); return e ? e.textContent.trim() : "";
+            }).join(" ").trim() : "";
+            if (!seen.has(el) && albText.toLowerCase().includes(q)) {
                 seen.add(el); b[3].push(el); continue;
             }
 
@@ -237,28 +243,12 @@ async function handleFind(args) {
             runAt: "document_idle",
         });
     } catch (err) {
-        const msg = err.message || String(err);
-        if (/cannot access|scheme|about:|chrome:|file:/i.test(msg)) {
-            throw new Error(
-                `find: cannot inject into this page (restricted URL or scheme). ` +
-                `Navigate to an http/https page first. (${msg})`
-            );
-        }
-        if (/no tab with id|invalid tab/i.test(msg)) {
-            throw new Error(
-                `find: tab ${realTabId} no longer exists. ` +
-                `Use tabs_context_mcp to list available tabs. (${msg})`
-            );
-        }
-        throw new Error(`find: executeScript failed: ${msg}`);
+        throw globalThis.classifyExecuteScriptError("find", realTabId, err);
     }
 
     const result = results && results[0];
     if (!result) {
         throw new Error("find: no result from page script");
-    }
-    if (result.error) {
-        throw new Error(result.error);
     }
 
     const { matches, total } = result;

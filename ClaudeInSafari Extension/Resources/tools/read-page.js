@@ -67,20 +67,7 @@ async function handleReadPage(args) {
             runAt: "document_idle",
         });
     } catch (err) {
-        const msg = err.message || String(err);
-        if (/cannot access|scheme|about:|chrome:|file:/i.test(msg)) {
-            throw new Error(
-                `read_page: cannot inject into this page (restricted URL or scheme). ` +
-                `Navigate to an http/https page first. (${msg})`
-            );
-        }
-        if (/no tab with id|invalid tab/i.test(msg)) {
-            throw new Error(
-                `read_page: tab ${realTabId} no longer exists. ` +
-                `Use tabs_context_mcp to list available tabs. (${msg})`
-            );
-        }
-        throw new Error(`read_page: executeScript failed: ${msg}`);
+        throw globalThis.classifyExecuteScriptError("read_page", realTabId, err);
     }
 
     const result = results && results[0];
