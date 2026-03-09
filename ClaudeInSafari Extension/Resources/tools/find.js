@@ -72,7 +72,7 @@ function buildFindScript(query) {
             v = el.getAttribute("alt");         if (v && v.trim()) return v.trim();
             v = el.getAttribute("title");       if (v && v.trim()) return v.trim();
             if (el.id) {
-                var lbl = document.querySelector('label[for="' + el.id + '"]');
+                var lbl = document.querySelector('label[for="' + CSS.escape(el.id) + '"]');
                 if (lbl && lbl.textContent.trim()) return lbl.textContent.trim();
             }
             var text = el.textContent;
@@ -144,8 +144,9 @@ function buildFindScript(query) {
             if (!seen.has(el) && detectedRole) {
                 var elRole = getRole(el);
                 var roleMatch = elRole === detectedRole
-                    || (detectedRole === "img"   && elRole === "image")
-                    || (detectedRole === "input" && (elRole === "textbox" || elRole === "searchbox" || elRole === "combobox"));
+                    || (detectedRole === "img"    && elRole === "image")
+                    || (detectedRole === "select" && elRole === "combobox")
+                    || (detectedRole === "input"  && (elRole === "textbox" || elRole === "searchbox" || elRole === "combobox"));
                 if (roleMatch && (!textPart || nl.includes(textPart))) {
                     seen.add(el); b[4].push(el);
                 }

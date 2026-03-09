@@ -19,6 +19,8 @@
  *   T14 — called with no arguments: throws on missing query
  *   T15 — registers itself under the name "find"
  *   T16 — single match uses "match" not "matches" (grammar)
+ *   T17 — CSS.escape used for el.id in label selector (injection safety)
+ *   T18 — "select" role keyword alias: injected code maps detectedRole "select" to combobox
  */
 
 "use strict";
@@ -241,6 +243,29 @@ describe("find tool", () => {
 
         expect(result).toContain("Found 1 match for");
         expect(result).not.toContain("1 matches");
+    });
+
+    test("T17 — injected code uses CSS.escape for label[for] selector", async () => {
+        const resolveTab = jest.fn(async () => 42);
+        const browser = makeBrowserMock({ scriptResult: makeScriptResult([], 0) });
+        const handler = loadFind({ browser, resolveTab });
+
+        await handler({ query: "email" });
+
+        const code = browser.tabs.executeScript.mock.calls[0][1].code;
+        expect(code).toContain("CSS.escape(el.id)");
+        expect(code).not.toContain('label[for="' + '" + el.id + "' + '"]');
+    });
+
+    test("T18 — injected code maps detectedRole 'select' to combobox in roleMatch", async () => {
+        const resolveTab = jest.fn(async () => 42);
+        const browser = makeBrowserMock({ scriptResult: makeScriptResult([], 0) });
+        const handler = loadFind({ browser, resolveTab });
+
+        await handler({ query: "select language" });
+
+        const code = browser.tabs.executeScript.mock.calls[0][1].code;
+        expect(code).toContain('detectedRole === "select" && elRole === "combobox"');
     });
 
     test("query is JSON-serialized safely into injected code", async () => {
