@@ -19,9 +19,10 @@
             "tools/tool-registry.js",
             "tools/tabs-manager.js",
             "tools/navigate.js",
+            "tools/read-page.js",
             "background.js"
         ],
-        "persistent": true
+        "persistent": false
     },
 
     "content_scripts": [

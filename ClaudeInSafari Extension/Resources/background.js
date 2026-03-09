@@ -8,7 +8,8 @@
  *   2. tools/tool-registry.js  — defines registerTool / executeTool on globalThis
  *   3. tools/tabs-manager.js   — registers tabs_context_mcp, tabs_create_mcp; exports resolveTab
  *   4. tools/navigate.js       — registers navigate
- *   5. background.js           — this file; starts the poll loop
+ *   5. tools/read-page.js      — registers read_page
+ *   6. background.js           — this file; starts the poll loop
  */
 
 const POLL_INTERVAL_MS = 100;
@@ -68,6 +69,15 @@ async function pollForRequests() {
             result = await globalThis.executeTool(payload.tool, payload.args, payload.context);
         } catch (error) {
             console.error("Poll: tool execution error for", payload.tool, ":", error);
+            try {
+                await browser.runtime.sendNativeMessage(NATIVE_APP_ID, {
+                    type: "tool_response",
+                    requestId: payload.requestId,
+                    error: { content: [{ type: "text", text: `Internal error executing ${payload.tool}: ${error.message || String(error)}` }] },
+                });
+            } catch (sendErr) {
+                console.error("Poll: also failed to send error response:", sendErr);
+            }
             isActive = false;
             return;
         }
@@ -99,7 +109,8 @@ if (typeof browser.alarms !== "undefined") {
     browser.alarms.create("keepalive", { periodInMinutes: 0.4 });
     browser.alarms.onAlarm.addListener((alarm) => {
         if (alarm.name === "keepalive") {
-            // This listener keeps the background script from being terminated
+            // No-op body. In Safari MV2, registering an onAlarm listener —
+            // not the code inside it — prevents the background page from being suspended.
         }
     });
 }
