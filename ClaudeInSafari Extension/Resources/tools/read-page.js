@@ -9,7 +9,7 @@
  *   tabId      (number|null)  – virtual tab ID; null → active tab
  *   filter     (string)       – "all" | "interactive" (default: "all")
  *   depth      (number|null)  – max tree depth; null uses content-script default (15)
- *   max_chars  (number|null)  – character cap on output; null means unlimited
+ *   max_chars  (number)       – character cap on output (default: 50000)
  *   ref_id     (string|null)  – focus on a specific element ref
  *
  * See Spec 005 (read-page).
@@ -22,7 +22,7 @@ async function handleReadPage(args) {
         tabId: virtualTabId = null,
         filter = "all",
         depth = null,
-        max_chars: maxChars = null,
+        max_chars: maxChars = 50000,
         ref_id: refId = null,
     } = args || {};
 

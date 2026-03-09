@@ -15,7 +15,7 @@ A macOS Safari Web Extension that replicates the "Claude in Chrome" browser auto
 - Run `xcodebuild test` after every change to verify tests pass
 
 ## Key Technical Decisions
-- **MV2 manifest** (not MV3) for persistent background page reliability on macOS Safari
+- **MV2 manifest** with `"persistent": false` + alarms keepalive — MV2 avoids MV3's service-worker lifecycle unpredictability on macOS Safari; `persistent: false` allows Safari to suspend the page when idle, with `browser.alarms` (every 24 s) preventing suspension during active polling
 - **ScreenCaptureKit** for screenshots (Safari's `captureVisibleTab` is unreliable)
 - **AppleScript** for window management (Safari's `browser.windows` API is limited)
 - **Virtual tab groups** via `browser.storage.session` (no `browser.tabGroups` API in Safari)

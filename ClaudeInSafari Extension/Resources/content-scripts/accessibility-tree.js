@@ -6,11 +6,12 @@
  * Chrome-specific APIs). Sets window.__generateAccessibilityTree so the
  * background script can call it via browser.tabs.executeScript.
  *
- * Note: the re-injection guard (window.__claudeAccessibilityTreeInstalled)
- * from the Chrome source was intentionally removed. The function definition
- * is stateless, so overwriting it on each injection (all_frames: true) is safe.
  */
 (function () {
+    // Idempotency guard: skip re-registration if already installed in this frame.
+    // Prevents mid-flight replacement on BFCache restores and double injection.
+    if (window.__generateAccessibilityTree) return;
+
     window.__claudeElementMap || (window.__claudeElementMap = {});
     window.__claudeRefCounter || (window.__claudeRefCounter = 0);
 
