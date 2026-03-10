@@ -229,14 +229,25 @@ class DefaultScreenCaptureProvider: ScreenCaptureProvider {
 
     func captureWindow(completion: @escaping (Result<(CGImage, Int, Int), ScreenshotError>) -> Void) {
         // Internal 10-second timeout guards against SCKit hanging.
+        // `onceLock` serialises the check-and-set of `settled` across the timeout queue
+        // and SCKit's callback queue so `completion` is invoked exactly once.
+        let onceLock = NSLock()
         var settled = false
         let timeoutItem = DispatchWorkItem {
-            if !settled { settled = true; completion(.failure(.timeout)) }
+            onceLock.lock()
+            let alreadySettled = settled
+            if !alreadySettled { settled = true }
+            onceLock.unlock()
+            if !alreadySettled { completion(.failure(.timeout)) }
         }
         DispatchQueue.global().asyncAfter(deadline: .now() + 10, execute: timeoutItem)
 
         let completeOnce: (Result<(CGImage, Int, Int), ScreenshotError>) -> Void = { result in
-            if !settled { settled = true; timeoutItem.cancel(); completion(result) }
+            onceLock.lock()
+            let alreadySettled = settled
+            if !alreadySettled { settled = true }
+            onceLock.unlock()
+            if !alreadySettled { timeoutItem.cancel(); completion(result) }
         }
 
         SCShareableContent.getWithCompletionHandler { content, error in
@@ -389,7 +400,8 @@ class DefaultScreenCaptureProvider: ScreenCaptureProvider {
 @available(macOS 13.0, *)
 private class SingleFrameCapture: NSObject, SCStreamOutput, SCStreamDelegate {
 
-    weak var stream: SCStream?
+    var stream: SCStream?   // strong — keeps the stream alive until stopCapture completes
+    private let capturedLock = NSLock()
     private var captured = false
     private let toolbarPx: Int
     private let viewportW: Int
@@ -404,8 +416,12 @@ private class SingleFrameCapture: NSObject, SCStreamOutput, SCStreamDelegate {
     }
 
     func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of outputType: SCStreamOutputType) {
-        guard !captured, outputType == .screen else { return }
-        captured = true
+        guard outputType == .screen else { return }
+        capturedLock.lock()
+        let alreadyCaptured = captured
+        if !alreadyCaptured { captured = true }
+        capturedLock.unlock()
+        guard !alreadyCaptured else { return }
         stream.stopCapture { _ in }
 
         guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else {
@@ -429,8 +445,11 @@ private class SingleFrameCapture: NSObject, SCStreamOutput, SCStreamDelegate {
     }
 
     func stream(_ stream: SCStream, didStopWithError error: Error) {
-        guard !captured else { return }
-        captured = true
+        capturedLock.lock()
+        let alreadyCaptured = captured
+        if !alreadyCaptured { captured = true }
+        capturedLock.unlock()
+        guard !alreadyCaptured else { return }
         completion(.failure(.captureFailed(error.localizedDescription)))
     }
 }
