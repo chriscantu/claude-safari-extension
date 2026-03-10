@@ -43,25 +43,11 @@ function makeBrowserMock(opts = {}) {
     };
 }
 
-// Simulate running the injected IIFE against a minimal DOM.
-// jsdom (Jest's default env) supports querySelector/cloneNode but not innerText;
-// we stub innerText on the cloned node to keep tests focused on logic.
-function runInjectedScript(domSetupFn) {
-    // Build the script string and extract the IIFE body.
-    // We eval it in the jsdom environment after setting up the DOM.
-    domSetupFn();
-
-    // Patch innerText on Element.prototype so jsdom returns textContent
-    // (good enough for unit tests — innerText vs textContent differences are
-    // integration/browser concerns, not unit-test concerns).
-    const orig = Object.getOwnPropertyDescriptor(Element.prototype, "innerText");
-    if (!orig) {
-        Object.defineProperty(Element.prototype, "innerText", {
-            get() { return this.textContent; },
-            configurable: true,
-        });
-    }
-}
+// NOTE: Tests T1-T8 mock scriptResult at the browser layer rather than
+// eval-ing the injected IIFE in a jsdom DOM. The extraction algorithm
+// (priority chain, noise removal, blank-line collapse, truncation) is
+// therefore not exercised here. This is tracked as ROADMAP.md L6 and
+// will be addressed when the JS test suite is configured for jsdom.
 
 // ---------------------------------------------------------------------------
 // Module loader
