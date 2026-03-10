@@ -95,6 +95,18 @@ Read DOM structure, find elements, fill forms, extract text.
 
 ---
 
+## Next Up — JS Test Infrastructure 🔧
+
+Before Phase 5 begins, resolve [L6](#deferred--known-issues): switch the JS test suite to `@jest-environment jsdom` so injected IIFEs can be eval'd against a real DOM. This unblocks behavioral tests for Phase 4 tools (priority chain, noise removal, blank-line collapse, truncation) and establishes the test pattern for all future tool IIFEs.
+
+| Item | Status |
+|------|--------|
+| Configure `@jest-environment jsdom` for JS test suite | ⬜ |
+| Replace vacuous `get-page-text` T1–T8 mocks with DOM-based IIFE eval tests | ⬜ |
+| Remove dead `runInjectedScript` helper | ⬜ |
+
+---
+
 ## Phase 5 — Input & Interaction → `v0.3.0` ⬜
 
 Mouse, keyboard, scroll simulation; page-context JS execution; screenshots.
