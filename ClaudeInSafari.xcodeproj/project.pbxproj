@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		020608970AC171717C3AD738 /* MessageFramerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 48CBDB59857AA797155E19CC /* MessageFramerTests.swift */; };
+		F011223344556677889900AA /* ScreenshotServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F011223344556677889900BB /* ScreenshotServiceTests.swift */; };
 		0E751393E09E0A8E2C5E8AAA /* ToolModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = DCF900FB4B4265BA727FFA21 /* ToolModels.swift */; };
 		2C8D97C719B2C8ABC14F61DA /* ToolRouter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4B4D8BEC346192E189913F39 /* ToolRouter.swift */; };
 		30EB2D0811612DBB6A50EF32 /* FileService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 658074861C8C0C7933646343 /* FileService.swift */; };
@@ -61,6 +62,7 @@
 		02B361326E8F2C467CF43011 /* AppleScriptBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppleScriptBridge.swift; sourceTree = "<group>"; };
 		14596A1FC6A28D35A07C800E /* ClaudeInSafari.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = ClaudeInSafari.entitlements; sourceTree = "<group>"; };
 		48CBDB59857AA797155E19CC /* MessageFramerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessageFramerTests.swift; sourceTree = "<group>"; };
+		F011223344556677889900BB /* ScreenshotServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenshotServiceTests.swift; sourceTree = "<group>"; };
 		4B4D8BEC346192E189913F39 /* ToolRouter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolRouter.swift; sourceTree = "<group>"; };
 		5736A5C7E56CF23B6FF9B13A /* ScreenshotService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenshotService.swift; sourceTree = "<group>"; };
 		652C99F1EAD7FA1BDBF44D9D /* MessageFramer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessageFramer.swift; sourceTree = "<group>"; };
@@ -158,6 +160,7 @@
 			children = (
 				48CBDB59857AA797155E19CC /* MessageFramerTests.swift */,
 				A1B2C3D4E5F60002A1B2C3D4 /* MCPMessageTests.swift */,
+				F011223344556677889900BB /* ScreenshotServiceTests.swift */,
 			);
 			path = Swift;
 			sourceTree = "<group>";
@@ -316,6 +319,7 @@
 				3E3A0B200C0A287DA885E7A5 /* Constants.swift in Sources */,
 				020608970AC171717C3AD738 /* MessageFramerTests.swift in Sources */,
 				A1B2C3D4E5F60001A1B2C3D4 /* MCPMessageTests.swift in Sources */,
+				F011223344556677889900AA /* ScreenshotServiceTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
