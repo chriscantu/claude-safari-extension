@@ -353,15 +353,17 @@ class DefaultScreenCaptureProvider: ScreenCaptureProvider {
                             // Crop display image to Safari window bounds (CGImage: bottom-left origin).
                             let screenH = display.frame.height * scale
                             let winX = windowBounds.origin.x * scale
-                            let winY = (display.frame.height - windowBounds.maxY) * scale
+                            let winY = screenH - windowBounds.maxY * scale
                             let toolbarPx = Int(toolbarPt * scale)
                             let cropRect = CGRect(
                                 x: winX, y: winY + CGFloat(toolbarPx),
                                 width: windowBounds.width * scale,
                                 height: max(1, windowBounds.height * scale - CGFloat(toolbarPx))
                             )
-                            _ = screenH  // suppress unused warning
-                            let cropped = dispImage.cropping(to: cropRect) ?? dispImage
+                            guard let cropped = dispImage.cropping(to: cropRect) else {
+                                completeOnce(.failure(.captureFailed("Failed to crop display image to Safari window (rect: \(cropRect), display: \(dispImage.width)x\(dispImage.height))")))
+                                return
+                            }
                             completeOnce(.success((cropped, viewportW, viewportH)))
                         }
                         return
@@ -376,7 +378,10 @@ class DefaultScreenCaptureProvider: ScreenCaptureProvider {
                     let toolbarPx = Int(toolbarPt * scale)
                     let contentHeight = image.height - toolbarPx
                     let cropRect = CGRect(x: 0, y: 0, width: image.width, height: max(1, contentHeight))
-                    let cropped = image.cropping(to: cropRect) ?? image
+                    guard let cropped = image.cropping(to: cropRect) else {
+                        completeOnce(.failure(.captureFailed("Failed to crop toolbar from image (rect: \(cropRect), image: \(image.width)x\(image.height))")))
+                        return
+                    }
                     completeOnce(.success((cropped, viewportW, viewportH)))
                 }
             } else {

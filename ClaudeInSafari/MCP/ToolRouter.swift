@@ -77,13 +77,6 @@ class ToolRouter: MCPSocketServerDelegate {
         }
 
         let arguments = (params?["arguments"] as? [String: Any]) ?? [:]
-        let requestId = UUID().uuidString
-        let queued = QueuedToolRequest(
-            requestId: requestId,
-            tool: toolName,
-            args: arguments.mapValues { AnyCodable($0) },
-            context: NativeMessageContext(clientId: clientId, tabGroupId: nil)
-        )
 
         if toolName == "computer",
            let action = arguments["action"] as? String,
@@ -92,6 +85,12 @@ class ToolRouter: MCPSocketServerDelegate {
         } else if nativeTools.contains(toolName) {
             sendError(id: id, code: -32000, message: "Native tool '\(toolName)' not yet implemented", to: clientId)
         } else {
+            let queued = QueuedToolRequest(
+                requestId: UUID().uuidString,
+                tool: toolName,
+                args: arguments.mapValues { AnyCodable($0) },
+                context: NativeMessageContext(clientId: clientId, tabGroupId: nil)
+            )
             forwardToExtension(queued, id: id, clientId: clientId)
         }
     }
@@ -101,8 +100,8 @@ class ToolRouter: MCPSocketServerDelegate {
     private func handleScreenshotAction(action: String, arguments: [String: Any], id: Any?, clientId: String) {
         let tabId = arguments["tabId"] as? Int
         if action == "screenshot" {
-            screenshotService.captureScreenshot(tabId: tabId) { [weak self] result in
-                self?.sendScreenshotResult(result, id: id, to: clientId)
+            screenshotService.captureScreenshot(tabId: tabId) { [self] result in
+                sendScreenshotResult(result, id: id, to: clientId)
             }
         } else {
             // zoom — parse region as [Int], tolerating JSON numbers arriving as Double or NSNumber
@@ -120,8 +119,8 @@ class ToolRouter: MCPSocketServerDelegate {
                 }
                 return nil
             }()
-            screenshotService.captureZoom(tabId: tabId, region: region) { [weak self] result in
-                self?.sendScreenshotResult(result, region: region, id: id, to: clientId)
+            screenshotService.captureZoom(tabId: tabId, region: region) { [self] result in
+                sendScreenshotResult(result, region: region, id: id, to: clientId)
             }
         }
     }
