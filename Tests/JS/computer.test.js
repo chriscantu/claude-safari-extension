@@ -11,6 +11,10 @@
  * KNOWN GAP — scrollBy / scrollIntoView:
  *   jsdom does not implement layout-based scrolling. Scroll IIFE tests verify the
  *   handler returns a success string; actual scroll position is not asserted.
+ *
+ * KNOWN GAP — execCommand:
+ *   jsdom does not implement execCommand meaningfully. T26 asserts it was called,
+ *   not that text was inserted.
  */
 
 "use strict";
@@ -57,6 +61,7 @@ function makeBrowserMockWithDomEval() {
         },
         alarms: {
             create: jest.fn(),
+            clear: jest.fn(),
             onAlarm: { addListener: jest.fn(), removeListener: jest.fn() },
         },
     };
@@ -77,6 +82,7 @@ function makeBrowserMock(opts = {}) {
         },
         alarms: {
             create: jest.fn(),
+            clear: jest.fn(),
             onAlarm: { addListener: jest.fn(), removeListener: jest.fn() },
         },
     };
@@ -157,6 +163,23 @@ describe("computer tool", () => {
         delete globalThis.registerTool;
         delete globalThis.classifyExecuteScriptError;
         delete globalThis.executeTool;
+    });
+
+    describe("action routing", () => {
+        test("null action rejects with 'action is required'", async () => {
+            const handler = loadComputer({ browser: makeBrowserMock(), resolveTab: jest.fn(async () => 42) });
+            await expect(handler({ action: null })).rejects.toThrow("action is required");
+        });
+
+        test("undefined action rejects with 'action is required'", async () => {
+            const handler = loadComputer({ browser: makeBrowserMock(), resolveTab: jest.fn(async () => 42) });
+            await expect(handler({})).rejects.toThrow("action is required");
+        });
+
+        test("unknown action rejects with 'Invalid action'", async () => {
+            const handler = loadComputer({ browser: makeBrowserMock(), resolveTab: jest.fn(async () => 42) });
+            await expect(handler({ action: "bogus" })).rejects.toThrow(/Invalid action/);
+        });
     });
 
     describe("left_click / right_click / double_click / triple_click", () => {
@@ -288,6 +311,13 @@ describe("computer tool", () => {
                 handler({ action: "left_click", ref: "ref_0" })
             ).rejects.toThrow(/no visible bounding rect/);
         });
+
+        test("ref not found for left_click: rejects with 'not found'", async () => {
+            const handler = loadComputer({ browser: makeBrowserMockWithDomEval(), resolveTab: jest.fn(async () => 42) });
+            await expect(
+                handler({ action: "left_click", ref: "ref_nonexistent" })
+            ).rejects.toThrow(/not found/);
+        });
     });
 
     describe("type", () => {
@@ -313,7 +343,6 @@ describe("computer tool", () => {
 
         test("T20 — type with no text: rejects", async () => {
             const handler = loadComputer({ browser: makeBrowserMock(), resolveTab: jest.fn(async () => 42) });
-
             await expect(handler({ action: "type" })).rejects.toThrow(/text parameter is required/);
         });
 
@@ -334,6 +363,32 @@ describe("computer tool", () => {
     });
 
     describe("key", () => {
+        test("key with no text: rejects", async () => {
+            const handler = loadComputer({ browser: makeBrowserMock(), resolveTab: jest.fn(async () => 42) });
+            await expect(handler({ action: "key" })).rejects.toThrow(/text parameter is required/);
+        });
+
+        test("key repeat 0: rejects", async () => {
+            const handler = loadComputer({ browser: makeBrowserMock(), resolveTab: jest.fn(async () => 42) });
+            await expect(
+                handler({ action: "key", text: "Enter", repeat: 0 })
+            ).rejects.toThrow(/repeat must be between 1 and 100/);
+        });
+
+        test("key repeat 101: rejects", async () => {
+            const handler = loadComputer({ browser: makeBrowserMock(), resolveTab: jest.fn(async () => 42) });
+            await expect(
+                handler({ action: "key", text: "Enter", repeat: 101 })
+            ).rejects.toThrow(/repeat must be between 1 and 100/);
+        });
+
+        test("key repeat false (boolean coercion to 0): rejects", async () => {
+            const handler = loadComputer({ browser: makeBrowserMock(), resolveTab: jest.fn(async () => 42) });
+            await expect(
+                handler({ action: "key", text: "Enter", repeat: false })
+            ).rejects.toThrow(/repeat must be between 1 and 100/);
+        });
+
         test("T7 — key Enter dispatches keydown + keyup events", async () => {
             const events = [];
             document.addEventListener("keydown", (e) => events.push({ type: e.type, key: e.key }));
@@ -375,6 +430,48 @@ describe("computer tool", () => {
         // wait uses setTimeout (≤20s) or browser.alarms (>20s) in the handler layer.
         // No executeScript — use makeBrowserMock(), not makeBrowserMockWithDomEval().
 
+        test("wait duration 0: resolves immediately", async () => {
+            const handler = loadComputer({ browser: makeBrowserMock(), resolveTab: jest.fn(async () => 42) });
+            const result = await handler({ action: "wait", duration: 0 });
+            expect(result).toBe("Waited 0 seconds");
+        });
+
+        test("wait duration -1: rejects", async () => {
+            const handler = loadComputer({ browser: makeBrowserMock(), resolveTab: jest.fn(async () => 42) });
+            await expect(handler({ action: "wait", duration: -1 })).rejects.toThrow(/0 and 30 seconds/);
+        });
+
+        test("wait > 20s uses browser.alarms and resolves when alarm fires", async () => {
+            let capturedAlarmName = null;
+            let capturedListener = null;
+            const browser = {
+                tabs: { executeScript: jest.fn() },
+                alarms: {
+                    create: jest.fn((name) => { capturedAlarmName = name; }),
+                    clear: jest.fn(),
+                    onAlarm: {
+                        addListener: jest.fn((fn) => { capturedListener = fn; }),
+                        removeListener: jest.fn(),
+                    },
+                },
+            };
+
+            const handler = loadComputer({ browser, resolveTab: jest.fn(async () => 42) });
+            const promise = handler({ action: "wait", duration: 25 });
+
+            // Alarm listener is registered synchronously in the Promise executor; fire it now
+            capturedListener({ name: capturedAlarmName });
+
+            const result = await promise;
+            expect(result).toBe("Waited 25 seconds");
+            expect(browser.alarms.create).toHaveBeenCalledWith(
+                expect.stringContaining("computer-wait-"),
+                { delayInMinutes: expect.any(Number) }
+            );
+            expect(browser.alarms.onAlarm.removeListener).toHaveBeenCalled();
+            expect(browser.alarms.clear).toHaveBeenCalled();
+        });
+
         test("T10 — wait 0.001 seconds returns confirmation", async () => {
             const handler = loadComputer({ browser: makeBrowserMock(), resolveTab: jest.fn(async () => 42) });
 
@@ -403,6 +500,34 @@ describe("computer tool", () => {
     });
 
     describe("scroll", () => {
+        test("scroll with missing scroll_direction: rejects", async () => {
+            const handler = loadComputer({ browser: makeBrowserMock(), resolveTab: jest.fn(async () => 42) });
+            await expect(
+                handler({ action: "scroll" })
+            ).rejects.toThrow("scroll_direction is required for scroll action");
+        });
+
+        test("scroll with invalid scroll_direction: rejects", async () => {
+            const handler = loadComputer({ browser: makeBrowserMock(), resolveTab: jest.fn(async () => 42) });
+            await expect(
+                handler({ action: "scroll", scroll_direction: "sideways" })
+            ).rejects.toThrow(/scroll_direction must be one of/);
+        });
+
+        test("scroll with scroll_amount 0: rejects", async () => {
+            const handler = loadComputer({ browser: makeBrowserMock(), resolveTab: jest.fn(async () => 42) });
+            await expect(
+                handler({ action: "scroll", scroll_direction: "down", scroll_amount: 0 })
+            ).rejects.toThrow(/scroll_amount must be between 1 and 10/);
+        });
+
+        test("scroll with scroll_amount 11: rejects", async () => {
+            const handler = loadComputer({ browser: makeBrowserMock(), resolveTab: jest.fn(async () => 42) });
+            await expect(
+                handler({ action: "scroll", scroll_direction: "down", scroll_amount: 11 })
+            ).rejects.toThrow(/scroll_amount must be between 1 and 10/);
+        });
+
         test("T11 — scroll down 3 ticks at coordinate: returns confirmation", async () => {
             const el = document.body;
             el.scrollBy = jest.fn();
@@ -445,6 +570,20 @@ describe("computer tool", () => {
     });
 
     describe("scroll_to", () => {
+        test("scroll_to with no ref: rejects", async () => {
+            const handler = loadComputer({ browser: makeBrowserMock(), resolveTab: jest.fn(async () => 42) });
+            await expect(
+                handler({ action: "scroll_to" })
+            ).rejects.toThrow(/ref is required for scroll_to/);
+        });
+
+        test("scroll_to with nonexistent ref: rejects with 'not found'", async () => {
+            const handler = loadComputer({ browser: makeBrowserMockWithDomEval(), resolveTab: jest.fn(async () => 42) });
+            await expect(
+                handler({ action: "scroll_to", ref: "ref_nonexistent" })
+            ).rejects.toThrow(/not found/);
+        });
+
         test("T13 — scroll_to ref: calls scrollIntoView on the element", async () => {
             const el = appendRefElement("ref_20");
             el.scrollIntoView = jest.fn();
@@ -459,6 +598,20 @@ describe("computer tool", () => {
     });
 
     describe("left_click_drag", () => {
+        test("left_click_drag missing start_coordinate: rejects", async () => {
+            const handler = loadComputer({ browser: makeBrowserMock(), resolveTab: jest.fn(async () => 42) });
+            await expect(
+                handler({ action: "left_click_drag", coordinate: [300, 300] })
+            ).rejects.toThrow(/start_coordinate is required/);
+        });
+
+        test("left_click_drag missing coordinate: rejects", async () => {
+            const handler = loadComputer({ browser: makeBrowserMock(), resolveTab: jest.fn(async () => 42) });
+            await expect(
+                handler({ action: "left_click_drag", start_coordinate: [100, 100] })
+            ).rejects.toThrow(/coordinate is required for left_click_drag/);
+        });
+
         test("T14 — drag from start to end: returns confirmation", async () => {
             document.elementFromPoint = jest.fn(() => document.body);
 
@@ -496,6 +649,13 @@ describe("computer tool", () => {
     });
 
     describe("hover", () => {
+        test("hover with neither coordinate nor ref: rejects", async () => {
+            const handler = loadComputer({ browser: makeBrowserMock(), resolveTab: jest.fn(async () => 42) });
+            await expect(
+                handler({ action: "hover" })
+            ).rejects.toThrow(/Provide coordinate or ref/);
+        });
+
         test("T15 — hover at coordinate dispatches mouseover + mousemove", async () => {
             const el = document.createElement("div");
             document.body.appendChild(el);

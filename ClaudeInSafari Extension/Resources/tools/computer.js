@@ -205,7 +205,6 @@ function buildTypeScript(text) {
                 var kOpts = { bubbles: true, cancelable: true, key: ch, char: ch };
                 el.dispatchEvent(new KeyboardEvent("keydown",  kOpts));
                 el.dispatchEvent(new KeyboardEvent("keypress", kOpts));
-                el.dispatchEvent(new InputEvent("input", { bubbles: true, data: ch }));
                 el.dispatchEvent(new KeyboardEvent("keyup", kOpts));
             }
 
@@ -503,7 +502,8 @@ async function handleKey(args, realTabId) {
  * page suspension — the keepalive alarm fires every 24s, leaving a gap for long waits.
  */
 async function handleWait(args) {
-    const { duration } = args;
+    const rawDuration = args.duration;
+    const duration = typeof rawDuration === "boolean" ? (rawDuration ? 1 : 0) : rawDuration;
     if (typeof duration !== "number" || duration < 0 || duration > 30) {
         throw new Error("duration must be between 0 and 30 seconds");
     }
@@ -512,31 +512,64 @@ async function handleWait(args) {
     if (duration <= 20) {
         await new Promise((resolve) => setTimeout(resolve, ms));
     } else {
-        await new Promise((resolve) => {
+        await new Promise((resolve, reject) => {
+            let settled = false;
+            let fallback;
             const alarmName = "computer-wait-" + Date.now();
-            browser.alarms.create(alarmName, { delayInMinutes: ms / 60000 });
-            browser.alarms.onAlarm.addListener(function onAlarm(alarm) {
-                if (alarm.name === alarmName) {
+
+            function onAlarm(alarm) {
+                if (alarm.name === alarmName && !settled) {
+                    settled = true;
                     browser.alarms.onAlarm.removeListener(onAlarm);
+                    browser.alarms.clear(alarmName);
+                    clearTimeout(fallback);
                     resolve();
                 }
-            });
+            }
+
+            fallback = setTimeout(() => {
+                if (!settled) {
+                    settled = true;
+                    browser.alarms.onAlarm.removeListener(onAlarm);
+                    browser.alarms.clear(alarmName);
+                    reject(new Error(
+                        "computer: wait alarm did not fire. " +
+                        "Ensure the 'alarms' permission is declared in manifest.json."
+                    ));
+                }
+            }, ms + 5000);
+
+            browser.alarms.create(alarmName, { delayInMinutes: ms / 60000 });
+            browser.alarms.onAlarm.addListener(onAlarm);
         });
     }
 
     return `Waited ${duration} seconds`;
 }
 
+const VALID_SCROLL_DIRECTIONS = ["up", "down", "left", "right"];
+
 async function handleScroll(args, realTabId) {
-    const { coordinate = null, scroll_direction, scroll_amount = 3 } = args;
+    const { coordinate = null, scroll_direction, scroll_amount: rawScrollAmount } = args;
+
     if (!scroll_direction) {
         throw new Error("scroll_direction is required for scroll action");
+    }
+    if (!VALID_SCROLL_DIRECTIONS.includes(scroll_direction)) {
+        throw new Error("scroll_direction must be one of: up, down, left, right");
+    }
+
+    const scrollAmount = typeof rawScrollAmount === "boolean"
+        ? (rawScrollAmount ? 1 : 0)
+        : (rawScrollAmount ?? 3);
+    if (typeof scrollAmount !== "number" || scrollAmount < 1 || scrollAmount > 10) {
+        throw new Error("scroll_amount must be between 1 and 10");
     }
 
     let results;
     try {
         results = await browser.tabs.executeScript(realTabId, {
-            code: buildScrollScript(coordinate, scroll_direction, scroll_amount),
+            code: buildScrollScript(coordinate, scroll_direction, scrollAmount),
             runAt: "document_idle",
         });
     } catch (err) {
@@ -549,7 +582,7 @@ async function handleScroll(args, realTabId) {
     if (results[0].error) throw new Error(results[0].error);
 
     const pos = coordinate ? `(${coordinate[0]}, ${coordinate[1]})` : "viewport center";
-    return `Scrolled ${scroll_direction} ${scroll_amount} tick${scroll_amount === 1 ? "" : "s"} at ${pos}`;
+    return `Scrolled ${scroll_direction} ${scrollAmount} tick${scrollAmount === 1 ? "" : "s"} at ${pos}`;
 }
 
 async function handleScrollTo(args, realTabId) {
