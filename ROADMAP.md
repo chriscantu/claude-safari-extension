@@ -111,9 +111,9 @@ Mouse, keyboard, scroll simulation; page-context JS execution; screenshots.
 
 | Item | Spec | Status |
 |------|------|--------|
-| `computer` — mouse, keyboard, scroll actions | 010 | ⬜ |
-| `computer` (screenshot) — ScreenCaptureKit | 011 | ⬜ |
-| `javascript_tool` — execute JS in page context | 012 | ⬜ |
+| `computer` — mouse, keyboard, scroll actions | [010](Specs/010-computer-mouse-keyboard.md) | 📋 |
+| `computer` (screenshot) — ScreenCaptureKit | [011](Specs/011-computer-screenshot.md) | 📋 |
+| `javascript_tool` — execute JS in page context | [012](Specs/012-javascript-tool.md) | 📋 |
 
 ---
 
@@ -123,12 +123,12 @@ Console/network capture, window management, GIF recording, file upload.
 
 | Item | Spec | Status |
 |------|------|--------|
-| `read_console_messages` | 014 | ⬜ |
-| `read_network_requests` | 015 | ⬜ |
-| `resize_window` — AppleScript window management | 016 | ⬜ |
-| `gif_creator` — record, stop, export animated GIFs | 017 | ⬜ |
-| `upload_image` — screenshot/image to page element | 018 | ⬜ |
-| `file_upload` — local file to file input | 019 | ⬜ |
+| `read_console_messages` | [014](Specs/014-read-console.md) | 📋 |
+| `read_network_requests` | [015](Specs/015-read-network.md) | 📋 |
+| `resize_window` — AppleScript window management | [016](Specs/016-resize-window.md) | 📋 |
+| `gif_creator` — record, stop, export animated GIFs | [017](Specs/017-gif-creator.md) | 📋 |
+| `upload_image` — screenshot/image to page element | [018](Specs/018-upload-image.md) | 📋 |
+| `file_upload` — local file to file input | [019](Specs/019-file-upload.md) | 📋 |
 
 ---
 
@@ -140,7 +140,7 @@ App Store or notarized DMG distribution, onboarding UX, documentation.
 |------|--------|
 | App Store submission (or notarized DMG) | ⬜ |
 | Setup wizard / onboarding UI | ⬜ |
-| `agent-visual-indicator` refinement (spec 020) | ⬜ |
+| `agent-visual-indicator` refinement ([020](Specs/020-agent-visual-indicator.md)) | 📋 |
 | Remaining medium/low REVIEW.md findings (M3–M7, L1–L5) | ⬜ |
 | Full test coverage for all Swift classes | ⬜ |
 
@@ -156,7 +156,7 @@ Issues from REVIEW.md deferred past the First Build milestone:
 | M5 | Payload normalisation inline in poll loop (SRP) |
 | M6 | Test hook `__captureResolveTab` leaking into production code |
 | M7 | Unnecessary `NSObject` inheritance on `ToolRouter` |
-| L1 | 10 spec files not yet written (must be written before Phase 5/6 begins) |
+| ~~L1~~ | ✅ Resolved — all 10 spec files written (010–012 Phase 5, 014–019 Phase 6, 020 Phase 7). Each spec includes Safari Considerations documenting degradations and enhancements vs Chrome. |
 | L2 | 6 Swift classes lack test coverage |
 | L3 | Hand-rolled `AnyCodable` edge cases — consider Flight-School/AnyCodable |
 | L4 | Magic number read buffer size in `MCPSocketServer` |
