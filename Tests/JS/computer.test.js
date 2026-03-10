@@ -291,11 +291,84 @@ describe("computer tool", () => {
     });
 
     describe("type", () => {
-        // Task 5 — T6, T20, T26
+        test("T6 — type text dispatches keyboard + input events on active element", async () => {
+            const input = document.createElement("input");
+            document.body.appendChild(input);
+            input.focus();
+
+            const events = [];
+            input.addEventListener("keydown", () => events.push("keydown"));
+            input.addEventListener("keyup",   () => events.push("keyup"));
+            input.addEventListener("input",   () => events.push("input"));
+
+            const handler = loadComputer({ browser: makeBrowserMockWithDomEval(), resolveTab: jest.fn(async () => 42) });
+
+            const result = await handler({ action: "type", text: "hi" });
+
+            expect(events).toContain("keydown");
+            expect(events).toContain("keyup");
+            expect(events).toContain("input");
+            expect(result).toBe('Typed "hi"');
+        });
+
+        test("T20 — type with no text: rejects", async () => {
+            const handler = loadComputer({ browser: makeBrowserMock(), resolveTab: jest.fn(async () => 42) });
+
+            await expect(handler({ action: "type" })).rejects.toThrow(/text parameter is required/);
+        });
+
+        test("T26 — type on contenteditable: uses execCommand fallback", async () => {
+            const div = document.createElement("div");
+            div.setAttribute("contenteditable", "true");
+            document.body.appendChild(div);
+            div.focus();
+
+            document.execCommand = jest.fn(() => true);
+
+            const handler = loadComputer({ browser: makeBrowserMockWithDomEval(), resolveTab: jest.fn(async () => 42) });
+
+            await handler({ action: "type", text: "hello" });
+
+            expect(document.execCommand).toHaveBeenCalledWith("insertText", false, "hello");
+        });
     });
 
     describe("key", () => {
-        // Task 5 — T7, T8, T9
+        test("T7 — key Enter dispatches keydown + keyup events", async () => {
+            const events = [];
+            document.addEventListener("keydown", (e) => events.push({ type: e.type, key: e.key }));
+
+            const handler = loadComputer({ browser: makeBrowserMockWithDomEval(), resolveTab: jest.fn(async () => 42) });
+
+            const result = await handler({ action: "key", text: "Enter" });
+
+            expect(events.some(e => e.type === "keydown" && e.key === "Enter")).toBe(true);
+            expect(result).toContain("Enter");
+        });
+
+        test("T8 — key cmd+a: dispatches with metaKey=true", async () => {
+            let capturedEvent = null;
+            document.addEventListener("keydown", (e) => { capturedEvent = e; });
+
+            const handler = loadComputer({ browser: makeBrowserMockWithDomEval(), resolveTab: jest.fn(async () => 42) });
+
+            await handler({ action: "key", text: "cmd+a" });
+
+            expect(capturedEvent).not.toBeNull();
+            expect(capturedEvent.metaKey).toBe(true);
+            expect(capturedEvent.key).toBe("a");
+        });
+
+        test("T9 — key Backspace with repeat:5 dispatches 5 keydown events", async () => {
+            const events = [];
+            document.addEventListener("keydown", (e) => events.push(e.key));
+
+            const handler = loadComputer({ browser: makeBrowserMockWithDomEval(), resolveTab: jest.fn(async () => 42) });
+
+            await handler({ action: "key", text: "Backspace", repeat: 5 });
+
+            expect(events.filter(k => k === "Backspace").length).toBe(5);
+        });
     });
 
     describe("wait", () => {
