@@ -65,3 +65,82 @@ jobs:
                 -f side=RIGHT \
                 -f body="Your comment here"
             Get the commit SHA with: gh pr view PR_NUMBER --repo REPO --json headRefOid -q .headRefOid
+
+  silent-failures:
+    runs-on: ubuntu-latest
+    env:
+      PR_REPO: ${{ github.repository }}
+      PR_NUMBER: ${{ github.event.pull_request.number }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          claude_args: --allowedTools "Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh api:*)"
+          prompt: |
+            REPO: $PR_REPO
+            PR NUMBER: $PR_NUMBER
+
+            Scan this PR diff for silent failure patterns only. Do not review for style,
+            structure, or general correctness — focus exclusively on error handling.
+
+            Look for:
+            - catch blocks that swallow exceptions without logging or re-throwing
+            - Promise rejections that are not handled (missing .catch() or try/catch at call sites)
+            - browser.* API calls (tabs, scripting, storage, runtime) with no error handling
+            - Functions that return null/undefined on failure without documenting that contract
+            - Swift: Result/Error values that are ignored (guard let without else, optional chaining
+              on errors, completion handlers that silently drop errors)
+            - Any pattern where a failure becomes invisible to the caller
+
+            Only flag issues introduced by this PR's diff. Skip pre-existing issues.
+            Skip false positives — if error handling is clearly intentional (e.g. a best-effort
+            keepalive alarm), say so and move on.
+
+            If you find real issues, post a single top-level PR comment summarising them with
+            file and line citations. If there are no issues, post nothing.
+
+            Get the commit SHA with: gh pr view $PR_NUMBER --repo $PR_REPO --json headRefOid -q .headRefOid
+
+  test-coverage:
+    runs-on: ubuntu-latest
+    env:
+      PR_REPO: ${{ github.repository }}
+      PR_NUMBER: ${{ github.event.pull_request.number }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          claude_args: --allowedTools "Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh api:*)"
+          prompt: |
+            REPO: $PR_REPO
+            PR NUMBER: $PR_NUMBER
+
+            Review this PR's test coverage. Check whether non-trivial logic introduced
+            by the diff has a corresponding test in Tests/JS/ or the Swift test targets.
+
+            Focus on:
+            - New tool handler files in tools/ — each should have a matching .test.js
+            - New branches or error paths in existing tools — check if tests cover them
+            - New Swift functions in the native app that involve non-trivial logic
+
+            Do NOT flag missing tests for:
+            - Simple config/manifest changes
+            - Boilerplate registrations (registerTool calls, constants)
+            - One-liner getters or pure delegation
+
+            The test layout convention: JS tests live in Tests/JS/<source-file>.test.js.
+
+            If you find gaps, post a single top-level PR comment describing what is untested
+            and why it matters. If coverage looks adequate, post nothing.
+
+            Get the commit SHA with: gh pr view $PR_NUMBER --repo $PR_REPO --json headRefOid -q .headRefOid
