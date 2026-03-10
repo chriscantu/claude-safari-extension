@@ -149,7 +149,7 @@ class ScreenshotService {
                 completion(.failure(error))
             case .success(let (cgImage, viewportWidth, viewportHeight)):
                 guard x0 >= 0, y0 >= 0, x1 <= viewportWidth, y1 <= viewportHeight else {
-                    completion(.failure(.invalidRegion("Invalid region: coordinates out of bounds")))
+                    completion(.failure(.invalidRegion("Invalid region: [\(x0),\(y0),\(x1),\(y1)] out of bounds for viewport \(viewportWidth)x\(viewportHeight)")))
                     return
                 }
                 let cropRect = CGRect(x: x0, y: y0, width: x1 - x0, height: y1 - y0)
@@ -229,12 +229,21 @@ class ScreenshotService {
 // MARK: - DefaultScreenCaptureProvider
 
 /// Production implementation using ScreenCaptureKit.
-/// Requires Screen Recording permission (check with CGPreflightScreenCaptureAccess()).
+/// Requires Screen Recording permission.
+/// Uses CGRequestScreenCaptureAccess() which presents the system prompt if not yet granted.
 @available(macOS 13.0, *)
 class DefaultScreenCaptureProvider: ScreenCaptureProvider {
 
     func checkPermission() -> Bool {
-        CGPreflightScreenCaptureAccess()
+        // CGRequestScreenCaptureAccess must run on the main thread.
+        // It presents the system dialog if the app hasn't been authorized yet,
+        // and returns immediately (true/false) if authorization was already decided.
+        if Thread.isMainThread {
+            return CGRequestScreenCaptureAccess()
+        }
+        var result = false
+        DispatchQueue.main.sync { result = CGRequestScreenCaptureAccess() }
+        return result
     }
 
     func captureWindow(completion: @escaping (Result<(CGImage, Int, Int), ScreenshotError>) -> Void) {
@@ -271,16 +280,19 @@ class DefaultScreenCaptureProvider: ScreenCaptureProvider {
 
         SCShareableContent.getWithCompletionHandler { content, error in
             if let error = error {
-                completeOnce(.failure(.captureFailed(error.localizedDescription)))
+                let ns = error as NSError
+                completeOnce(.failure(.captureFailed("SCShareableContent error \(ns.domain)/\(ns.code): \(ns.localizedDescription)")))
                 return
             }
             guard let content = content else {
                 completeOnce(.failure(.noSafariWindow))
                 return
             }
-            let safariWindows = content.windows.filter {
-                $0.owningApplication?.bundleIdentifier == "com.apple.Safari"
-            }
+            // Pick the largest Safari window — SCKit may return menus, overlays, and other
+            // small elements before the main browser window in the list.
+            let safariWindows = content.windows
+                .filter { $0.owningApplication?.bundleIdentifier == "com.apple.Safari" }
+                .sorted { $0.frame.width * $0.frame.height > $1.frame.width * $1.frame.height }
             guard let window = safariWindows.first else {
                 completeOnce(.failure(.noSafariWindow))
                 return
@@ -301,16 +313,53 @@ class DefaultScreenCaptureProvider: ScreenCaptureProvider {
             let viewportH = Int(contentH)
 
             let scale = NSScreen.main?.backingScaleFactor ?? 1.0
-            let filter = SCContentFilter(desktopIndependentWindow: window)
-            let config = SCStreamConfiguration()
-            config.width = Int(windowBounds.width * scale)
-            config.height = Int(windowBounds.height * scale)
-            config.pixelFormat = kCVPixelFormatType_32BGRA
 
             if #available(macOS 14.0, *) {
-                SCScreenshotManager.captureImage(contentFilter: filter, configuration: config) { image, error in
+                // Primary: window-level filter. Falls back to display-level if the OS blocks
+                // window capture (e.g. macOS 15+ per-session consent not yet granted).
+                let windowFilter = SCContentFilter(desktopIndependentWindow: window)
+                let config = SCStreamConfiguration()
+                config.width = Int(windowBounds.width * scale)
+                config.height = Int(windowBounds.height * scale)
+                config.pixelFormat = kCVPixelFormatType_32BGRA
+                SCScreenshotManager.captureImage(contentFilter: windowFilter, configuration: config) { image, error in
                     if let error = error {
-                        completeOnce(.failure(.captureFailed(error.localizedDescription)))
+                        let ns = error as NSError
+                        // -3811 = userDeclinedToStartCapture (macOS 15+): window filter blocked.
+                        // Fall back to display-level capture and crop to the Safari window bounds.
+                        guard ns.code == -3811, let display = content.displays.first else {
+                            completeOnce(.failure(.captureFailed("SCScreenshotManager error \(ns.domain)/\(ns.code): \(ns.localizedDescription)")))
+                            return
+                        }
+                        let dispConfig = SCStreamConfiguration()
+                        dispConfig.pixelFormat = kCVPixelFormatType_32BGRA
+                        dispConfig.width = Int(display.frame.width * scale)
+                        dispConfig.height = Int(display.frame.height * scale)
+                        let dispFilter = SCContentFilter(display: display, excludingApplications: [], exceptingWindows: [])
+                        SCScreenshotManager.captureImage(contentFilter: dispFilter, configuration: dispConfig) { dispImage, dispError in
+                            if let dispError = dispError {
+                                let dns = dispError as NSError
+                                completeOnce(.failure(.captureFailed("Display fallback error \(dns.domain)/\(dns.code): \(dns.localizedDescription)")))
+                                return
+                            }
+                            guard let dispImage = dispImage else {
+                                completeOnce(.failure(.captureFailed("No image from display fallback")))
+                                return
+                            }
+                            // Crop display image to Safari window bounds (CGImage: bottom-left origin).
+                            let screenH = display.frame.height * scale
+                            let winX = windowBounds.origin.x * scale
+                            let winY = (display.frame.height - windowBounds.maxY) * scale
+                            let toolbarPx = Int(toolbarPt * scale)
+                            let cropRect = CGRect(
+                                x: winX, y: winY + CGFloat(toolbarPx),
+                                width: windowBounds.width * scale,
+                                height: max(1, windowBounds.height * scale - CGFloat(toolbarPx))
+                            )
+                            _ = screenH  // suppress unused warning
+                            let cropped = dispImage.cropping(to: cropRect) ?? dispImage
+                            completeOnce(.success((cropped, viewportW, viewportH)))
+                        }
                         return
                     }
                     guard let image = image else {
@@ -329,8 +378,13 @@ class DefaultScreenCaptureProvider: ScreenCaptureProvider {
             } else {
                 // macOS 13 (Ventura) — SCStream single-frame fallback.
                 // Store the capture so the timeout closure can stop the stream if it fires.
+                let windowFilter = SCContentFilter(desktopIndependentWindow: window)
+                var streamConfig = SCStreamConfiguration()
+                streamConfig.width = Int(windowBounds.width * scale)
+                streamConfig.height = Int(windowBounds.height * scale)
+                streamConfig.pixelFormat = kCVPixelFormatType_32BGRA
                 let cap = self.captureViaSCStream(
-                    filter: filter, config: config,
+                    filter: windowFilter, config: streamConfig,
                     toolbarPx: Int(toolbarPt * scale),
                     viewportW: viewportW, viewportH: viewportH,
                     completion: completeOnce
