@@ -160,7 +160,134 @@ describe("computer tool", () => {
     });
 
     describe("left_click / right_click / double_click / triple_click", () => {
-        // Task 3 — T1–T5, T17, T18, T19, T24, T27
+        test("T1 — left_click at coordinate dispatches click + mousedown", async () => {
+            const el = document.createElement("button");
+            document.body.appendChild(el);
+            document.elementFromPoint = jest.fn(() => el);
+
+            const events = [];
+            el.addEventListener("click",     () => events.push("click"));
+            el.addEventListener("mousedown", () => events.push("mousedown"));
+
+            const handler = loadComputer({ browser: makeBrowserMockWithDomEval(), resolveTab: jest.fn(async () => 42) });
+
+            const result = await handler({ action: "left_click", coordinate: [100, 200] });
+
+            expect(events).toContain("click");
+            expect(events).toContain("mousedown");
+            expect(result).toMatch(/100/);
+            expect(result).toMatch(/200/);
+        });
+
+        test("T2 — left_click with ref: dispatches at element center", async () => {
+            const el = appendRefElement("ref_5");
+            document.elementFromPoint = jest.fn(() => el);
+
+            const events = [];
+            el.addEventListener("click", () => events.push("click"));
+
+            const handler = loadComputer({ browser: makeBrowserMockWithDomEval(), resolveTab: jest.fn(async () => 42) });
+
+            const result = await handler({ action: "left_click", ref: "ref_5" });
+
+            expect(events).toContain("click");
+            expect(result).toContain("ref_5");
+        });
+
+        test("T3 — right_click dispatches contextmenu event", async () => {
+            const el = document.createElement("div");
+            document.body.appendChild(el);
+            document.elementFromPoint = jest.fn(() => el);
+
+            const events = [];
+            el.addEventListener("contextmenu", () => events.push("contextmenu"));
+
+            const handler = loadComputer({ browser: makeBrowserMockWithDomEval(), resolveTab: jest.fn(async () => 42) });
+
+            await handler({ action: "right_click", coordinate: [100, 200] });
+
+            expect(events).toContain("contextmenu");
+        });
+
+        test("T4 — double_click dispatches dblclick event", async () => {
+            const el = document.createElement("div");
+            document.body.appendChild(el);
+            document.elementFromPoint = jest.fn(() => el);
+
+            const events = [];
+            el.addEventListener("dblclick", () => events.push("dblclick"));
+
+            const handler = loadComputer({ browser: makeBrowserMockWithDomEval(), resolveTab: jest.fn(async () => 42) });
+
+            await handler({ action: "double_click", coordinate: [100, 200] });
+
+            expect(events).toContain("dblclick");
+        });
+
+        test("T5 — triple_click dispatches exactly 3 click events", async () => {
+            const el = document.createElement("div");
+            document.body.appendChild(el);
+            document.elementFromPoint = jest.fn(() => el);
+
+            const events = [];
+            el.addEventListener("click", () => events.push("click"));
+
+            const handler = loadComputer({ browser: makeBrowserMockWithDomEval(), resolveTab: jest.fn(async () => 42) });
+
+            await handler({ action: "triple_click", coordinate: [100, 200] });
+
+            expect(events.filter(e => e === "click").length).toBe(3);
+        });
+
+        test("T17 — shift modifier: shiftKey is true on dispatched click event", async () => {
+            const el = document.createElement("button");
+            document.body.appendChild(el);
+            document.elementFromPoint = jest.fn(() => el);
+
+            let capturedEvent = null;
+            el.addEventListener("click", (e) => { capturedEvent = e; });
+
+            const handler = loadComputer({ browser: makeBrowserMockWithDomEval(), resolveTab: jest.fn(async () => 42) });
+
+            await handler({ action: "left_click", coordinate: [100, 200], modifiers: "shift" });
+
+            expect(capturedEvent).not.toBeNull();
+            expect(capturedEvent.shiftKey).toBe(true);
+        });
+
+        test("T18 — both coordinate and ref provided: rejects", async () => {
+            const handler = loadComputer({ browser: makeBrowserMock(), resolveTab: jest.fn(async () => 42) });
+
+            await expect(
+                handler({ action: "left_click", coordinate: [100, 200], ref: "ref_1" })
+            ).rejects.toThrow("Provide either coordinate or ref, not both");
+        });
+
+        test("T19 — no coordinate or ref for left_click: rejects", async () => {
+            const handler = loadComputer({ browser: makeBrowserMock(), resolveTab: jest.fn(async () => 42) });
+
+            await expect(
+                handler({ action: "left_click" })
+            ).rejects.toThrow(/Provide coordinate or ref/);
+        });
+
+        test("T24 — coordinate outside viewport: IIFE returns error", async () => {
+            const handler = loadComputer({ browser: makeBrowserMockWithDomEval(), resolveTab: jest.fn(async () => 42) });
+
+            await expect(
+                handler({ action: "left_click", coordinate: [-1, -1] })
+            ).rejects.toThrow(/outside the viewport/);
+        });
+
+        test("T27 — ref with zero-size bounding rect: IIFE returns error", async () => {
+            appendZeroSizeRefElement("ref_0");
+
+            const handler = loadComputer({ browser: makeBrowserMockWithDomEval(), resolveTab: jest.fn(async () => 42) });
+
+            await expect(
+                handler({ action: "left_click", ref: "ref_0" })
+            ).rejects.toThrow(/no visible bounding rect/);
+        });
     });
 
     describe("type", () => {
