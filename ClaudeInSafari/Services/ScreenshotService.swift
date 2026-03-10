@@ -243,12 +243,21 @@ class DefaultScreenCaptureProvider: ScreenCaptureProvider {
         // and SCKit's callback queue so `completion` is invoked exactly once.
         let onceLock = NSLock()
         var settled = false
+        // cancelLock protects captureToCancel, which is set after captureViaSCStream returns.
+        let cancelLock = NSLock()
+        var captureToCancel: SingleFrameCapture? = nil
         let timeoutItem = DispatchWorkItem {
             onceLock.lock()
             let alreadySettled = settled
             if !alreadySettled { settled = true }
             onceLock.unlock()
-            if !alreadySettled { completion(.failure(.timeout)) }
+            if !alreadySettled {
+                cancelLock.lock()
+                let cap = captureToCancel
+                cancelLock.unlock()
+                cap?.cancel()   // stop SCStream on macOS 13 to avoid a permanent retain
+                completion(.failure(.timeout))
+            }
         }
         DispatchQueue.global().asyncAfter(deadline: .now() + 10, execute: timeoutItem)
 
@@ -278,7 +287,15 @@ class DefaultScreenCaptureProvider: ScreenCaptureProvider {
             }
 
             let windowBounds = window.frame
-            let toolbarPt = self.toolbarHeight(for: window, windowBounds: windowBounds)
+            // AX APIs must be called from the main thread; SCKit callbacks run on its own queue.
+            var toolbarPt: CGFloat = 0
+            if Thread.isMainThread {
+                toolbarPt = self.toolbarHeight(for: window, windowBounds: windowBounds)
+            } else {
+                DispatchQueue.main.sync {
+                    toolbarPt = self.toolbarHeight(for: window, windowBounds: windowBounds)
+                }
+            }
             let contentH = max(1.0, windowBounds.height - toolbarPt)
             let viewportW = Int(windowBounds.width)
             let viewportH = Int(contentH)
@@ -311,12 +328,16 @@ class DefaultScreenCaptureProvider: ScreenCaptureProvider {
                 }
             } else {
                 // macOS 13 (Ventura) — SCStream single-frame fallback.
-                self.captureViaSCStream(
+                // Store the capture so the timeout closure can stop the stream if it fires.
+                let cap = self.captureViaSCStream(
                     filter: filter, config: config,
                     toolbarPx: Int(toolbarPt * scale),
                     viewportW: viewportW, viewportH: viewportH,
                     completion: completeOnce
                 )
+                cancelLock.lock()
+                captureToCancel = cap
+                cancelLock.unlock()
             }
         }
     }
@@ -387,6 +408,7 @@ class DefaultScreenCaptureProvider: ScreenCaptureProvider {
     // MARK: - macOS 13 SCStream fallback
 
     @available(macOS 13.0, *)
+    @discardableResult
     private func captureViaSCStream(
         filter: SCContentFilter,
         config: SCStreamConfiguration,
@@ -394,7 +416,7 @@ class DefaultScreenCaptureProvider: ScreenCaptureProvider {
         viewportW: Int,
         viewportH: Int,
         completion: @escaping (Result<(CGImage, Int, Int), ScreenshotError>) -> Void
-    ) {
+    ) -> SingleFrameCapture {
         let capture = SingleFrameCapture(toolbarPx: toolbarPx, viewportW: viewportW, viewportH: viewportH, completion: completion)
         let stream = SCStream(filter: filter, configuration: config, delegate: capture)
         do {
@@ -409,6 +431,7 @@ class DefaultScreenCaptureProvider: ScreenCaptureProvider {
         } catch {
             completion(.failure(.captureFailed(error.localizedDescription)))
         }
+        return capture
     }
 }
 
@@ -430,6 +453,19 @@ private class SingleFrameCapture: NSObject, SCStreamOutput, SCStreamDelegate {
         self.viewportW = viewportW
         self.viewportH = viewportH
         self.completion = completion
+    }
+
+    /// Called by the outer timeout to stop the stream and release the retain cycle.
+    /// Completion is NOT invoked here — the caller delivers the timeout error itself.
+    func cancel() {
+        capturedLock.lock()
+        let alreadyCaptured = captured
+        if !alreadyCaptured { captured = true }
+        capturedLock.unlock()
+        if !alreadyCaptured {
+            stream?.stopCapture { _ in }
+            stream = nil
+        }
     }
 
     func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of outputType: SCStreamOutputType) {
