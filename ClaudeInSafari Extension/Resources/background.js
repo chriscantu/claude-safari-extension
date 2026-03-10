@@ -10,9 +10,10 @@
  *   4. tools/navigate.js       — registers navigate
  *   5. tools/read-page.js      — registers read_page
  *   6. tools/find.js           — registers find
- *   7. tools/form-input.js    — registers form_input
- *   8. tools/get-page-text.js — registers get_page_text
- *   9. background.js           — this file; starts the poll loop
+ *   7. tools/form-input.js     — registers form_input
+ *   8. tools/get-page-text.js  — registers get_page_text
+ *   9. tools/computer.js       — registers computer
+ *  10. background.js           — this file; starts the poll loop
  */
 
 const POLL_INTERVAL_MS = 100;
@@ -115,6 +116,20 @@ if (typeof browser.alarms !== "undefined") {
             // No-op body. In Safari MV2, registering an onAlarm listener —
             // not the code inside it — prevents the background page from being suspended.
         }
+    });
+
+    // On startup, clean up any stale computer-wait alarm entry left from a prior
+    // background page suspension where ToolRouter timed out before we could respond.
+    // If the alarm already fired (alarms.get returns undefined), remove the storage
+    // entry so the next handleWait call doesn't mistake it for a live resume.
+    browser.storage.session.get("computer-wait-alarmName").then((stored) => {
+        const alarmName = stored["computer-wait-alarmName"];
+        if (!alarmName) return;
+        browser.alarms.get(alarmName).then((alarm) => {
+            if (!alarm) {
+                browser.storage.session.remove("computer-wait-alarmName");
+            }
+        });
     });
 }
 
