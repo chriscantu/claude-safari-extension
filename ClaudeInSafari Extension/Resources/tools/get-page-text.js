@@ -65,12 +65,21 @@ function buildGetPageTextScript() {
             // use try/finally so the container is always removed even if innerText throws.
             if (!document.body) return { text: "" };
             var container = document.createElement("div");
-            container.style.cssText = "position:absolute;left:-9999px;visibility:hidden";
+            container.style.cssText = "position:absolute;left:-9999px;opacity:0";
             container.appendChild(clone);
             document.body.appendChild(container);
             var raw;
             try {
-                raw = clone.innerText || "";
+                // innerText is preferred: it is layout-aware (block elements →
+                // newlines) and excludes display:none content. The ?? operator
+                // falls through only when innerText evaluates to null or
+                // undefined — not when it returns an empty string — so this
+                // does not suppress a genuine empty-page result. In jsdom
+                // (used by the test suite) innerText is not implemented and
+                // the property access returns undefined, so textContent is
+                // used instead. In all target browsers innerText is always
+                // defined, so the textContent branch never fires in production.
+                raw = clone.innerText ?? clone.textContent ?? "";
             } finally {
                 if (document.body.contains(container)) {
                     document.body.removeChild(container);
