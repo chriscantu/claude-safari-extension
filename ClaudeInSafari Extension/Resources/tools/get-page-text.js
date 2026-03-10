@@ -65,12 +65,15 @@ function buildGetPageTextScript() {
             // use try/finally so the container is always removed even if innerText throws.
             if (!document.body) return { text: "" };
             var container = document.createElement("div");
-            container.style.cssText = "position:absolute;left:-9999px;visibility:hidden";
+            container.style.cssText = "position:absolute;left:-9999px;opacity:0";
             container.appendChild(clone);
             document.body.appendChild(container);
             var raw;
             try {
-                raw = clone.innerText || "";
+                // innerText is preferred (layout-aware, excludes display:none).
+                // textContent is the fallback for environments that do not
+                // implement innerText (e.g. jsdom in tests).
+                raw = clone.innerText ?? clone.textContent ?? "";
             } finally {
                 if (document.body.contains(container)) {
                     document.body.removeChild(container);

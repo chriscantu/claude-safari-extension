@@ -93,15 +93,15 @@ Read DOM structure, find elements, fill forms, extract text.
 
 ---
 
-## Next Up — JS Test Infrastructure 🔧
+## JS Test Infrastructure ✅
 
-Before Phase 5 begins, resolve [L6](#deferred--known-issues): switch the JS test suite to `@jest-environment jsdom` so injected IIFEs can be eval'd against a real DOM. This unblocks behavioral tests for Phase 4 tools (priority chain, noise removal, blank-line collapse, truncation) and establishes the test pattern for all future tool IIFEs.
+Resolved [L6](#deferred--known-issues): `get-page-text.test.js` now carries a `@jest-environment jsdom` docblock. Tests T1–T8 use `vm.runInNewContext` to execute the injected IIFE against a real jsdom DOM so the extraction algorithm is actually exercised. `runInjectedScript` was never written, so nothing to remove.
 
 | Item | Status |
 |------|--------|
-| Configure `@jest-environment jsdom` for JS test suite | ⬜ |
-| Replace vacuous `get-page-text` T1–T8 mocks with DOM-based IIFE eval tests | ⬜ |
-| Remove dead `runInjectedScript` helper | ⬜ |
+| Add `@jest-environment jsdom` to `get-page-text.test.js` | ✅ |
+| Replace vacuous T1–T8 mocks with DOM-based IIFE eval tests | ✅ |
+| Remove dead `runInjectedScript` helper (never existed) | ✅ |
 
 ---
 
@@ -161,4 +161,4 @@ Issues from REVIEW.md deferred past the First Build milestone:
 | L3 | Hand-rolled `AnyCodable` edge cases — consider Flight-School/AnyCodable |
 | L4 | Magic number read buffer size in `MCPSocketServer` |
 | L5 | `clientId` duplicated at payload and socket level |
-| L6 | JS tool tests (T1–T8 in `get-page-text.test.js`) mock `scriptResult` rather than eval-ing the injected IIFE in jsdom — `runInjectedScript` helper is dead code. Requires switching Jest env to `@jest-environment jsdom` and eval-ing the IIFE source; blocked until jsdom environment is set up for the JS test suite. Affects: priority chain, blank-line collapse, noise removal, truncation boundary. |
+| ~~L6~~ | ✅ Resolved in `fix/js-test-infrastructure` — `@jest-environment jsdom` docblock added to `get-page-text.test.js`; T1–T8 now eval the IIFE via `vm.runInNewContext` against a real jsdom DOM. |

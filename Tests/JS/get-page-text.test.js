@@ -1,16 +1,28 @@
 /**
+ * @jest-environment jsdom
+ *
+ * WHY jsdom here but not in other test files:
+ * Tests T1–T8 run the injected IIFE (built by buildGetPageTextScript) against
+ * a real DOM so the extraction algorithm — priority chain, noise removal,
+ * blank-line collapse, truncation — is actually exercised. The other tool test
+ * files (find, navigate, form-input, tool-registry) operate purely at the
+ * background-script layer and have no DOM dependencies, so they remain on the
+ * default "node" environment to keep their behaviour unchanged.
+ */
+
+/**
  * Tests for tools/get-page-text.js
  * See Spec 009 (get_page_text).
  *
  * Covers:
- *   T1  — page with <article>: returns article text
- *   T2  — page with <main> but no <article>: returns main text
+ *   T1  — page with <article>: returns article text, not surrounding body text
+ *   T2  — page with <main> but no single <article>: returns main text
  *   T3  — page with only <body> (body fallback): returns body text
  *   T4  — multiple consecutive blank lines collapsed to one
  *   T5  — <script> content excluded from output
  *   T6  — aria-hidden section excluded
  *   T7  — text > 100 000 chars: truncated with "[content truncated]"
- *   T8  — empty page: returns empty string (no error)
+ *   T8  — empty body: returns empty string (no error)
  *   T9  — tab not accessible: classifyExecuteScriptError wraps with guidance
  *   T10 — virtualTabId forwarded to resolveTab
  *   T11 — executeScript returns no results: throws no-result error
@@ -31,6 +43,35 @@
 // Helpers
 // ---------------------------------------------------------------------------
 
+/**
+ * Browser mock that actually runs the injected IIFE code string against the
+ * live jsdom document. Used by T1–T8 so the extraction algorithm runs for
+ * real instead of returning a pre-canned scriptResult.
+ *
+ * vm.runInNewContext creates a fresh V8 sandbox seeded with jsdom's live
+ * `document` object. The IIFE runs inside that sandbox with full access to
+ * document.querySelectorAll, document.createElement, document.body etc.
+ * because all those methods are JavaScript functions that close over jsdom's
+ * internal state — they work correctly regardless of which V8 context calls them.
+ * `code` is always the output of buildGetPageTextScript() — our own controlled
+ * source — so executing it here is safe.
+ */
+function makeBrowserMockWithDomEval() {
+    const vm = require("vm");
+    return {
+        tabs: {
+            executeScript: jest.fn(async (_tabId, { code }) => {
+                return [vm.runInNewContext(code, { document: globalThis.document })];
+            }),
+        },
+    };
+}
+
+/**
+ * Browser mock that returns a pre-set scriptResult without running the IIFE.
+ * Used by T9–T20 which test the handler's plumbing, error handling, and
+ * source-string properties — not the DOM extraction algorithm.
+ */
 function makeBrowserMock(opts = {}) {
     const { scriptResult, scriptError = null } = opts;
     return {
@@ -42,12 +83,6 @@ function makeBrowserMock(opts = {}) {
         },
     };
 }
-
-// NOTE: Tests T1-T8 mock scriptResult at the browser layer rather than
-// eval-ing the injected IIFE in a jsdom DOM. The extraction algorithm
-// (priority chain, noise removal, blank-line collapse, truncation) is
-// therefore not exercised here. This is tracked as ROADMAP.md L6 and
-// will be addressed when the JS test suite is configured for jsdom.
 
 // ---------------------------------------------------------------------------
 // Module loader
@@ -72,11 +107,32 @@ function loadGetPageText({ browser, resolveTab }) {
 }
 
 // ---------------------------------------------------------------------------
+// DOM fixture helpers — build test DOMs without innerHTML
+// ---------------------------------------------------------------------------
+
+function appendArticle(text) {
+    const el = document.createElement("article");
+    el.textContent = text;
+    document.body.appendChild(el);
+    return el;
+}
+
+function appendElement(tag, text, parent) {
+    const el = document.createElement(tag);
+    el.textContent = text;
+    (parent || document.body).appendChild(el);
+    return el;
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
 describe("get_page_text tool", () => {
     afterEach(() => {
+        // Clear DOM state so T1–T8 fixtures don't bleed between tests.
+        document.body.replaceChildren();
+
         jest.resetModules();
         delete globalThis.browser;
         delete globalThis.resolveTab;
@@ -85,88 +141,121 @@ describe("get_page_text tool", () => {
         delete globalThis.executeTool;
     });
 
-    test("T1 — article present: returns article text", async () => {
+    // -------------------------------------------------------------------------
+    // T1–T8: DOM extraction algorithm (IIFE runs in real jsdom document)
+    // -------------------------------------------------------------------------
+
+    test("T1 — article present: returns article text, not surrounding body text", async () => {
+        appendArticle("Article content");
+        appendElement("p", "Body-only text");
         const resolveTab = jest.fn(async () => 42);
-        const browser = makeBrowserMock({ scriptResult: [{ text: "Article content" }] });
-        const handler = loadGetPageText({ browser, resolveTab });
+        const handler = loadGetPageText({ browser: makeBrowserMockWithDomEval(), resolveTab });
 
         const result = await handler({});
 
-        expect(result).toBe("Article content");
+        expect(result).toContain("Article content");
+        expect(result).not.toContain("Body-only text");
     });
 
-    test("T2 — <main> but no <article>: returns main text", async () => {
+    test("T2 — <main> but no single <article>: returns main text", async () => {
+        // Two <article> elements → falls through to <main>
+        appendArticle("A");
+        appendArticle("B");
+        appendElement("main", "Main content");
         const resolveTab = jest.fn(async () => 42);
-        const browser = makeBrowserMock({ scriptResult: [{ text: "Main content" }] });
-        const handler = loadGetPageText({ browser, resolveTab });
+        const handler = loadGetPageText({ browser: makeBrowserMockWithDomEval(), resolveTab });
 
         const result = await handler({});
 
-        expect(result).toBe("Main content");
+        expect(result).toContain("Main content");
     });
 
-    test("T3 — body fallback: returns body text", async () => {
+    test("T3 — body fallback: returns body text when no article or main", async () => {
+        appendElement("p", "Body content");
         const resolveTab = jest.fn(async () => 42);
-        const browser = makeBrowserMock({ scriptResult: [{ text: "Body content" }] });
-        const handler = loadGetPageText({ browser, resolveTab });
+        const handler = loadGetPageText({ browser: makeBrowserMockWithDomEval(), resolveTab });
 
         const result = await handler({});
 
-        expect(result).toBe("Body content");
+        expect(result).toContain("Body content");
     });
 
-    test("T4 — multiple blank lines collapsed to one", async () => {
+    test("T4 — multiple consecutive blank lines collapsed to one", async () => {
+        // Literal newlines injected via textContent to bypass HTML whitespace collapsing.
+        const article = document.createElement("article");
+        article.textContent = "Line 1\n\n\n\nLine 2";
+        document.body.appendChild(article);
         const resolveTab = jest.fn(async () => 42);
-        const browser = makeBrowserMock({ scriptResult: [{ text: "Line 1\n\nLine 2" }] });
-        const handler = loadGetPageText({ browser, resolveTab });
+        const handler = loadGetPageText({ browser: makeBrowserMockWithDomEval(), resolveTab });
 
         const result = await handler({});
 
-        // Single blank line between paragraphs
         expect(result).toBe("Line 1\n\nLine 2");
     });
 
-    test("T5 — <script> content excluded", async () => {
+    test("T5 — <script> content excluded from output", async () => {
+        const article = document.createElement("article");
+        const textNode = document.createTextNode("Visible text");
+        article.appendChild(textNode);
+        const script = document.createElement("script");
+        script.textContent = 'alert("hidden")';
+        article.appendChild(script);
+        document.body.appendChild(article);
         const resolveTab = jest.fn(async () => 42);
-        const browser = makeBrowserMock({ scriptResult: [{ text: "Visible text" }] });
-        const handler = loadGetPageText({ browser, resolveTab });
+        const handler = loadGetPageText({ browser: makeBrowserMockWithDomEval(), resolveTab });
 
         const result = await handler({});
 
+        expect(result).toContain("Visible text");
         expect(result).not.toContain("alert(");
-        expect(result).toBe("Visible text");
     });
 
     test("T6 — aria-hidden section excluded", async () => {
+        const article = document.createElement("article");
+        const visible = document.createElement("p");
+        visible.textContent = "Visible";
+        article.appendChild(visible);
+        const hidden = document.createElement("div");
+        hidden.setAttribute("aria-hidden", "true");
+        hidden.textContent = "Hidden text";
+        article.appendChild(hidden);
+        document.body.appendChild(article);
         const resolveTab = jest.fn(async () => 42);
-        const browser = makeBrowserMock({ scriptResult: [{ text: "Visible" }] });
-        const handler = loadGetPageText({ browser, resolveTab });
+        const handler = loadGetPageText({ browser: makeBrowserMockWithDomEval(), resolveTab });
 
         const result = await handler({});
 
-        expect(result).toBe("Visible");
+        expect(result).toContain("Visible");
+        expect(result).not.toContain("Hidden text");
     });
 
     test("T7 — text > 100 000 chars: truncated with [content truncated]", async () => {
+        const article = document.createElement("article");
+        article.textContent = "x".repeat(100001);
+        document.body.appendChild(article);
         const resolveTab = jest.fn(async () => 42);
-        const longText = "x".repeat(100001) + "\n[content truncated]";
-        const browser = makeBrowserMock({ scriptResult: [{ text: longText }] });
-        const handler = loadGetPageText({ browser, resolveTab });
+        const handler = loadGetPageText({ browser: makeBrowserMockWithDomEval(), resolveTab });
 
         const result = await handler({});
 
         expect(result).toContain("[content truncated]");
+        // Slice is at 100 000 chars; sentinel "\n[content truncated]" adds 20 more.
+        expect(result.length).toBe(100020);
     });
 
-    test("T8 — empty page: returns empty string", async () => {
+    test("T8 — empty body: returns empty string", async () => {
+        // document.body has no children (cleared by afterEach from prior test).
         const resolveTab = jest.fn(async () => 42);
-        const browser = makeBrowserMock({ scriptResult: [{ text: "" }] });
-        const handler = loadGetPageText({ browser, resolveTab });
+        const handler = loadGetPageText({ browser: makeBrowserMockWithDomEval(), resolveTab });
 
         const result = await handler({});
 
         expect(result).toBe("");
     });
+
+    // -------------------------------------------------------------------------
+    // T9–T20: handler plumbing, error handling, source-string checks
+    // -------------------------------------------------------------------------
 
     test("T9 — restricted URL: classifyExecuteScriptError wraps with guidance", async () => {
         const resolveTab = jest.fn(async () => 42);
