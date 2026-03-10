@@ -83,6 +83,9 @@ class ScreenshotService {
     }
 
     /// Capture a full screenshot of the Safari window.
+    /// `tabId` is accepted for API consistency but not used for window targeting:
+    /// SCKit operates at the OS window level with no tab-to-window mapping available
+    /// on the native side. The largest Safari window is always captured.
     func captureScreenshot(tabId: Int?, completion: @escaping (Result<CapturedImage, ScreenshotError>) -> Void) {
         guard captureProvider.checkPermission() else {
             completion(.failure(.permissionDenied))
@@ -117,6 +120,7 @@ class ScreenshotService {
 
     /// Capture a zoomed region of the Safari window.
     /// `region` must be [x0, y0, x1, y1] in viewport pixels (web content area coords).
+    /// `tabId` is accepted for API consistency but not used — see `captureScreenshot`.
     func captureZoom(tabId: Int?, region: [Int]?, completion: @escaping (Result<CapturedImage, ScreenshotError>) -> Void) {
         guard let region = region else {
             completion(.failure(.invalidRegion("region parameter is required for zoom action")))
@@ -148,7 +152,7 @@ class ScreenshotService {
             case .failure(let error):
                 completion(.failure(error))
             case .success(let (cgImage, viewportWidth, viewportHeight)):
-                guard x0 >= 0, y0 >= 0, x1 <= viewportWidth, y1 <= viewportHeight else {
+                guard x1 <= viewportWidth, y1 <= viewportHeight else {
                     completion(.failure(.invalidRegion("Invalid region: [\(x0),\(y0),\(x1),\(y1)] out of bounds for viewport \(viewportWidth)x\(viewportHeight)")))
                     return
                 }
@@ -383,13 +387,15 @@ class DefaultScreenCaptureProvider: ScreenCaptureProvider {
                 streamConfig.width = Int(windowBounds.width * scale)
                 streamConfig.height = Int(windowBounds.height * scale)
                 streamConfig.pixelFormat = kCVPixelFormatType_32BGRA
+                // Hold cancelLock across captureViaSCStream so the timeout can never
+                // observe a nil captureToCancel after the stream has started.
+                cancelLock.lock()
                 let cap = self.captureViaSCStream(
                     filter: windowFilter, config: streamConfig,
                     toolbarPx: Int(toolbarPt * scale),
                     viewportW: viewportW, viewportH: viewportH,
                     completion: completeOnce
                 )
-                cancelLock.lock()
                 captureToCancel = cap
                 cancelLock.unlock()
             }
@@ -529,7 +535,7 @@ private class SingleFrameCapture: NSObject, SCStreamOutput, SCStreamDelegate {
         if !alreadyCaptured { captured = true }
         capturedLock.unlock()
         guard !alreadyCaptured else { return }
-        stream.stopCapture { _ in }
+        stream.stopCapture { [weak self] _ in self?.stream = nil }  // break retain cycle
 
         guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else {
             completion(.failure(.captureFailed("No pixel buffer in SCStream frame")))
@@ -557,6 +563,7 @@ private class SingleFrameCapture: NSObject, SCStreamOutput, SCStreamDelegate {
         if !alreadyCaptured { captured = true }
         capturedLock.unlock()
         guard !alreadyCaptured else { return }
+        self.stream = nil  // break retain cycle
         completion(.failure(.captureFailed(error.localizedDescription)))
     }
 }

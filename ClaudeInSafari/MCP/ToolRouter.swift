@@ -102,7 +102,7 @@ class ToolRouter: MCPSocketServerDelegate {
         let tabId = arguments["tabId"] as? Int
         if action == "screenshot" {
             screenshotService.captureScreenshot(tabId: tabId) { [weak self] result in
-                self?.sendScreenshotResult(result, action: action, id: id, to: clientId)
+                self?.sendScreenshotResult(result, id: id, to: clientId)
             }
         } else {
             // zoom — parse region as [Int], tolerating JSON numbers arriving as Double or NSNumber
@@ -121,20 +121,23 @@ class ToolRouter: MCPSocketServerDelegate {
                 return nil
             }()
             screenshotService.captureZoom(tabId: tabId, region: region) { [weak self] result in
-                self?.sendScreenshotResult(result, action: action, id: id, to: clientId)
+                self?.sendScreenshotResult(result, region: region, id: id, to: clientId)
             }
         }
     }
 
-    private func sendScreenshotResult(_ result: Result<CapturedImage, ScreenshotError>, action: String, id: Any?, to clientId: String) {
+    private func sendScreenshotResult(_ result: Result<CapturedImage, ScreenshotError>, region: [Int]? = nil, id: Any?, to clientId: String) {
         switch result {
         case .failure(let error):
             sendError(id: id, code: -32000, message: error.userMessage, to: clientId)
         case .success(let captured):
             let base64 = captured.data.base64EncodedString()
-            let label = action == "zoom"
-                ? "Zoomed region (imageId: \(captured.imageId))."
-                : "Screenshot captured (imageId: \(captured.imageId)). Use this imageId with upload_image."
+            let label: String
+            if let r = region {
+                label = "Zoomed region [\(r[0]),\(r[1]),\(r[2]),\(r[3])] (imageId: \(captured.imageId))."
+            } else {
+                label = "Screenshot captured (imageId: \(captured.imageId)). Use this imageId with upload_image."
+            }
             let content: [[String: Any]] = [
                 ["type": "image", "data": base64, "mediaType": "image/png"],
                 ["type": "text", "text": label]
