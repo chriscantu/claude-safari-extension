@@ -138,7 +138,7 @@ class ToolRouter: MCPSocketServerDelegate {
                 label = "Screenshot captured (imageId: \(captured.imageId)). Use this imageId with upload_image."
             }
             let content: [[String: Any]] = [
-                ["type": "image", "data": base64, "mediaType": "image/png"],
+                ["type": "image", "data": base64, "mimeType": "image/png"],
                 ["type": "text", "text": label]
             ]
             sendResult(id: id, result: ["content": content], to: clientId)
