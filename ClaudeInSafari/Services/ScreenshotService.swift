@@ -89,7 +89,10 @@ class ScreenshotService {
             return
         }
         captureProvider.captureWindow { [weak self] result in
-            guard let self = self else { return }
+            guard let self = self else {
+                completion(.failure(.captureFailed("Service deallocated")))
+                return
+            }
             switch result {
             case .failure(let error):
                 completion(.failure(error))
@@ -124,6 +127,10 @@ class ScreenshotService {
             return
         }
         let (x0, y0, x1, y1) = (region[0], region[1], region[2], region[3])
+        guard x0 >= 0, y0 >= 0 else {
+            completion(.failure(.invalidRegion("Invalid region: coordinates must be non-negative")))
+            return
+        }
         guard x0 < x1, y0 < y1 else {
             completion(.failure(.invalidRegion("Invalid region: coordinates out of bounds")))
             return
@@ -133,7 +140,10 @@ class ScreenshotService {
             return
         }
         captureProvider.captureWindow { [weak self] result in
-            guard let self = self else { return }
+            guard let self = self else {
+                completion(.failure(.captureFailed("Service deallocated")))
+                return
+            }
             switch result {
             case .failure(let error):
                 completion(.failure(error))
@@ -291,9 +301,11 @@ class DefaultScreenCaptureProvider: ScreenCaptureProvider {
                         return
                     }
                     // Crop out the toolbar (top N pixels in the captured image).
+                    // CGImage.cropping(to:) uses a bottom-left origin, so the toolbar
+                    // occupies y=(contentHeight)..<image.height. Keep y=0..contentHeight.
                     let toolbarPx = Int(toolbarPt * scale)
                     let contentHeight = image.height - toolbarPx
-                    let cropRect = CGRect(x: 0, y: toolbarPx, width: image.width, height: max(1, contentHeight))
+                    let cropRect = CGRect(x: 0, y: 0, width: image.width, height: max(1, contentHeight))
                     let cropped = image.cropping(to: cropRect) ?? image
                     completeOnce(.success((cropped, viewportW, viewportH)))
                 }
@@ -329,9 +341,11 @@ class DefaultScreenCaptureProvider: ScreenCaptureProvider {
         let app = AXUIElementCreateApplication(pid)
         var mainWindowRef: CFTypeRef?
         guard AXUIElementCopyAttributeValue(app, kAXMainWindowAttribute as CFString, &mainWindowRef) == AXError.success,
-              CFGetTypeID(mainWindowRef!) == AXUIElementGetTypeID() else { return nil }
+              let mainWindowRaw = mainWindowRef,
+              CFGetTypeID(mainWindowRaw) == AXUIElementGetTypeID() else { return nil }
+        let mainWindow = mainWindowRaw as! AXUIElement  // safe: type confirmed by CFGetTypeID above
 
-        guard let webArea = findAXWebArea(in: mainWindowRef as! AXUIElement, depth: 0) else { return nil }
+        guard let webArea = findAXWebArea(in: mainWindow, depth: 0) else { return nil }
 
         var frameRef: CFTypeRef?
         guard AXUIElementCopyAttributeValue(webArea, "AXFrame" as CFString, &frameRef) == AXError.success,
@@ -339,7 +353,9 @@ class DefaultScreenCaptureProvider: ScreenCaptureProvider {
 
         var contentRect = CGRect.zero
         // AXFrame is in "flipped" screen coordinates: origin top-left of primary screen, Y↓.
-        guard AXValueGetValue(frameValue as! AXValue, AXValueType.cgRect, &contentRect) else { return nil }
+        guard CFGetTypeID(frameValue) == AXValueGetTypeID() else { return nil }
+        let axValue = frameValue as! AXValue  // safe: type confirmed by CFGetTypeID above
+        guard AXValueGetValue(axValue, AXValueType.cgRect, &contentRect) else { return nil }
 
         // Convert AX y (flipped, from screen top) to the content's distance from the window top.
         // NS window.frame.origin.y is the bottom of the window in NS coords (Y↑).
@@ -386,6 +402,7 @@ class DefaultScreenCaptureProvider: ScreenCaptureProvider {
             capture.stream = stream
             stream.startCapture { error in
                 if let error = error {
+                    capture.stream = nil  // break retain cycle on startCapture failure
                     completion(.failure(.captureFailed(error.localizedDescription)))
                 }
             }

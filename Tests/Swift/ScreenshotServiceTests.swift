@@ -262,6 +262,39 @@ final class ScreenshotServiceTests: XCTestCase {
         waitForExpectations(timeout: 1)
     }
 
+    // MARK: - T17: zoom image is stored and retrievable
+
+    func testZoomStoresImageId() {
+        let exp = expectation(description: "zoom stores imageId")
+        var capturedId: String?
+        service.captureZoom(tabId: nil, region: [0, 0, 50, 50]) { result in
+            if case .success(let img) = result {
+                capturedId = img.imageId
+                exp.fulfill()
+            } else {
+                XCTFail("Expected success, got \(result)")
+            }
+        }
+        waitForExpectations(timeout: 1)
+        guard let id = capturedId else { return XCTFail("No imageId from zoom") }
+        XCTAssertNotNil(service.retrieveImage(imageId: id), "Zoom image should be stored and retrievable")
+        XCTAssertNotNil(UUID(uuidString: id), "Zoom imageId should be a valid UUID")
+    }
+
+    // MARK: - Negative coordinates fail before capture
+
+    func testZoomNegativeCoordinatesFails() {
+        let exp = expectation(description: "negative coordinates")
+        service.captureZoom(tabId: nil, region: [-10, -10, 100, 100]) { result in
+            if case .failure(.invalidRegion) = result {
+                exp.fulfill()
+            } else {
+                XCTFail("Expected invalidRegion, got \(result)")
+            }
+        }
+        waitForExpectations(timeout: 1)
+    }
+
     // MARK: - Multiple captures produce unique imageIds
 
     func testCapturesProduceUniqueIds() {
