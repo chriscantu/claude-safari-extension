@@ -109,10 +109,10 @@ struct AnyCodable: Codable {
         let container = try decoder.singleValueContainer()
         if container.decodeNil() {
             value = NSNull()
-        } else if let bool = try? container.decode(Bool.self) {
-            value = bool
         } else if let int = try? container.decode(Int.self) {
             value = int
+        } else if let bool = try? container.decode(Bool.self) {
+            value = bool
         } else if let double = try? container.decode(Double.self) {
             value = double
         } else if let string = try? container.decode(String.self) {
@@ -131,6 +131,20 @@ struct AnyCodable: Codable {
         switch value {
         case is NSNull:
             try container.encodeNil()
+        case let number as NSNumber:
+            // JSONSerialization returns NSNumber for both JSON booleans and numbers.
+            // Use CFBoolean identity to distinguish true JSON booleans from integers,
+            // since `NSNumber(1) as Bool` succeeds in Swift due to ObjC bridging.
+            if CFGetTypeID(number) == CFBooleanGetTypeID() {
+                try container.encode(number.boolValue)
+            } else {
+                let d = number.doubleValue
+                if d == Double(number.intValue) {
+                    try container.encode(number.intValue)
+                } else {
+                    try container.encode(d)
+                }
+            }
         case let bool as Bool:
             try container.encode(bool)
         case let int as Int:
