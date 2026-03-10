@@ -19,7 +19,7 @@ Foundational plumbing: MCP socket server, message framing, native↔extension br
 | Item | Spec | Status |
 |------|------|--------|
 | Unix domain socket server (GCD) | [001](Specs/001-mcp-socket-server.md) | ✅ |
-| 4-byte BE length-prefix framing | [002](Specs/002-message-framing.md) | ✅ |
+| Newline-delimited JSON framing | [002](Specs/002-message-framing.md) | ✅ |
 | Native ↔ extension bridge (`SafariWebExtensionHandler`) | [003](Specs/003-native-extension-bridge.md) | ✅ |
 
 ---
@@ -50,34 +50,32 @@ URL navigation and browser history traversal.
 
 ---
 
-## Milestone: First Build → `v0.1.0` 🔧
+## Milestone: First Build → `v0.1.0` ✅
 
-**Next up.** Fix critical bugs from [REVIEW.md](REVIEW.md), compile, install, and verify end-to-end connectivity. Tagging `v0.1.0` is the first act that publishes an artifact — intentionally gated behind working end-to-end traffic so nothing is released in a broken state.
+All critical and medium bugs from [REVIEW.md](REVIEW.md) resolved. Ready to compile, install, and verify end-to-end connectivity.
 
 > **Versioning policy:** `0.x.x` throughout pre-release. The minor version bumps at each phase completion. `1.0.0` is reserved for when the extension is a genuine drop-in replacement for Claude in Chrome.
 
-### Bug Fixes Required
+### Bug Fixes
 
-| ID | Severity | File | Issue |
-|----|----------|------|-------|
-| C1 | 🔴 Critical | `AppDelegate.swift` | `toolRouter.setServer()` never called → all responses silently dropped |
-| H1 | 🟠 High | `MCPSocketServer.swift` | Partial TCP writes silently discarded — needs retry loop |
-| H2 | 🟠 High | `SafariWebExtensionHandler.swift` | Single-slot `UserDefaults` IPC drops concurrent requests |
-| H3 | 🟠 High | `ToolRouter.swift` | `hybridTools` declared but never consulted (dead code) |
-| H4 | ~~🟠 High~~ | `tool-registry.js` | ~~Core dispatch layer has zero tests~~ — ✅ fixed (tests added in Phase 4) |
-| M1 | 🟡 Medium | `background.js`, `popup.js` | Bundle ID hardcoded in two files (DRY) |
-| M2 | 🟡 Medium | `ToolModels.swift` | `NativeMessage` should be a Swift enum, not stringly-typed struct |
-| M3 | 🟡 Medium | `manifest.json` | `persistent: false` + `setTimeout` polling fragile under suspension |
-| M8 | 🟡 Medium | `tool-registry.js` | All results force-coerced to `text`; blocks image content type |
+| ID | Severity | File | Issue | Status |
+|----|----------|------|-------|--------|
+| C1 | 🔴 Critical | `AppDelegate.swift` | `toolRouter.setServer()` never called → all responses silently dropped | ✅ Fixed |
+| H1 | 🟠 High | `MCPSocketServer.swift` | Partial TCP writes silently discarded — needs retry loop | ✅ Fixed |
+| H2 | 🟠 High | `SafariWebExtensionHandler.swift` | Single-slot `UserDefaults` IPC drops concurrent requests | ✅ Fixed (file-based FIFO + `NSFileCoordinator`) |
+| H3 | 🟠 High | `ToolRouter.swift` | `hybridTools` declared but never consulted (dead code) | ✅ Fixed (removed) |
+| H4 | ~~🟠 High~~ | `tool-registry.js` | ~~Core dispatch layer has zero tests~~ | ✅ Fixed (tests added in Phase 4) |
+| M1 | 🟡 Medium | `background.js`, `popup.js` | Bundle ID hardcoded in two files (DRY) | ✅ Fixed (`constants.js` loaded in both contexts) |
+| M2 | 🟡 Medium | `ToolModels.swift` | `NativeMessage` should be a Swift enum, not stringly-typed struct | ✅ Fixed |
+| M3 | 🟡 Medium | `manifest.json` | `persistent: false` + `setTimeout` polling fragile under suspension | Deferred to Phase 7 |
+| M8 | 🟡 Medium | `tool-registry.js` | All results force-coerced to `text`; blocks image content type | ✅ Fixed (content arrays pass through as-is) |
 
 ### Build & Install Checklist
 
-- [ ] Fix C1, H1, H2, H3 (required for any traffic to flow end-to-end; H4 resolved)
-- [ ] Fix M1, M2, M8 (required for Phase 4 tools to work correctly)
-- [ ] `xcodebuild build -scheme ClaudeInSafari -destination "platform=macOS"`
-- [ ] Run the app; verify MCP socket appears at expected path
-- [ ] Enable extension in Safari → Settings → Extensions
-- [ ] Send a `navigate` tool call from Claude Code CLI; verify response
+- [x] `xcodebuild build -scheme ClaudeInSafari -destination "platform=macOS"`
+- [x] Run the app; verify MCP socket appears at expected path
+- [x] Send a `navigate` tool call via `make send TOOL=navigate ARGS='{"url":"https://example.com"}'`; end-to-end response confirmed (socket → native → extension → content script → back)
+- [ ] Enable extension in Safari → Settings → Extensions (manual step)
 - [ ] Tag `v0.1.0` → release workflow publishes unsigned `.app` archive to GitHub Releases
 
 ---

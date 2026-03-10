@@ -109,10 +109,13 @@ struct AnyCodable: Codable {
         let container = try decoder.singleValueContainer()
         if container.decodeNil() {
             value = NSNull()
-        } else if let bool = try? container.decode(Bool.self) {
-            value = bool
+        // Decode Int before Bool: Swift's JSONDecoder decodes JSON booleans
+        // as Int (true→1) via NSNumber bridging. Trying Int first is safe
+        // because decode(Int.self) rejects JSON true/false tokens.
         } else if let int = try? container.decode(Int.self) {
             value = int
+        } else if let bool = try? container.decode(Bool.self) {
+            value = bool
         } else if let double = try? container.decode(Double.self) {
             value = double
         } else if let string = try? container.decode(String.self) {
@@ -131,12 +134,24 @@ struct AnyCodable: Codable {
         switch value {
         case is NSNull:
             try container.encodeNil()
-        case let bool as Bool:
-            try container.encode(bool)
-        case let int as Int:
-            try container.encode(int)
-        case let double as Double:
-            try container.encode(double)
+        case let number as NSNumber:
+            // Bool, Int, and Double stored in Any all bridge to NSNumber via ObjC,
+            // so pattern-matching `as Bool` or `as Int` is unreliable (e.g.,
+            // NSNumber(1) matches both). Use CFBoolean type identity to distinguish
+            // true JSON booleans from numeric values.
+            if CFGetTypeID(number) == CFBooleanGetTypeID() {
+                try container.encode(number.boolValue)
+            } else {
+                // NSNumber does not distinguish Int(1) from Double(1.0) at the
+                // CFTypeID level. We prefer Int when the value is representable
+                // without loss, matching JSON's typical treatment of whole numbers.
+                let d = number.doubleValue
+                if d.isFinite && d == Double(number.intValue) {
+                    try container.encode(number.intValue)
+                } else {
+                    try container.encode(d)
+                }
+            }
         case let string as String:
             try container.encode(string)
         case let array as [Any]:

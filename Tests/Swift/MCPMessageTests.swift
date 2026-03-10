@@ -225,6 +225,68 @@ final class MCPMessageTests: XCTestCase {
         XCTAssertEqual(response.error?.content.first?.text, "Malformed extension response")
     }
 
+    // MARK: - AnyCodable NSNumber/Bool coercion regression
+
+    /// NSNumber(value: 1) must encode as JSON integer 1, not boolean true.
+    /// Regression test for the ObjC bridging bug where integer args like tabId
+    /// were re-encoded as JSON booleans through the Swift native bridge.
+    func testAnyCodableEncodesNSNumberIntegerAsInt() throws {
+        let value = AnyCodable(NSNumber(value: 1))
+        let data = try JSONEncoder().encode(value)
+        XCTAssertEqual(String(data: data, encoding: .utf8), "1")
+    }
+
+    func testAnyCodableEncodesNSNumberZeroAsInt() throws {
+        let value = AnyCodable(NSNumber(value: 0))
+        let data = try JSONEncoder().encode(value)
+        XCTAssertEqual(String(data: data, encoding: .utf8), "0")
+    }
+
+    func testAnyCodableEncodesNSBooleanTrueAsBool() throws {
+        let value = AnyCodable(NSNumber(value: true))
+        let data = try JSONEncoder().encode(value)
+        XCTAssertEqual(String(data: data, encoding: .utf8), "true")
+    }
+
+    func testAnyCodableEncodesNSBooleanFalseAsBool() throws {
+        let value = AnyCodable(NSNumber(value: false))
+        let data = try JSONEncoder().encode(value)
+        XCTAssertEqual(String(data: data, encoding: .utf8), "false")
+    }
+
+    func testAnyCodableEncodesNSNumberDoubleAsDouble() throws {
+        let value = AnyCodable(NSNumber(value: 3.14))
+        let data = try JSONEncoder().encode(value)
+        let str = String(data: data, encoding: .utf8)!
+        XCTAssertTrue(str.starts(with: "3.14"))
+    }
+
+    /// End-to-end: a QueuedToolRequest with integer tabId must not coerce to boolean.
+    func testQueuedToolRequestPreservesIntegerTabId() throws {
+        let request = QueuedToolRequest(
+            requestId: "req-tab",
+            tool: "navigate",
+            args: ["tabId": AnyCodable(NSNumber(value: 1)), "url": AnyCodable("https://example.com")],
+            context: nil
+        )
+        let data = try JSONEncoder().encode(request)
+        let json = try JSONSerialization.jsonObject(with: data) as! [String: Any]
+        let args = json["args"] as! [String: Any]
+        XCTAssertEqual(args["tabId"] as? Int, 1)
+    }
+
+    /// Round-trip from raw JSON: integers stay integers, booleans stay booleans.
+    func testAnyCodableRoundTripPreservesTypesFromRawJSON() throws {
+        let json = #"{"flag": true, "count": 1, "off": false, "zero": 0}"#.data(using: .utf8)!
+        let decoded = try JSONDecoder().decode([String: AnyCodable].self, from: json)
+        let reencoded = try JSONEncoder().encode(decoded)
+        let result = try JSONSerialization.jsonObject(with: reencoded) as! [String: Any]
+        XCTAssertEqual(result["flag"] as? Bool, true)
+        XCTAssertEqual(result["count"] as? Int, 1)
+        XCTAssertEqual(result["off"] as? Bool, false)
+        XCTAssertEqual(result["zero"] as? Int, 0)
+    }
+
     func testDecodeExtensionResponseAllBlocksMalformed() {
         let router = ToolRouter()
         // Content array exists but all blocks are missing the required "type" key
