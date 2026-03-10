@@ -372,17 +372,90 @@ describe("computer tool", () => {
     });
 
     describe("wait", () => {
-        // Task 6 — T10, T21, T28
         // wait uses setTimeout (≤20s) or browser.alarms (>20s) in the handler layer.
         // No executeScript — use makeBrowserMock(), not makeBrowserMockWithDomEval().
+
+        test("T10 — wait 0.001 seconds returns confirmation", async () => {
+            const handler = loadComputer({ browser: makeBrowserMock(), resolveTab: jest.fn(async () => 42) });
+
+            const result = await handler({ action: "wait", duration: 0.001 });
+
+            expect(result).toBe("Waited 0.001 seconds");
+        });
+
+        test("T21 — wait duration > 30: rejects", async () => {
+            const handler = loadComputer({ browser: makeBrowserMock(), resolveTab: jest.fn(async () => 42) });
+
+            await expect(handler({ action: "wait", duration: 60 })).rejects.toThrow(/0 and 30 seconds/);
+        });
+
+        test("T28 — two concurrent wait calls each resolve independently", async () => {
+            const handler = loadComputer({ browser: makeBrowserMock(), resolveTab: jest.fn(async () => 42) });
+
+            const [r1, r2] = await Promise.all([
+                handler({ action: "wait", duration: 0.001 }),
+                handler({ action: "wait", duration: 0.001 }),
+            ]);
+
+            expect(r1).toBe("Waited 0.001 seconds");
+            expect(r2).toBe("Waited 0.001 seconds");
+        });
     });
 
     describe("scroll", () => {
-        // Task 6 — T11, T12, T23
+        test("T11 — scroll down 3 ticks at coordinate: returns confirmation", async () => {
+            const el = document.body;
+            el.scrollBy = jest.fn();
+            document.elementFromPoint = jest.fn(() => el);
+
+            const handler = loadComputer({ browser: makeBrowserMockWithDomEval(), resolveTab: jest.fn(async () => 42) });
+
+            const result = await handler({ action: "scroll", coordinate: [400, 300], scroll_direction: "down" });
+
+            expect(result).toContain("down");
+            expect(result).toContain("3");
+            expect(result).toContain("400");
+        });
+
+        test("T12 — scroll up 5 ticks with no coordinate: defaults to viewport center", async () => {
+            const el = document.body;
+            el.scrollBy = jest.fn();
+            document.elementFromPoint = jest.fn(() => el);
+
+            const handler = loadComputer({ browser: makeBrowserMockWithDomEval(), resolveTab: jest.fn(async () => 42) });
+
+            const result = await handler({ action: "scroll", scroll_direction: "up", scroll_amount: 5 });
+
+            expect(result).toContain("up");
+            expect(result).toContain("5");
+            expect(result).toContain("viewport center");
+        });
+
+        test("T23 — scroll with no coordinate: does not reject", async () => {
+            const el = document.body;
+            el.scrollBy = jest.fn();
+            document.elementFromPoint = jest.fn(() => el);
+
+            const handler = loadComputer({ browser: makeBrowserMockWithDomEval(), resolveTab: jest.fn(async () => 42) });
+
+            await expect(
+                handler({ action: "scroll", scroll_direction: "down" })
+            ).resolves.toBeDefined();
+        });
     });
 
     describe("scroll_to", () => {
-        // Task 6 — T13
+        test("T13 — scroll_to ref: calls scrollIntoView on the element", async () => {
+            const el = appendRefElement("ref_20");
+            el.scrollIntoView = jest.fn();
+
+            const handler = loadComputer({ browser: makeBrowserMockWithDomEval(), resolveTab: jest.fn(async () => 42) });
+
+            const result = await handler({ action: "scroll_to", ref: "ref_20" });
+
+            expect(el.scrollIntoView).toHaveBeenCalledWith({ behavior: "smooth", block: "center" });
+            expect(result).toContain("ref_20");
+        });
     });
 
     describe("left_click_drag", () => {
