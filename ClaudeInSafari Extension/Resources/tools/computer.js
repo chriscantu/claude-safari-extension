@@ -346,11 +346,12 @@ function buildDragScript(startCoordinate, endCoordinate) {
             var startEl = document.elementFromPoint(sx, sy) || document.body;
             var endEl   = document.elementFromPoint(ex, ey) || document.body;
 
-            startEl.dispatchEvent(new MouseEvent("pointerdown", mkOpts(sx, sy, 1)));
+            var PointerCtor = (typeof PointerEvent !== "undefined") ? PointerEvent : MouseEvent;
+            startEl.dispatchEvent(new PointerCtor("pointerdown", mkOpts(sx, sy, 1)));
             startEl.dispatchEvent(new MouseEvent("mousedown",   mkOpts(sx, sy, 1)));
             startEl.dispatchEvent(new MouseEvent("mousemove",   mkOpts(mx, my, 1)));
             endEl.dispatchEvent(  new MouseEvent("mousemove",   mkOpts(ex, ey, 1)));
-            endEl.dispatchEvent(  new MouseEvent("pointerup",   mkOpts(ex, ey, 0)));
+            endEl.dispatchEvent(  new PointerCtor("pointerup",   mkOpts(ex, ey, 0)));
             endEl.dispatchEvent(  new MouseEvent("mouseup",     mkOpts(ex, ey, 0)));
             return { success: true };
         } catch (e) {
@@ -473,14 +474,15 @@ async function handleKey(args, realTabId) {
     if (!text || typeof text !== "string") {
         throw new Error("text parameter is required for key action");
     }
-    if (typeof repeat !== "number" || repeat < 1 || repeat > 100) {
+    const repeatNum = typeof repeat === "boolean" ? (repeat ? 1 : 0) : (repeat ?? 1);
+    if (typeof repeatNum !== "number" || repeatNum < 1 || repeatNum > 100) {
         throw new Error("repeat must be between 1 and 100");
     }
 
     let results;
     try {
         results = await browser.tabs.executeScript(realTabId, {
-            code: buildKeyScript(text, repeat),
+            code: buildKeyScript(text, repeatNum),
             runAt: "document_idle",
         });
     } catch (err) {
@@ -502,7 +504,7 @@ async function handleKey(args, realTabId) {
  */
 async function handleWait(args) {
     const { duration } = args;
-    if (typeof duration !== "number" || duration <= 0 || duration > 30) {
+    if (typeof duration !== "number" || duration < 0 || duration > 30) {
         throw new Error("duration must be between 0 and 30 seconds");
     }
 
