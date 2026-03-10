@@ -135,6 +135,8 @@ struct AnyCodable: Codable {
             // JSONSerialization returns NSNumber for both JSON booleans and numbers.
             // Use CFBoolean identity to distinguish true JSON booleans from integers,
             // since `NSNumber(1) as Bool` succeeds in Swift due to ObjC bridging.
+            // Note: Bool, Int, and Double stored in Any all bridge to NSNumber,
+            // so this case handles all numeric and boolean values.
             if CFGetTypeID(number) == CFBooleanGetTypeID() {
                 try container.encode(number.boolValue)
             } else {
@@ -145,12 +147,6 @@ struct AnyCodable: Codable {
                     try container.encode(d)
                 }
             }
-        case let bool as Bool:
-            try container.encode(bool)
-        case let int as Int:
-            try container.encode(int)
-        case let double as Double:
-            try container.encode(double)
         case let string as String:
             try container.encode(string)
         case let array as [Any]:
