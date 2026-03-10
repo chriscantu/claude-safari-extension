@@ -85,6 +85,7 @@ claude-safari-extension/
 │           ├── read-page.test.js
 │           ├── find.test.js
 │           ├── form-input.test.js
+│           ├── get-page-text.test.js
 │           ├── computer.test.js
 │           ├── javascript-tool.test.js
 │           ├── navigate.test.js

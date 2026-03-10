@@ -64,7 +64,7 @@ URL navigation and browser history traversal.
 | H1 | 🟠 High | `MCPSocketServer.swift` | Partial TCP writes silently discarded — needs retry loop |
 | H2 | 🟠 High | `SafariWebExtensionHandler.swift` | Single-slot `UserDefaults` IPC drops concurrent requests |
 | H3 | 🟠 High | `ToolRouter.swift` | `hybridTools` declared but never consulted (dead code) |
-| H4 | 🟠 High | `tool-registry.js` | Core dispatch layer has zero tests |
+| H4 | ~~🟠 High~~ | `tool-registry.js` | ~~Core dispatch layer has zero tests~~ — ✅ fixed (tests added in Phase 4) |
 | M1 | 🟡 Medium | `background.js`, `popup.js` | Bundle ID hardcoded in two files (DRY) |
 | M2 | 🟡 Medium | `ToolModels.swift` | `NativeMessage` should be a Swift enum, not stringly-typed struct |
 | M3 | 🟡 Medium | `manifest.json` | `persistent: false` + `setTimeout` polling fragile under suspension |
@@ -72,7 +72,7 @@ URL navigation and browser history traversal.
 
 ### Build & Install Checklist
 
-- [ ] Fix C1, H1, H2, H3, H4 (required for any traffic to flow end-to-end)
+- [ ] Fix C1, H1, H2, H3 (required for any traffic to flow end-to-end; H4 resolved)
 - [ ] Fix M1, M2, M8 (required for Phase 4 tools to work correctly)
 - [ ] `xcodebuild build -scheme ClaudeInSafari -destination "platform=macOS"`
 - [ ] Run the app; verify MCP socket appears at expected path
@@ -82,16 +82,28 @@ URL navigation and browser history traversal.
 
 ---
 
-## Phase 4 — Content Extraction → `v0.2.0` 📋
+## Phase 4 — Content Extraction → `v0.2.0` ✅
 
 Read DOM structure, find elements, fill forms, extract text.
 
 | Item | Spec | Status |
 |------|------|--------|
-| `read_page` — accessibility tree snapshot | [005](Specs/005-read-page.md) | 📋 |
-| `find` — natural language element search | [006](Specs/006-find.md) | 📋 |
-| `form_input` — fill inputs, checkboxes, selects | [007](Specs/007-form-input.md) | 📋 |
-| `get_page_text` — extract article/main text | [009](Specs/009-get-page-text.md) | 📋 |
+| `read_page` — accessibility tree snapshot | [005](Specs/005-read-page.md) | ✅ |
+| `find` — natural language element search | [006](Specs/006-find.md) | ✅ |
+| `form_input` — fill inputs, checkboxes, selects | [007](Specs/007-form-input.md) | ✅ |
+| `get_page_text` — extract article/main text | [009](Specs/009-get-page-text.md) | ✅ |
+
+---
+
+## Next Up — JS Test Infrastructure 🔧
+
+Before Phase 5 begins, resolve [L6](#deferred--known-issues): switch the JS test suite to `@jest-environment jsdom` so injected IIFEs can be eval'd against a real DOM. This unblocks behavioral tests for Phase 4 tools (priority chain, noise removal, blank-line collapse, truncation) and establishes the test pattern for all future tool IIFEs.
+
+| Item | Status |
+|------|--------|
+| Configure `@jest-environment jsdom` for JS test suite | ⬜ |
+| Replace vacuous `get-page-text` T1–T8 mocks with DOM-based IIFE eval tests | ⬜ |
+| Remove dead `runInjectedScript` helper | ⬜ |
 
 ---
 
@@ -151,3 +163,4 @@ Issues from REVIEW.md deferred past the First Build milestone:
 | L3 | Hand-rolled `AnyCodable` edge cases — consider Flight-School/AnyCodable |
 | L4 | Magic number read buffer size in `MCPSocketServer` |
 | L5 | `clientId` duplicated at payload and socket level |
+| L6 | JS tool tests (T1–T8 in `get-page-text.test.js`) mock `scriptResult` rather than eval-ing the injected IIFE in jsdom — `runInjectedScript` helper is dead code. Requires switching Jest env to `@jest-environment jsdom` and eval-ing the IIFE source; blocked until jsdom environment is set up for the JS test suite. Affects: priority chain, blank-line collapse, noise removal, truncation boundary. |

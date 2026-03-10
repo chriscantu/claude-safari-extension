@@ -6,7 +6,7 @@ A macOS Safari Web Extension that brings the [Claude in Chrome](https://claude.a
 
 ```
 Claude Code CLI
-    ↕  Unix domain socket  (4-byte BE length-prefix + JSON)
+    ↕  Unix domain socket  (newline-delimited JSON)
     ↕  /tmp/claude-mcp-browser-bridge-<username>/<pid>.sock
 Native Swift App  (MCP server · screenshots · window management · file I/O)
     ↕  browser.runtime.sendNativeMessage()
@@ -97,15 +97,15 @@ This project follows the principles in [PRINCIPLES.md](PRINCIPLES.md):
 | `read_page` — accessibility tree snapshot | ✅ Done |
 | `navigate` — URL navigation & history traversal | ✅ Done |
 | `find` — find elements by natural language | ✅ Done |
-| `form_input` — fill inputs, checkboxes, selects | 🔲 Planned |
-| `get_page_text` — extract article/main text | 🔲 Planned |
+| `form_input` — fill inputs, checkboxes, selects | ✅ Done |
+| `get_page_text` — extract article/main text | ✅ Done |
 | `javascript_tool` — run JS in page context | 🔲 Planned |
 | `read_console_messages` — captured console logs | 🔲 Planned (content script scaffolded) |
 | `read_network_requests` — captured network log | 🔲 Planned (content script scaffolded) |
 | `computer` — mouse, keyboard, scroll | 🔲 Planned |
 | `computer` (screenshot) — ScreenCaptureKit | 🔲 Planned |
 | `resize_window` — AppleScript window management | 🔲 Planned |
-| `tabs_context_mcp` / `tabs_create_mcp` | 🔲 Planned |
+| `tabs_context_mcp` / `tabs_create_mcp` | ✅ Done |
 | `gif_creator` | 🔲 Planned |
 | `file_upload` / `upload_image` | 🔲 Planned |
 
