@@ -117,6 +117,20 @@ if (typeof browser.alarms !== "undefined") {
             // not the code inside it — prevents the background page from being suspended.
         }
     });
+
+    // On startup, clean up any stale computer-wait alarm entry left from a prior
+    // background page suspension where ToolRouter timed out before we could respond.
+    // If the alarm already fired (alarms.get returns undefined), remove the storage
+    // entry so the next handleWait call doesn't mistake it for a live resume.
+    browser.storage.session.get("computer-wait-alarmName").then((stored) => {
+        const alarmName = stored["computer-wait-alarmName"];
+        if (!alarmName) return;
+        browser.alarms.get(alarmName).then((alarm) => {
+            if (!alarm) {
+                browser.storage.session.remove("computer-wait-alarmName");
+            }
+        });
+    });
 }
 
 // Start polling when the extension loads

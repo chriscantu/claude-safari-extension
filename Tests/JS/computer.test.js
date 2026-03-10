@@ -62,7 +62,15 @@ function makeBrowserMockWithDomEval() {
         alarms: {
             create: jest.fn(),
             clear: jest.fn(),
+            get: jest.fn(() => Promise.resolve(undefined)),
             onAlarm: { addListener: jest.fn(), removeListener: jest.fn() },
+        },
+        storage: {
+            session: {
+                get: jest.fn(() => Promise.resolve({})),
+                set: jest.fn(() => Promise.resolve()),
+                remove: jest.fn(() => Promise.resolve()),
+            },
         },
     };
 }
@@ -83,7 +91,15 @@ function makeBrowserMock(opts = {}) {
         alarms: {
             create: jest.fn(),
             clear: jest.fn(),
+            get: jest.fn(() => Promise.resolve(undefined)),
             onAlarm: { addListener: jest.fn(), removeListener: jest.fn() },
+        },
+        storage: {
+            session: {
+                get: jest.fn(() => Promise.resolve({})),
+                set: jest.fn(() => Promise.resolve()),
+                remove: jest.fn(() => Promise.resolve()),
+            },
         },
     };
 }
@@ -449,9 +465,17 @@ describe("computer tool", () => {
                 alarms: {
                     create: jest.fn((name) => { capturedAlarmName = name; }),
                     clear: jest.fn(),
+                    get: jest.fn(() => Promise.resolve(undefined)),
                     onAlarm: {
                         addListener: jest.fn((fn) => { capturedListener = fn; }),
                         removeListener: jest.fn(),
+                    },
+                },
+                storage: {
+                    session: {
+                        get: jest.fn(() => Promise.resolve({})),
+                        set: jest.fn(() => Promise.resolve()),
+                        remove: jest.fn(() => Promise.resolve()),
                     },
                 },
             };
@@ -459,7 +483,9 @@ describe("computer tool", () => {
             const handler = loadComputer({ browser, resolveTab: jest.fn(async () => 42) });
             const promise = handler({ action: "wait", duration: 25 });
 
-            // Alarm listener is registered synchronously in the Promise executor; fire it now
+            // Allow storage.session.get microtask to resolve before accessing capturedListener
+            await Promise.resolve();
+
             capturedListener({ name: capturedAlarmName });
 
             const result = await promise;
@@ -468,8 +494,78 @@ describe("computer tool", () => {
                 expect.stringContaining("computer-wait-"),
                 { delayInMinutes: expect.any(Number) }
             );
+            expect(browser.storage.session.set).toHaveBeenCalledWith(
+                expect.objectContaining({ "computer-wait-alarmName": expect.any(String) })
+            );
             expect(browser.alarms.onAlarm.removeListener).toHaveBeenCalled();
             expect(browser.alarms.clear).toHaveBeenCalled();
+            expect(browser.storage.session.remove).toHaveBeenCalledWith("computer-wait-alarmName");
+        });
+
+        test("wait > 20s: alarm fired while page suspended — returns immediately on resume", async () => {
+            const storedAlarmName = "computer-wait-1234567890";
+            const browser = {
+                tabs: { executeScript: jest.fn() },
+                alarms: {
+                    create: jest.fn(),
+                    clear: jest.fn(),
+                    get: jest.fn(() => Promise.resolve(undefined)),
+                    onAlarm: { addListener: jest.fn(), removeListener: jest.fn() },
+                },
+                storage: {
+                    session: {
+                        get: jest.fn(() => Promise.resolve({ "computer-wait-alarmName": storedAlarmName })),
+                        set: jest.fn(() => Promise.resolve()),
+                        remove: jest.fn(() => Promise.resolve()),
+                    },
+                },
+            };
+
+            const handler = loadComputer({ browser, resolveTab: jest.fn(async () => 42) });
+            const result = await handler({ action: "wait", duration: 25 });
+
+            expect(result).toBe("Waited 25 seconds");
+            expect(browser.alarms.create).not.toHaveBeenCalled();
+            expect(browser.storage.session.remove).toHaveBeenCalledWith("computer-wait-alarmName");
+        });
+
+        test("wait > 20s: alarm still pending on resume — re-registers listener without new alarm", async () => {
+            const storedAlarmName = "computer-wait-1234567890";
+            let capturedListener = null;
+            const browser = {
+                tabs: { executeScript: jest.fn() },
+                alarms: {
+                    create: jest.fn(),
+                    clear: jest.fn(),
+                    get: jest.fn(() => Promise.resolve({ name: storedAlarmName })),
+                    onAlarm: {
+                        addListener: jest.fn((fn) => { capturedListener = fn; }),
+                        removeListener: jest.fn(),
+                    },
+                },
+                storage: {
+                    session: {
+                        get: jest.fn(() => Promise.resolve({ "computer-wait-alarmName": storedAlarmName })),
+                        set: jest.fn(() => Promise.resolve()),
+                        remove: jest.fn(() => Promise.resolve()),
+                    },
+                },
+            };
+
+            const handler = loadComputer({ browser, resolveTab: jest.fn(async () => 42) });
+            const promise = handler({ action: "wait", duration: 25 });
+
+            // Two async awaits before listener registration: storage.session.get + alarms.get
+            await Promise.resolve();
+            await Promise.resolve();
+
+            capturedListener({ name: storedAlarmName });
+
+            const result = await promise;
+            expect(result).toBe("Waited 25 seconds");
+            expect(browser.alarms.create).not.toHaveBeenCalled();
+            expect(browser.alarms.onAlarm.removeListener).toHaveBeenCalled();
+            expect(browser.storage.session.remove).toHaveBeenCalledWith("computer-wait-alarmName");
         });
 
         test("T10 — wait 0.001 seconds returns confirmation", async () => {

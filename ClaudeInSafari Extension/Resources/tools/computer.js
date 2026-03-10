@@ -500,6 +500,16 @@ async function handleKey(args, realTabId) {
  * @param {{ duration: number }} args
  * Uses setTimeout for ≤20s. Uses browser.alarms for >20s to survive background
  * page suspension — the keepalive alarm fires every 24s, leaving a gap for long waits.
+ *
+ * Background-page suspension recovery (alarm path only):
+ *   The alarm name is persisted in browser.storage.session. If the background page
+ *   is suspended mid-wait and then wakes via the alarm, ToolRouter.swift re-polls
+ *   and re-issues the tool call. handleWait checks storage and either:
+ *     1. Returns immediately — alarm already fired while page was suspended.
+ *     2. Re-registers the listener — alarm is still pending.
+ *
+ * NOTE: With persistent: false, the background page can be suspended at any time.
+ *   The keepalive alarm in background.js mitigates but does not eliminate this risk.
  */
 async function handleWait(args) {
     const rawDuration = args.duration;
@@ -511,39 +521,79 @@ async function handleWait(args) {
     const ms = Math.round(duration * 1000);
     if (duration <= 20) {
         await new Promise((resolve) => setTimeout(resolve, ms));
-    } else {
-        await new Promise((resolve, reject) => {
-            let settled = false;
-            let fallback;
-            const alarmName = "computer-wait-" + Date.now();
-
-            function onAlarm(alarm) {
-                if (alarm.name === alarmName && !settled) {
-                    settled = true;
-                    browser.alarms.onAlarm.removeListener(onAlarm);
-                    browser.alarms.clear(alarmName);
-                    clearTimeout(fallback);
-                    resolve();
-                }
-            }
-
-            fallback = setTimeout(() => {
-                if (!settled) {
-                    settled = true;
-                    browser.alarms.onAlarm.removeListener(onAlarm);
-                    browser.alarms.clear(alarmName);
-                    reject(new Error(
-                        "computer: wait alarm did not fire. " +
-                        "Ensure the 'alarms' permission is declared in manifest.json."
-                    ));
-                }
-            }, ms + 5000);
-
-            browser.alarms.create(alarmName, { delayInMinutes: ms / 60000 });
-            browser.alarms.onAlarm.addListener(onAlarm);
-        });
+        return `Waited ${duration} seconds`;
     }
 
+    // Check for a persisted alarm name from a prior suspended wait.
+    const stored = await browser.storage.session.get("computer-wait-alarmName");
+    const storedAlarmName = stored["computer-wait-alarmName"];
+
+    if (storedAlarmName) {
+        const existingAlarm = await browser.alarms.get(storedAlarmName);
+        if (!existingAlarm) {
+            // Alarm fired while page was suspended. Wait is complete.
+            await browser.storage.session.remove("computer-wait-alarmName");
+            return `Waited ${duration} seconds`;
+        }
+        // Alarm still pending after resume. Re-use it — don't create a new one.
+    }
+
+    const alarmName = storedAlarmName || "computer-wait-" + Date.now();
+    if (!storedAlarmName) {
+        browser.alarms.create(alarmName, { delayInMinutes: ms / 60000 });
+        // Fire-and-forget: storage is for recovery only; a failed write loses the
+        // optimisation but does not break correctness.
+        browser.storage.session.set({ "computer-wait-alarmName": alarmName });
+    }
+
+    let cancelFn;
+    const alarmPromise = new Promise((resolve, reject) => {
+        let settled = false;
+        let fallback;
+
+        function onAlarm(alarm) {
+            if (alarm.name === alarmName && !settled) {
+                settled = true;
+                browser.alarms.onAlarm.removeListener(onAlarm);
+                browser.alarms.clear(alarmName);
+                clearTimeout(fallback);
+                browser.storage.session.remove("computer-wait-alarmName");
+                resolve();
+            }
+        }
+
+        fallback = setTimeout(() => {
+            if (!settled) {
+                settled = true;
+                browser.alarms.onAlarm.removeListener(onAlarm);
+                browser.alarms.clear(alarmName);
+                browser.storage.session.remove("computer-wait-alarmName");
+                reject(new Error(
+                    "computer: wait alarm did not fire. " +
+                    "Ensure the 'alarms' permission is declared in manifest.json."
+                ));
+            }
+        }, ms + 5000);
+
+        browser.alarms.onAlarm.addListener(onAlarm);
+
+        // Assigned synchronously in the executor so it is set before alarmPromise.cancel below.
+        cancelFn = () => {
+            if (!settled) {
+                settled = true;
+                browser.alarms.onAlarm.removeListener(onAlarm);
+                browser.alarms.clear(alarmName);
+                clearTimeout(fallback);
+                browser.storage.session.remove("computer-wait-alarmName");
+            }
+        };
+    });
+
+    // Per CLAUDE.md Cancellable Promises requirement: Promises owning external resources
+    // (alarm + listener) must expose .cancel(). Callers may invoke it to abort the wait.
+    alarmPromise.cancel = cancelFn;
+
+    await alarmPromise;
     return `Waited ${duration} seconds`;
 }
 
