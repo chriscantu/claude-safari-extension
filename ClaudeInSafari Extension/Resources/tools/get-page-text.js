@@ -70,9 +70,15 @@ function buildGetPageTextScript() {
             document.body.appendChild(container);
             var raw;
             try {
-                // innerText is preferred (layout-aware, excludes display:none).
-                // textContent is the fallback for environments that do not
-                // implement innerText (e.g. jsdom in tests).
+                // innerText is preferred: it is layout-aware (block elements →
+                // newlines) and excludes display:none content. The ?? operator
+                // falls through only when innerText evaluates to null or
+                // undefined — not when it returns an empty string — so this
+                // does not suppress a genuine empty-page result. In jsdom
+                // (used by the test suite) innerText is not implemented and
+                // the property access returns undefined, so textContent is
+                // used instead. In all target browsers innerText is always
+                // defined, so the textContent branch never fires in production.
                 raw = clone.innerText ?? clone.textContent ?? "";
             } finally {
                 if (document.body.contains(container)) {

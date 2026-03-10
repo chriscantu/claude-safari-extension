@@ -1,13 +1,19 @@
 /**
  * @jest-environment jsdom
  *
- * WHY jsdom here but not in other test files:
- * Tests T1–T8 run the injected IIFE (built by buildGetPageTextScript) against
- * a real DOM so the extraction algorithm — priority chain, noise removal,
- * blank-line collapse, truncation — is actually exercised. The other tool test
- * files (find, navigate, form-input, tool-registry) operate purely at the
+ * WHY jsdom here but not in other tool test files:
+ * Tests T1–T8d run the injected IIFE against a real DOM so the extraction
+ * algorithm — priority chain, noise removal, blank-line collapse, truncation —
+ * is actually exercised. All other tool test files operate purely at the
  * background-script layer and have no DOM dependencies, so they remain on the
- * default "node" environment to keep their behaviour unchanged.
+ * default "node" environment.
+ *
+ * KNOWN GAP — innerText vs textContent:
+ * jsdom 20.x (bundled with jest-environment-jsdom 29) does not implement
+ * innerText. The IIFE's `clone.innerText ?? clone.textContent` expression
+ * therefore always falls through to textContent in tests. The innerText code
+ * path — layout-aware whitespace, display:none exclusion — is not exercised
+ * by this suite; manual browser testing covers it.
  */
 
 /**
@@ -15,26 +21,30 @@
  * See Spec 009 (get_page_text).
  *
  * Covers:
- *   T1  — page with <article>: returns article text, not surrounding body text
- *   T2  — page with <main> but no single <article>: returns main text
- *   T3  — page with only <body> (body fallback): returns body text
- *   T4  — multiple consecutive blank lines collapsed to one
- *   T5  — <script> content excluded from output
- *   T6  — aria-hidden section excluded
- *   T7  — text > 100 000 chars: truncated with "[content truncated]"
- *   T8  — empty body: returns empty string (no error)
- *   T9  — tab not accessible: classifyExecuteScriptError wraps with guidance
- *   T10 — virtualTabId forwarded to resolveTab
- *   T11 — executeScript returns no results: throws no-result error
- *   T12 — page script __error surfaces as rejection
- *   T13 — registers itself under the name "get_page_text"
- *   T14 — [role="main"] used when no <main> exists
- *   T15 — nav/header/footer excluded in body-fallback mode
- *   T16 — resolveTab failure: rejects with tabs_context_mcp guidance
- *   T17 — executeScript returns [null]: throws no-result error
- *   T18 — result.text not a string: throws unexpected shape error
- *   T19 — result.__error empty string (falsy) still surfaces as rejection
- *   T20 — injected code uses try/finally to clean up DOM container
+ *   T1   — page with <article>: returns article text, not surrounding body text
+ *   T2   — page with <main> but no single <article>: returns main text
+ *   T3   — page with only <body> (body fallback): returns body text
+ *   T4   — multiple consecutive blank lines collapsed to one
+ *   T5   — <script> content excluded from output
+ *   T6   — aria-hidden section excluded
+ *   T7   — text > 100 000 chars: truncated with "[content truncated]"
+ *   T7b  — text exactly 100 000 chars: NOT truncated (boundary guard)
+ *   T8   — empty body takes body-fallback path and returns empty string
+ *   T8b  — [role="main"] used when no <article> and no <main> (DOM-level)
+ *   T8c  — nav/header/footer excluded in body-fallback mode (DOM-level)
+ *   T8d  — nav/header/footer inside <article> NOT excluded (isBodyFallback=false)
+ *   T9   — tab not accessible: classifyExecuteScriptError wraps with guidance
+ *   T10  — virtualTabId forwarded to resolveTab
+ *   T11  — executeScript returns no results: throws no-result error
+ *   T12  — page script __error surfaces as rejection
+ *   T13  — registers itself under the name "get_page_text"
+ *   T14  — injected code string contains [role="main"] selector (source-string check)
+ *   T15  — injected code string contains "nav", "header", "footer" (source-string check)
+ *   T16  — resolveTab failure: rejects with tabs_context_mcp guidance
+ *   T17  — executeScript returns [null]: throws no-result error
+ *   T18  — result.text not a string: throws unexpected shape error
+ *   T19  — result.__error empty string (falsy) still surfaces as rejection
+ *   T20  — injected code uses try/finally to clean up DOM container
  */
 
 "use strict";
@@ -45,7 +55,7 @@
 
 /**
  * Browser mock that actually runs the injected IIFE code string against the
- * live jsdom document. Used by T1–T8 so the extraction algorithm runs for
+ * live jsdom document. Used by T1–T8d so the extraction algorithm runs for
  * real instead of returning a pre-canned scriptResult.
  *
  * vm.runInNewContext creates a fresh V8 sandbox seeded with jsdom's live
@@ -130,7 +140,7 @@ function appendElement(tag, text, parent) {
 
 describe("get_page_text tool", () => {
     afterEach(() => {
-        // Clear DOM state so T1–T8 fixtures don't bleed between tests.
+        // Clear DOM state so T1–T8d fixtures don't bleed between tests.
         document.body.replaceChildren();
 
         jest.resetModules();
@@ -142,7 +152,7 @@ describe("get_page_text tool", () => {
     });
 
     // -------------------------------------------------------------------------
-    // T1–T8: DOM extraction algorithm (IIFE runs in real jsdom document)
+    // T1–T8d: DOM extraction algorithm (IIFE runs in real jsdom document)
     // -------------------------------------------------------------------------
 
     test("T1 — article present: returns article text, not surrounding body text", async () => {
@@ -194,11 +204,13 @@ describe("get_page_text tool", () => {
     });
 
     test("T5 — <script> content excluded from output", async () => {
+        // Use a harmless script body (no browser APIs) so jsdom's script
+        // runner does not trigger a "Not implemented: window.alert" error
+        // when the article is inserted into the live document.
         const article = document.createElement("article");
-        const textNode = document.createTextNode("Visible text");
-        article.appendChild(textNode);
+        article.appendChild(document.createTextNode("Visible text"));
         const script = document.createElement("script");
-        script.textContent = 'alert("hidden")';
+        script.textContent = "var __scriptContent = 1;";
         article.appendChild(script);
         document.body.appendChild(article);
         const resolveTab = jest.fn(async () => 42);
@@ -207,7 +219,7 @@ describe("get_page_text tool", () => {
         const result = await handler({});
 
         expect(result).toContain("Visible text");
-        expect(result).not.toContain("alert(");
+        expect(result).not.toContain("__scriptContent");
     });
 
     test("T6 — aria-hidden section excluded", async () => {
@@ -243,14 +255,80 @@ describe("get_page_text tool", () => {
         expect(result.length).toBe(100020);
     });
 
-    test("T8 — empty body: returns empty string", async () => {
-        // document.body has no children (cleared by afterEach from prior test).
+    test("T7b — text exactly 100 000 chars: NOT truncated (boundary guard)", async () => {
+        // The condition is text.length > MAX_CHARS (strict), so exactly 100 000
+        // chars must pass through unchanged.
+        const article = document.createElement("article");
+        article.textContent = "x".repeat(100000);
+        document.body.appendChild(article);
+        const resolveTab = jest.fn(async () => 42);
+        const handler = loadGetPageText({ browser: makeBrowserMockWithDomEval(), resolveTab });
+
+        const result = await handler({});
+
+        expect(result).not.toContain("[content truncated]");
+        expect(result.length).toBe(100000);
+    });
+
+    test("T8 — empty body: takes body-fallback path and returns empty string", async () => {
+        // document.body exists but has no children. The IIFE selects body as
+        // root (body-fallback), clones it, finds no text, and returns "".
+        // Note: the !root / !document.body early-return guards (IIFE lines 48/66)
+        // are not reachable via jsdom because document.body is always present.
         const resolveTab = jest.fn(async () => 42);
         const handler = loadGetPageText({ browser: makeBrowserMockWithDomEval(), resolveTab });
 
         const result = await handler({});
 
         expect(result).toBe("");
+    });
+
+    test("T8b — [role=\"main\"] used when no <article> and no <main> (DOM-level)", async () => {
+        const roleMain = document.createElement("div");
+        roleMain.setAttribute("role", "main");
+        roleMain.textContent = "Role main content";
+        document.body.appendChild(roleMain);
+        appendElement("p", "Other body text");
+        const resolveTab = jest.fn(async () => 42);
+        const handler = loadGetPageText({ browser: makeBrowserMockWithDomEval(), resolveTab });
+
+        const result = await handler({});
+
+        expect(result).toContain("Role main content");
+        expect(result).not.toContain("Other body text");
+    });
+
+    test("T8c — nav/header/footer excluded in body-fallback mode (DOM-level)", async () => {
+        // No <article> or <main> → body-fallback → nav/header/footer stripped.
+        appendElement("nav", "Nav links");
+        appendElement("header", "Site header");
+        appendElement("p", "Body content");
+        appendElement("footer", "Footer text");
+        const resolveTab = jest.fn(async () => 42);
+        const handler = loadGetPageText({ browser: makeBrowserMockWithDomEval(), resolveTab });
+
+        const result = await handler({});
+
+        expect(result).toContain("Body content");
+        expect(result).not.toContain("Nav links");
+        expect(result).not.toContain("Site header");
+        expect(result).not.toContain("Footer text");
+    });
+
+    test("T8d — nav/header/footer inside <article> NOT excluded (isBodyFallback=false)", async () => {
+        // When a single <article> is selected, isBodyFallback is false so the
+        // nav/header/footer selectors are NOT added to noiseSelectors.
+        const article = document.createElement("article");
+        appendElement("nav", "In-article nav", article);
+        appendElement("p", "Article body", article);
+        document.body.appendChild(article);
+        const resolveTab = jest.fn(async () => 42);
+        const handler = loadGetPageText({ browser: makeBrowserMockWithDomEval(), resolveTab });
+
+        const result = await handler({});
+
+        expect(result).toContain("In-article nav");
+        expect(result).toContain("Article body");
     });
 
     // -------------------------------------------------------------------------
@@ -302,9 +380,9 @@ describe("get_page_text tool", () => {
         expect(globalThis.registerTool).toHaveBeenCalledWith("get_page_text", expect.any(Function));
     });
 
-    test("T14 — injected code checks for [role=\"main\"] fallback", async () => {
+    test("T14 — injected code string contains [role=\"main\"] selector (source-string check)", async () => {
         const resolveTab = jest.fn(async () => 42);
-        const browser = makeBrowserMock({ scriptResult: [{ text: "Role main content" }] });
+        const browser = makeBrowserMock({ scriptResult: [{ text: "ok" }] });
         const handler = loadGetPageText({ browser, resolveTab });
 
         await handler({});
@@ -313,9 +391,9 @@ describe("get_page_text tool", () => {
         expect(code).toContain('[role="main"]');
     });
 
-    test("T15 — injected code removes nav/header/footer in body-fallback mode", async () => {
+    test("T15 — injected code string contains \"nav\", \"header\", \"footer\" (source-string check)", async () => {
         const resolveTab = jest.fn(async () => 42);
-        const browser = makeBrowserMock({ scriptResult: [{ text: "Content" }] });
+        const browser = makeBrowserMock({ scriptResult: [{ text: "ok" }] });
         const handler = loadGetPageText({ browser, resolveTab });
 
         await handler({});
