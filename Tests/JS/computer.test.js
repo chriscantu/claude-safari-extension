@@ -459,18 +459,94 @@ describe("computer tool", () => {
     });
 
     describe("left_click_drag", () => {
-        // Task 7 — T14, T25
+        test("T14 — drag from start to end: returns confirmation", async () => {
+            document.elementFromPoint = jest.fn(() => document.body);
+
+            const handler = loadComputer({ browser: makeBrowserMockWithDomEval(), resolveTab: jest.fn(async () => 42) });
+
+            const result = await handler({
+                action: "left_click_drag",
+                start_coordinate: [100, 100],
+                coordinate: [300, 300],
+            });
+
+            expect(result).toContain("100");
+            expect(result).toContain("300");
+        });
+
+        test("T25 — drag dispatches intermediate mousemove at midpoint", async () => {
+            const el = document.createElement("div");
+            document.body.appendChild(el);
+            document.elementFromPoint = jest.fn(() => el);
+
+            const moves = [];
+            el.addEventListener("mousemove", (e) => moves.push([e.clientX, e.clientY]));
+
+            const handler = loadComputer({ browser: makeBrowserMockWithDomEval(), resolveTab: jest.fn(async () => 42) });
+
+            await handler({
+                action: "left_click_drag",
+                start_coordinate: [100, 100],
+                coordinate: [300, 300],
+            });
+
+            // Midpoint (200, 200) must appear among the dispatched mousemoves
+            expect(moves.some(([x, y]) => x === 200 && y === 200)).toBe(true);
+        });
     });
 
     describe("hover", () => {
-        // Task 7 — T15, T16
+        test("T15 — hover at coordinate dispatches mouseover + mousemove", async () => {
+            const el = document.createElement("div");
+            document.body.appendChild(el);
+            document.elementFromPoint = jest.fn(() => el);
+
+            const events = [];
+            el.addEventListener("mouseover", () => events.push("mouseover"));
+            el.addEventListener("mousemove", () => events.push("mousemove"));
+
+            const handler = loadComputer({ browser: makeBrowserMockWithDomEval(), resolveTab: jest.fn(async () => 42) });
+
+            const result = await handler({ action: "hover", coordinate: [200, 150] });
+
+            expect(events).toContain("mouseover");
+            expect(events).toContain("mousemove");
+            expect(result).toContain("200");
+        });
+
+        test("T16 — hover with ref: dispatches at element center", async () => {
+            const el = appendRefElement("ref_3");
+
+            const events = [];
+            el.addEventListener("mouseover", () => events.push("mouseover"));
+
+            const handler = loadComputer({ browser: makeBrowserMockWithDomEval(), resolveTab: jest.fn(async () => 42) });
+
+            const result = await handler({ action: "hover", ref: "ref_3" });
+
+            expect(events).toContain("mouseover");
+            expect(result).toContain("ref_3");
+        });
     });
 
     describe("error handling", () => {
-        // Task 7 — T22 (invalid tab)
+        test("T22 — invalid tab ID: classifyExecuteScriptError wraps with guidance", async () => {
+            const resolveTab = jest.fn(async () => 99);
+            const browser = makeBrowserMock({
+                scriptError: new Error("No tab with id 99"),
+            });
+            const handler = loadComputer({ browser, resolveTab });
+
+            await expect(
+                handler({ action: "left_click", coordinate: [100, 200] })
+            ).rejects.toThrow(/tabs_context_mcp/);
+        });
     });
 
     describe("registration", () => {
-        // Task 8 — registers "computer"
+        test("registers itself under the name 'computer'", () => {
+            loadComputer({ browser: makeBrowserMock(), resolveTab: jest.fn(async () => 42) });
+            expect(globalThis.registerTool).toHaveBeenCalledWith("computer", expect.any(Function));
+        });
     });
 });

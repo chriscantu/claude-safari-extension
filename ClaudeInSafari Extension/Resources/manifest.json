@@ -23,6 +23,7 @@
             "tools/find.js",
             "tools/form-input.js",
             "tools/get-page-text.js",
+            "tools/computer.js",
             "background.js"
         ],
         "persistent": false

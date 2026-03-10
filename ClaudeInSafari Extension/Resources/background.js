@@ -10,9 +10,10 @@
  *   4. tools/navigate.js       — registers navigate
  *   5. tools/read-page.js      — registers read_page
  *   6. tools/find.js           — registers find
- *   7. tools/form-input.js    — registers form_input
- *   8. tools/get-page-text.js — registers get_page_text
- *   9. background.js           — this file; starts the poll loop
+ *   7. tools/form-input.js     — registers form_input
+ *   8. tools/get-page-text.js  — registers get_page_text
+ *   9. tools/computer.js       — registers computer
+ *  10. background.js           — this file; starts the poll loop
  */
 
 const POLL_INTERVAL_MS = 100;
