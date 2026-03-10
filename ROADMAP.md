@@ -151,3 +151,4 @@ Issues from REVIEW.md deferred past the First Build milestone:
 | L3 | Hand-rolled `AnyCodable` edge cases — consider Flight-School/AnyCodable |
 | L4 | Magic number read buffer size in `MCPSocketServer` |
 | L5 | `clientId` duplicated at payload and socket level |
+| L6 | JS tool tests (T1–T8 in `get-page-text.test.js`) mock `scriptResult` rather than eval-ing the injected IIFE in jsdom — `runInjectedScript` helper is dead code. Requires switching Jest env to `@jest-environment jsdom` and eval-ing the IIFE source; blocked until jsdom environment is set up for the JS test suite. Affects: priority chain, blank-line collapse, noise removal, truncation boundary. |
