@@ -4,6 +4,7 @@ import Foundation
 /// Implements the MCP stdio transport protocol: initialize handshake, tools/list, and tools/call.
 class ToolRouter: MCPSocketServerDelegate {
     private weak var server: MCPSocketServer?
+    private let screenshotService = ScreenshotService()
 
     /// Tools handled natively by the Swift app (not forwarded to the extension).
     private let nativeTools: Set<String> = ["resize_window"]
@@ -87,11 +88,58 @@ class ToolRouter: MCPSocketServerDelegate {
         if toolName == "computer",
            let action = arguments["action"] as? String,
            action == "screenshot" || action == "zoom" {
-            sendError(id: id, code: -32000, message: "Screenshot not yet implemented", to: clientId)
+            handleScreenshotAction(action: action, arguments: arguments, id: id, clientId: clientId)
         } else if nativeTools.contains(toolName) {
             sendError(id: id, code: -32000, message: "Native tool '\(toolName)' not yet implemented", to: clientId)
         } else {
             forwardToExtension(queued, id: id, clientId: clientId)
+        }
+    }
+
+    // MARK: - Native Screenshot / Zoom
+
+    private func handleScreenshotAction(action: String, arguments: [String: Any], id: Any?, clientId: String) {
+        let tabId = arguments["tabId"] as? Int
+        if action == "screenshot" {
+            screenshotService.captureScreenshot(tabId: tabId) { [weak self] result in
+                self?.sendScreenshotResult(result, action: action, id: id, to: clientId)
+            }
+        } else {
+            // zoom — parse region as [Int], tolerating JSON numbers arriving as Double or NSNumber
+            let region: [Int]? = {
+                guard let raw = arguments["region"] else { return nil }
+                if let ints = raw as? [Int] { return ints }
+                if let any = raw as? [Any] {
+                    let converted = any.compactMap { v -> Int? in
+                        if let i = v as? Int { return i }
+                        if let d = v as? Double { return Int(d) }
+                        if let n = v as? NSNumber { return n.intValue }
+                        return nil
+                    }
+                    return converted.count == 4 ? converted : nil
+                }
+                return nil
+            }()
+            screenshotService.captureZoom(tabId: tabId, region: region) { [weak self] result in
+                self?.sendScreenshotResult(result, action: action, id: id, to: clientId)
+            }
+        }
+    }
+
+    private func sendScreenshotResult(_ result: Result<CapturedImage, ScreenshotError>, action: String, id: Any?, to clientId: String) {
+        switch result {
+        case .failure(let error):
+            sendError(id: id, code: -32000, message: error.userMessage, to: clientId)
+        case .success(let captured):
+            let base64 = captured.data.base64EncodedString()
+            let label = action == "zoom"
+                ? "Zoomed region (imageId: \(captured.imageId))."
+                : "Screenshot captured (imageId: \(captured.imageId)). Use this imageId with upload_image."
+            let content: [[String: Any]] = [
+                ["type": "image", "data": base64, "mediaType": "image/png"],
+                ["type": "text", "text": label]
+            ]
+            sendResult(id: id, result: ["content": content], to: clientId)
         }
     }
 

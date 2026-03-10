@@ -26,5 +26,7 @@
 	<false/>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
+	<key>NSScreenCaptureUsageDescription</key>
+	<string>Claude in Safari captures screenshots to help Claude Code see and automate the browser.</string>
 </dict>
 </plist>
