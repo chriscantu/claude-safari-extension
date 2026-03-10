@@ -34,6 +34,10 @@
 
 "use strict";
 
+// Monotonic counter for unique alarm names — avoids Date.now() collisions
+// when two wait calls land within the same millisecond.
+let _waitSeq = 0;
+
 // ---------------------------------------------------------------------------
 // Action dispatch table
 // ---------------------------------------------------------------------------
@@ -205,6 +209,7 @@ function buildTypeScript(text) {
                 var kOpts = { bubbles: true, cancelable: true, key: ch, char: ch };
                 el.dispatchEvent(new KeyboardEvent("keydown",  kOpts));
                 el.dispatchEvent(new KeyboardEvent("keypress", kOpts));
+                el.dispatchEvent(new InputEvent("input", { bubbles: true, data: ch, inputType: "insertText" }));
                 el.dispatchEvent(new KeyboardEvent("keyup", kOpts));
             }
 
@@ -538,7 +543,7 @@ async function handleWait(args) {
         // Alarm still pending after resume. Re-use it — don't create a new one.
     }
 
-    const alarmName = storedAlarmName || "computer-wait-" + Date.now();
+    const alarmName = storedAlarmName || "computer-wait-" + (++_waitSeq);
     if (!storedAlarmName) {
         browser.alarms.create(alarmName, { delayInMinutes: ms / 60000 });
         // Fire-and-forget: storage is for recovery only; a failed write loses the
@@ -593,7 +598,16 @@ async function handleWait(args) {
     // (alarm + listener) must expose .cancel(). Callers may invoke it to abort the wait.
     alarmPromise.cancel = cancelFn;
 
-    await alarmPromise;
+    // Wrap in try-catch so the error path releases the alarm + listener.
+    // Note: external callers (poll loop) cannot call .cancel() because handleWait
+    // is async and they receive a plain string result. The cancel method is
+    // available on alarmPromise for callers that hold a reference to it.
+    try {
+        await alarmPromise;
+    } catch (err) {
+        alarmPromise.cancel();
+        throw err;
+    }
     return `Waited ${duration} seconds`;
 }
 
