@@ -74,7 +74,7 @@ All critical and medium bugs from [REVIEW.md](REVIEW.md) resolved. Ready to comp
 
 - [x] `xcodebuild build -scheme ClaudeInSafari -destination "platform=macOS"`
 - [x] Run the app; verify MCP socket appears at expected path
-- [x] Send a `navigate` tool call via `mcp-test.py`; end-to-end response confirmed (socket → native → extension → content script → back)
+- [x] Send a `navigate` tool call via `make send TOOL=navigate ARGS='{"url":"https://example.com"}'`; end-to-end response confirmed (socket → native → extension → content script → back)
 - [ ] Enable extension in Safari → Settings → Extensions (manual step)
 - [ ] Tag `v0.1.0` → release workflow publishes unsigned `.app` archive to GitHub Releases
 
