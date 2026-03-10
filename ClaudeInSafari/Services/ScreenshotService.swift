@@ -156,7 +156,15 @@ class ScreenshotService {
                     completion(.failure(.invalidRegion("Invalid region: [\(x0),\(y0),\(x1),\(y1)] out of bounds for viewport \(viewportWidth)x\(viewportHeight)")))
                     return
                 }
-                let cropRect = CGRect(x: x0, y: y0, width: x1 - x0, height: y1 - y0)
+                // CGImage origin is bottom-left; viewport coords have y=0 at top.
+                // Scale from logical (CSS) pixels to physical pixels using width ratio.
+                let pixelScale = viewportWidth > 0 ? CGFloat(cgImage.width) / CGFloat(viewportWidth) : 1.0
+                let cropRect = CGRect(
+                    x: CGFloat(x0) * pixelScale,
+                    y: CGFloat(viewportHeight - y1) * pixelScale,
+                    width: CGFloat(x1 - x0) * pixelScale,
+                    height: CGFloat(y1 - y0) * pixelScale
+                )
                 guard let cropped = cgImage.cropping(to: cropRect) else {
                     completion(.failure(.captureFailed("Failed to crop zoom region")))
                     return

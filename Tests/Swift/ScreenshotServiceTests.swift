@@ -6,7 +6,8 @@ import CoreGraphics
 
 private class MockCaptureProvider: ScreenCaptureProvider {
     var permissionGranted = true
-    var captureResult: Result<(CGImage, Int, Int), ScreenshotError> = .success((MockCaptureProvider.makeTestImage(), 1280, 800))
+    // Viewport matches image dimensions (100×100) so pixelScale = 1.0 in zoom tests.
+    var captureResult: Result<(CGImage, Int, Int), ScreenshotError> = .success((MockCaptureProvider.makeTestImage(), 100, 100))
 
     static func makeTestImage(width: Int = 100, height: Int = 100) -> CGImage {
         let ctx = CGContext(
@@ -83,7 +84,7 @@ final class ScreenshotServiceTests: XCTestCase {
 
     func testZoomRegionOutOfBoundsFails() {
         let exp = expectation(description: "out of bounds region")
-        // Mock viewport is 1280x800; region extends beyond that
+        // Mock viewport is 100×100; region extends far beyond that
         service.captureZoom(tabId: nil, region: [0, 0, 99999, 99999]) { result in
             if case .failure(.invalidRegion) = result {
                 exp.fulfill()
@@ -236,8 +237,8 @@ final class ScreenshotServiceTests: XCTestCase {
         let exp = expectation(description: "viewport dims")
         service.captureScreenshot(tabId: nil) { result in
             if case .success(let img) = result {
-                XCTAssertEqual(img.viewportWidth, 1280)
-                XCTAssertEqual(img.viewportHeight, 800)
+                XCTAssertEqual(img.viewportWidth, 100)
+                XCTAssertEqual(img.viewportHeight, 100)
                 exp.fulfill()
             } else {
                 XCTFail("Expected success, got \(result)")
@@ -250,10 +251,11 @@ final class ScreenshotServiceTests: XCTestCase {
 
     func testZoomSuccessReturnsCroppedDimensions() {
         let exp = expectation(description: "zoom success")
-        service.captureZoom(tabId: nil, region: [0, 0, 640, 480]) { result in
+        // Region fits within the 100×100 mock viewport.
+        service.captureZoom(tabId: nil, region: [0, 0, 50, 50]) { result in
             if case .success(let img) = result {
-                XCTAssertEqual(img.viewportWidth, 640)
-                XCTAssertEqual(img.viewportHeight, 480)
+                XCTAssertEqual(img.viewportWidth, 50)
+                XCTAssertEqual(img.viewportHeight, 50)
                 exp.fulfill()
             } else {
                 XCTFail("Expected success, got \(result)")
