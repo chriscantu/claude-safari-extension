@@ -19,7 +19,7 @@ Foundational plumbing: MCP socket server, message framing, native↔extension br
 | Item | Spec | Status |
 |------|------|--------|
 | Unix domain socket server (GCD) | [001](Specs/001-mcp-socket-server.md) | ✅ |
-| 4-byte BE length-prefix framing | [002](Specs/002-message-framing.md) | ✅ |
+| Newline-delimited JSON framing | [002](Specs/002-message-framing.md) | ✅ |
 | Native ↔ extension bridge (`SafariWebExtensionHandler`) | [003](Specs/003-native-extension-bridge.md) | ✅ |
 
 ---

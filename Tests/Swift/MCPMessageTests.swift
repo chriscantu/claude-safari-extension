@@ -275,6 +275,18 @@ final class MCPMessageTests: XCTestCase {
         XCTAssertEqual(args["tabId"] as? Int, 1)
     }
 
+    /// Round-trip from raw JSON: integers stay integers, booleans stay booleans.
+    func testAnyCodableRoundTripPreservesTypesFromRawJSON() throws {
+        let json = #"{"flag": true, "count": 1, "off": false, "zero": 0}"#.data(using: .utf8)!
+        let decoded = try JSONDecoder().decode([String: AnyCodable].self, from: json)
+        let reencoded = try JSONEncoder().encode(decoded)
+        let result = try JSONSerialization.jsonObject(with: reencoded) as! [String: Any]
+        XCTAssertEqual(result["flag"] as? Bool, true)
+        XCTAssertEqual(result["count"] as? Int, 1)
+        XCTAssertEqual(result["off"] as? Bool, false)
+        XCTAssertEqual(result["zero"] as? Int, 0)
+    }
+
     func testDecodeExtensionResponseAllBlocksMalformed() {
         let router = ToolRouter()
         // Content array exists but all blocks are missing the required "type" key
