@@ -67,7 +67,7 @@ function formatTimestamp(timestamp) {
  * @param {boolean} cleared
  * @returns {string}
  */
-function formatOutput(virtualTabId, messages, cleared) {
+function formatConsoleOutput(virtualTabId, messages, cleared) {
     let out;
     if (messages.length === 0) {
         out = `No console messages found for tab ${virtualTabId}.`;
@@ -128,45 +128,21 @@ async function handleReadConsoleMessages(args) {
     }
 
     // If the tab is removed mid-execution Safari may never settle the executeScript
-    // promise, blocking the poll loop. The onRemoved guard wins the race and rejects
-    // immediately. The listener is removed on all three exit paths (success,
-    // executeScript error, tab removal) per CLAUDE.md lifecycle rules.
+    // promise, blocking the poll loop. executeScriptWithTabGuard provides an onRemoved
+    // guard, settled-flag race prevention, and a 30s timeout per CLAUDE.md lifecycle rules.
     let results;
     try {
-        results = await new Promise((resolve, reject) => {
-            let settled = false;
-
-            function cleanup() {
-                browser.tabs.onRemoved.removeListener(onTabRemoved);
-            }
-
-            function onTabRemoved(tabId) {
-                if (tabId !== realTabId || settled) return;
-                settled = true;
-                cleanup();
-                reject(new Error(`Tab ${realTabId} was closed during read_console_messages`));
-            }
-
-            browser.tabs.onRemoved.addListener(onTabRemoved);
-
-            browser.tabs.executeScript(realTabId, {
-                code: buildReadConsoleScript(clear),
-                runAt: "document_idle",
-            }).then((r) => {
-                if (settled) return;
-                settled = true;
-                cleanup();
-                resolve(r);
-            }).catch((err) => {
-                if (settled) return;
-                settled = true;
-                cleanup();
-                reject(err);
-            });
-        });
+        results = await globalThis.executeScriptWithTabGuard(
+            realTabId,
+            buildReadConsoleScript(clear),
+            "read_console_messages"
+        );
     } catch (err) {
-        if (/was closed during/.test(err.message)) throw err;
-        throw globalThis.classifyExecuteScriptError("read_console_messages", realTabId, err);
+        if (err && /was closed during/.test(err.message)) throw err;
+        if (typeof globalThis.classifyExecuteScriptError === "function") {
+            throw globalThis.classifyExecuteScriptError("read_console_messages", realTabId, err);
+        }
+        throw err;
     }
 
     if (!results || results.length === 0) {
@@ -174,11 +150,10 @@ async function handleReadConsoleMessages(args) {
     }
     const result = results[0];
     if (result === undefined || result === null) {
-        // executeScript returned null — treat as empty buffer (content script may not have run yet).
-        // The || [] guard in the IIFE means a missing window.__claudeConsoleMessages returns
-        // { messages: [] }, not null; null here indicates a Safari-level injection issue,
-        // but the spec says to return empty rather than error in this case.
-        return formatOutput(virtualTabId, [], clear);
+        // executeScript returned null — content script may not have loaded yet.
+        // Return empty rather than error per spec, but log so it's visible.
+        console.warn("[read_console_messages] executeScript returned null; console-monitor.js may not have loaded yet");
+        return formatConsoleOutput(virtualTabId, [], false); // nothing was cleared
     }
     if (result.__error != null) {
         throw new Error(`read_console_messages: page script error: ${result.__error}`);
@@ -206,7 +181,7 @@ async function handleReadConsoleMessages(args) {
         messages = messages.slice(-limit);
     }
 
-    return formatOutput(virtualTabId, messages, clear);
+    return formatConsoleOutput(virtualTabId, messages, clear);
 }
 
 // ---------------------------------------------------------------------------
