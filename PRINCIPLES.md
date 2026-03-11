@@ -6,4 +6,4 @@
 4. **Structure Compliance** — Code MUST be organized according to the project STRUCTURE.md guide.
 5. **Deviation Requires Approval** — ANY deviations from these rules MUST be validated by the user.
 6. **Iterative Commits** — Work MUST be done in small iterative batches and commit work as we go.
-7. **PR Merge Gate** — All spec test cases (T1–TN) listed in the feature spec MUST be confirmed passing before a PR is merged. No spec test case may be omitted, skipped, or left as `📋` at merge time.
+7. **PR Merge Gate** — All manual test steps listed in the PR description MUST be completed and confirmed before a PR is merged. No checklist item may be left unchecked at merge time.
