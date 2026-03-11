@@ -123,7 +123,7 @@ Console/network capture, window management, GIF recording, file upload.
 
 | Item | Spec | Status |
 |------|------|--------|
-| `read_console_messages` | [014](Specs/014-read-console.md) | 📋 |
+| `read_console_messages` | [014](Specs/014-read-console.md) | ✅ |
 | `read_network_requests` | [015](Specs/015-read-network.md) | 📋 |
 | `resize_window` — AppleScript window management | [016](Specs/016-resize-window.md) | 📋 |
 | `gif_creator` — record, stop, export animated GIFs | [017](Specs/017-gif-creator.md) | 📋 |
