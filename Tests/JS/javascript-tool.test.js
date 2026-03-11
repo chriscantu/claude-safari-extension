@@ -8,8 +8,12 @@
  * because the two-phase bridge injection (isolated world → <script> → main world)
  * cannot be fully exercised in jsdom (jsdom does not execute <script> textContent).
  *
- * KNOWN GAP — main-world execution (T17):
- *   Page-variable access requires a real browser. Tests verify handler contract only.
+ * KNOWN GAP — main-world execution (T4, T5, T17):
+ *   Page-variable access and async code require a real browser. The bridge IIFE
+ *   (CSP probe, postMessage channel, eval semantics) cannot run in jsdom because
+ *   jsdom does not execute <script> textContent. Handler-layer tests mock the
+ *   executeScript return value; the bridge itself is validated via code-string
+ *   inspection in the "bridge code validation" describe block below.
  *
  * KNOWN GAP — CSP probe (T16):
  *   The synchronous DOM attribute check runs in the bridge script; tests mock the
@@ -295,6 +299,72 @@ describe("javascript_tool", () => {
         test("registers itself under the name 'javascript_tool'", () => {
             loadJavaScriptTool({ browser: makeBrowserMock(), resolveTab: jest.fn(async () => 1) });
             expect(globalThis.registerTool).toHaveBeenCalledWith("javascript_tool", expect.any(Function));
+        });
+    });
+
+    describe("non-Error throw serialization", () => {
+        test("thrown plain object is JSON-stringified, not [object Object]", async () => {
+            const thrownObj = JSON.stringify({ code: 404, message: "Not found" }, null, 2);
+            const handler = loadJavaScriptTool({
+                browser: makeBrowserMock({ scriptResult: [{ error: thrownObj }] }),
+                resolveTab: jest.fn(async () => 1),
+            });
+            await expect(
+                handler({ action: "javascript_exec", text: "throw { code: 404, message: 'Not found' }" })
+            ).rejects.toThrow(/404/);
+        });
+    });
+
+    describe("bridge code validation", () => {
+        async function captureGeneratedCode(userCode) {
+            let capturedCode = null;
+            const browser = {
+                tabs: {
+                    executeScript: jest.fn(async (_tabId, { code }) => {
+                        capturedCode = code;
+                        return [{ value: "ok" }];
+                    }),
+                },
+            };
+            const handler = loadJavaScriptTool({ browser, resolveTab: jest.fn(async () => 1) });
+            await handler({ action: "javascript_exec", text: userCode });
+            return capturedCode;
+        }
+
+        test("generated code uses IIFE-local RFLAG, not module-level RESULT_FLAG, as runtime reference", async () => {
+            const code = await captureGeneratedCode("1+1");
+            // The IIFE-local var RFLAG (not the module-level RESULT_FLAG) must be referenced in postMessage calls
+            expect(code).toMatch(/JSON\.stringify\(RFLAG\)/);
+        });
+
+        test("generated code embeds MAX_OUTPUT numeric value in IIFE-local var declaration", async () => {
+            const code = await captureGeneratedCode("1+1");
+            // The numeric value 100000 must appear as the IIFE-local var, not as a bare module-level reference
+            expect(code).toContain("var MAX_OUT = 100000");
+        });
+
+        test("generated code embeds the RESULT_FLAG literal value", async () => {
+            const code = await captureGeneratedCode("1+1");
+            expect(code).toContain("__claudeJsToolResult");
+        });
+
+        test("generated code uses AsyncFunction for last-expression return semantics", async () => {
+            const code = await captureGeneratedCode("1+1");
+            expect(code).toContain("AsyncFunc");
+            expect(code).toContain("return eval(arguments[0])");
+        });
+
+        test("user code with double-quotes is safely JSON-encoded in generated code", async () => {
+            const userCode = 'document.querySelector("h1").textContent';
+            const code = await captureGeneratedCode(userCode);
+            // Raw concatenation would embed the " literally; JSON encoding escapes it to \"
+            expect(code).toContain(JSON.stringify(userCode));
+        });
+
+        test("user code appears JSON-encoded (not raw-concatenated) in generated code", async () => {
+            const userCode = "const x = '</script>'; x";
+            const code = await captureGeneratedCode(userCode);
+            expect(code).toContain(JSON.stringify(userCode));
         });
     });
 });

@@ -113,7 +113,7 @@ Mouse, keyboard, scroll simulation; page-context JS execution; screenshots.
 |------|------|--------|
 | `computer` — mouse, keyboard, scroll actions | [010](Specs/010-computer-mouse-keyboard.md) | ✅ |
 | `computer` (screenshot) — ScreenCaptureKit | [011](Specs/011-computer-screenshot.md) | ✅ |
-| `javascript_tool` — execute JS in page context | [012](Specs/012-javascript-tool.md) | 📋 |
+| `javascript_tool` — execute JS in page context | [012](Specs/012-javascript-tool.md) | ✅ |
 
 ---
 

@@ -10,13 +10,22 @@
  *   Result   — main world script sends result via window.postMessage; content
  *              script resolves its returned Promise with the result object.
  *
- * The bridge script returns a Promise as its last expression. executeScript
- * in MV2 awaits Promises, so the background script receives the resolved value.
+ * The bridge script returns a Promise as its last expression. Safari's MV2
+ * executeScript implementation awaits Promises returned from injected scripts.
+ * Note: this is Safari-specific — Chrome MV2 does not await Promise results.
  *
  * CSP detection: before the main-world script is injected, a synchronous probe
  * <script> element mutates a DOM attribute. If the attribute is unchanged after
  * appendChild, CSP blocks inline scripts and we return an error immediately
- * without waiting for the 30-second timeout.
+ * without waiting for the 30-second timeout. A unique nonce per invocation
+ * prevents concurrent calls from sharing the same probe attribute.
+ *
+ * eval() semantics: the main-world script uses eval() inside an AsyncFunction
+ * to provide console-like last-expression return semantics. eval() returns the
+ * completion value of the last statement (e.g. eval('1+1') returns 2, not
+ * undefined). await is valid because direct eval() shares the enclosing async
+ * function's execution context. Note: eval() requires 'unsafe-eval' in the
+ * page's CSP script-src directive (separate from 'unsafe-inline' for <script>).
  *
  * ⚠ Safari must be frontmost for executeScript to succeed (same restriction
  *   as the computer tool). ToolRouter.swift activates Safari before forwarding.
@@ -44,11 +53,21 @@ const TIMEOUT_MS   = 30000;
 /**
  * Builds the bridge content script that runs in the isolated world.
  * The script injects a <script> element into the page (main world) that
- * wraps userCode in an AsyncFunction for last-expression return semantics.
+ * uses eval() inside an AsyncFunction for last-expression return semantics.
  *
- * Security: userCode is passed as a JSON-serialized argument to the outer
- * IIFE (injection-safe), then re-serialized via JSON.stringify(userCode)
- * inside the browser before embedding in the AsyncFunction constructor call.
+ * Security: text is JSON-serialized into the outer IIFE argument at build time
+ * (in the background page). Inside the bridge, userCode is JSON-serialized at
+ * bridge-build time (in the extension's isolated world) before being passed as
+ * the call argument to fn(). No user-controlled string is concatenated without
+ * serialization at either stage.
+ *
+ * Spec 012 describes the timeout/message race as Promise.race. The implementation
+ * uses a single Promise with a settled guard flag instead — equivalent and avoids
+ * the cleanup race that Promise.race introduces.
+ *
+ * Note on postMessage spoofing: event.source === window guards against
+ * cross-origin iframes. Same-page scripts could still forge the flag, but
+ * the local-machine MCP trust boundary makes this an accepted risk.
  *
  * @param {string} text - The user-provided JavaScript code to execute.
  * @returns {string} JS source for browser.tabs.executeScript code option.
@@ -60,6 +79,10 @@ function buildJavaScriptExecScript(text) {
         var MAX_OUT = ${MAX_OUTPUT};
         var TIMEOUT = ${TIMEOUT_MS};
 
+        // This Promise always resolves (never rejects). Errors from user code,
+        // timeout, and CSP detection resolve with { error: string }; the handler
+        // layer converts them to thrown Errors. This avoids unhandled rejections
+        // from synchronous exceptions thrown inside the executor.
         return new Promise(function(resolve) {
             var settled = false;
             var timer;
@@ -72,7 +95,11 @@ function buildJavaScriptExecScript(text) {
                 resolve(data);
             }
 
+            // event.source === window rejects messages from cross-origin iframes.
+            // Same-page scripts could still forge the flag — accepted risk given
+            // the local-machine MCP trust boundary (see file-level JSDoc).
             function onMessage(event) {
+                if (event.source !== window) return;
                 if (event.data && event.data[RFLAG]) {
                     settle(event.data);
                 }
@@ -80,15 +107,23 @@ function buildJavaScriptExecScript(text) {
 
             // --- Synchronous CSP probe ---
             // A <script> without async/defer executes synchronously on appendChild.
-            // If the probe attribute stays "pending" after append, CSP blocks inline scripts.
+            // If the attribute stays "pending" after append, CSP blocks inline scripts.
+            // A unique nonce prevents concurrent calls from matching each other's probe.
+            var cspNonce = Math.random().toString(36).slice(2);
+            var probeAttr = "data-claude-csp-probe-" + cspNonce;
             var probe = document.createElement("script");
-            probe.setAttribute("data-claude-csp-probe", "pending");
-            probe.textContent = "document.querySelector('[data-claude-csp-probe]').setAttribute('data-claude-csp-probe','ok');";
-            (document.head || document.documentElement).appendChild(probe);
+            probe.setAttribute(probeAttr, "pending");
+            probe.textContent = "document.querySelector('[" + probeAttr + "]').setAttribute('" + probeAttr + "','ok');";
+            try {
+                (document.head || document.documentElement).appendChild(probe);
+            } catch (appendErr) {
+                settle({ error: "Cannot inject script: document has no injectable parent element (" + appendErr.message + ")" });
+                return;
+            }
             probe.remove();
 
-            if (probe.getAttribute("data-claude-csp-probe") !== "ok") {
-                resolve({ error: "Page Content Security Policy blocks script execution. The page's CSP does not allow inline scripts." });
+            if (probe.getAttribute(probeAttr) !== "ok") {
+                settle({ error: "Page Content Security Policy blocks script execution. The page's CSP does not allow inline scripts." });
                 return;
             }
 
@@ -98,15 +133,25 @@ function buildJavaScriptExecScript(text) {
 
             window.addEventListener("message", onMessage);
 
-            // Build main-world script — userCode embedded via JSON.stringify (injection-safe).
-            // The AsyncFunction constructor gives the code its own return-capable scope
-            // and allows await at the top level, so the last expression is returned.
+            // Build and inject main-world script.
+            // userCode is embedded via JSON.stringify(userCode) at bridge-build time
+            // (here in the IIFE, before injection) — not at background-page build time.
+            //
+            // eval() inside an AsyncFunction gives console-like semantics:
+            //   eval('1+1') returns 2  (last expression value, not undefined)
+            //   eval('const x=5; x*3') returns 15
+            //   eval('await fetch(...)') works because direct eval() shares the async context
+            //
+            // Note: RFLAG and MAX_OUT are IIFE-local variables (declared above as
+            // var RFLAG/MAX_OUT). They are referenced here at bridge-runtime via
+            // JSON.stringify(RFLAG) and MAX_OUT — both are in IIFE scope. The module-level
+            // constants RESULT_FLAG and MAX_OUTPUT are NOT in scope here.
             var mainScript = [
                 "(async function() {",
                 "  try {",
                 "    var AsyncFunc = Object.getPrototypeOf(async function(){}).constructor;",
-                "    var fn = new AsyncFunc(" + JSON.stringify(userCode) + ");",
-                "    var result = await fn();",
+                "    var fn = new AsyncFunc('return eval(arguments[0])');",
+                "    var result = await fn(" + JSON.stringify(userCode) + ");",
                 "    var output;",
                 "    if (result === undefined) {",
                 "      output = 'undefined';",
@@ -115,25 +160,33 @@ function buildJavaScriptExecScript(text) {
                 "        output = Object.prototype.toString.call(result) + ' (DOM element \\u2014 use .outerHTML or .textContent to serialize)';",
                 "      } else {",
                 "        try { output = JSON.stringify(result, null, 2); }",
-                "        catch(circ) { window.postMessage({ [" + JSON.stringify(RESULT_FLAG) + "]: true, error: 'Result contains circular references' }, '*'); return; }",
+                "        catch(circ) { window.postMessage({ [" + JSON.stringify(RFLAG) + "]: true, error: 'Result contains circular references' }, '*'); return; }",
                 "      }",
                 "    } else {",
                 "      output = String(result);",
                 "    }",
-                "    if (output.length > " + MAX_OUTPUT + ") output = output.slice(0, " + MAX_OUTPUT + ") + '\\n[output truncated]';",
-                "    window.postMessage({ [" + JSON.stringify(RESULT_FLAG) + "]: true, value: output }, '*');",
+                "    if (output.length > " + MAX_OUT + ") output = output.slice(0, " + MAX_OUT + ") + '\\n[output truncated]';",
+                "    window.postMessage({ [" + JSON.stringify(RFLAG) + "]: true, value: output }, '*');",
                 "  } catch(e) {",
-                "    var msg = (e instanceof Error)",
-                "      ? 'JavaScript error: ' + e.message + '\\n' + (e.stack || '(no stack)')",
-                "      : String(e);",
-                "    window.postMessage({ [" + JSON.stringify(RESULT_FLAG) + "]: true, error: msg }, '*');",
+                "    var msg;",
+                "    if (e instanceof Error) {",
+                "      msg = 'JavaScript error: ' + e.message + '\\n' + (e.stack || '(no stack)');",
+                "    } else {",
+                "      try { msg = JSON.stringify(e, null, 2); } catch(_) { msg = String(e); }",
+                "    }",
+                "    window.postMessage({ [" + JSON.stringify(RFLAG) + "]: true, error: msg }, '*');",
                 "  }",
                 "})();"
             ].join("\\n");
 
             var script = document.createElement("script");
             script.textContent = mainScript;
-            (document.head || document.documentElement).appendChild(script);
+            try {
+                (document.head || document.documentElement).appendChild(script);
+            } catch (injectErr) {
+                settle({ error: "Script injection failed: " + injectErr.message });
+                return;
+            }
             script.remove();
         });
     })(${JSON.stringify(text)})`;
