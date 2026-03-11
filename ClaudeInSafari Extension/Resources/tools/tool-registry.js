@@ -95,7 +95,7 @@ function classifyExecuteScriptError(toolName, realTabId, err) {
  *
  * @param {number} realTabId  - resolved browser tab ID
  * @param {string} scriptCode - JS source to inject (IIFE string)
- * @param {string} toolName   - e.g. "read_network_requests" (for error messages)
+ * @param {string} toolName   - e.g. "read_console_messages" or "read_network_requests" (used in rejection messages)
  * @returns {Promise<any[]>} the raw executeScript result array
  */
 function executeScriptWithTabGuard(realTabId, scriptCode, toolName) {
@@ -128,12 +128,18 @@ function executeScriptWithTabGuard(realTabId, scriptCode, toolName) {
             code: scriptCode,
             runAt: "document_idle",
         }).then((r) => {
-            if (settled) return;
+            if (settled) {
+                console.warn(`[${toolName}] executeScript resolved after settlement (result discarded)`);
+                return;
+            }
             settled = true;
             cleanup();
             resolve(r);
         }).catch((err) => {
-            if (settled) return;
+            if (settled) {
+                console.warn(`[${toolName}] executeScript rejected after settlement (late error):`, err);
+                return;
+            }
             settled = true;
             cleanup();
             reject(err);

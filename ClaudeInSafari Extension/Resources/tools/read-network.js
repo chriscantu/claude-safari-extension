@@ -55,6 +55,9 @@ function buildReadNetworkScript(clear) {
  * @returns {string}
  */
 function formatNetworkEntry(entry) {
+    if (!entry || typeof entry !== "object") {
+        return `[unknown] (invalid entry: ${JSON.stringify(entry)})`;
+    }
     const type = entry.type || "fetch";
     const method = (entry.method || "GET").toUpperCase();
     const url = entry.url || "(unknown)";
@@ -119,8 +122,9 @@ function formatNetworkOutput(virtualTabId, requests, cleared) {
  * @throws {Error} "read_network_requests: could not resolve tab..." when tab resolution fails
  * @throws {Error} "read_network_requests: ..." when executeScript rejects (classifyExecuteScriptError)
  * @throws {Error} "read_network_requests: executeScript returned no result (unexpected)" when
- *   executeScript returns an empty array (indicates Safari content-script injection failure, not
- *   an empty buffer — an empty buffer returns { requests: [] }, not []).
+ *   executeScript resolves with a falsy value or an empty array — both indicate a Safari
+ *   injection failure rather than an empty buffer (an empty buffer returns { requests: [] }
+ *   as results[0], not a falsy or zero-length results array).
  */
 async function handleReadNetworkRequests(args) {
     const {
@@ -164,7 +168,9 @@ async function handleReadNetworkRequests(args) {
     }
     const result = results[0];
     if (result === undefined || result === null) {
-        // Content script not yet loaded — return empty rather than error (spec: T12).
+        // executeScript returned null — content script may not have loaded yet.
+        // Return empty rather than error per spec (T12), but log so it's visible.
+        console.warn("[read_network_requests] executeScript returned null; network-monitor.js may not have loaded yet");
         return formatNetworkOutput(virtualTabId, [], clear);
     }
     if (result.__error != null) {

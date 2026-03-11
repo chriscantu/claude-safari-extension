@@ -221,47 +221,19 @@ async function handleJavaScriptTool(args) {
 
     const realTabId = await globalThis.resolveTab(virtualTabId);
 
-    // Wrap executeScript in a Promise that also listens for tab closure.
-    // If the tab is removed mid-execution the page context is destroyed and
-    // Safari may never reject executeScript — this guard wins the race and
-    // rejects immediately. The listener is removed on all three exit paths
-    // (success, executeScript error, tab removal) per CLAUDE.md lifecycle rules.
     let results;
     try {
-        results = await new Promise((resolve, reject) => {
-            let settled = false;
-
-            function cleanup() {
-                browser.tabs.onRemoved.removeListener(onTabRemoved);
-            }
-
-            function onTabRemoved(tabId) {
-                if (tabId !== realTabId || settled) return;
-                settled = true;
-                cleanup();
-                reject(new Error(`Tab ${realTabId} was closed during JavaScript execution`));
-            }
-
-            browser.tabs.onRemoved.addListener(onTabRemoved);
-
-            browser.tabs.executeScript(realTabId, {
-                code: buildJavaScriptExecScript(text),
-                runAt: "document_idle",
-            }).then((r) => {
-                if (settled) return;
-                settled = true;
-                cleanup();
-                resolve(r);
-            }).catch((err) => {
-                if (settled) return;
-                settled = true;
-                cleanup();
-                reject(err);
-            });
-        });
+        results = await globalThis.executeScriptWithTabGuard(
+            realTabId,
+            buildJavaScriptExecScript(text),
+            "javascript_tool"
+        );
     } catch (err) {
-        if (/was closed during/.test(err.message)) throw err;
-        throw globalThis.classifyExecuteScriptError("javascript_tool", realTabId, err);
+        if (err && /was closed during/.test(err.message)) throw err;
+        if (typeof globalThis.classifyExecuteScriptError === "function") {
+            throw globalThis.classifyExecuteScriptError("javascript_tool", realTabId, err);
+        }
+        throw err;
     }
 
     if (!results || results.length === 0 || results[0] == null) {

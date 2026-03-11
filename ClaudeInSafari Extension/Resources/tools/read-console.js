@@ -150,10 +150,9 @@ async function handleReadConsoleMessages(args) {
     }
     const result = results[0];
     if (result === undefined || result === null) {
-        // executeScript returned null — treat as empty buffer (content script may not have run yet).
-        // The || [] guard in the IIFE means a missing window.__claudeConsoleMessages returns
-        // { messages: [] }, not null; null here indicates a Safari-level injection issue,
-        // but the spec says to return empty rather than error in this case.
+        // executeScript returned null — content script may not have loaded yet.
+        // Return empty rather than error per spec, but log so it's visible.
+        console.warn("[read_console_messages] executeScript returned null; console-monitor.js may not have loaded yet");
         return formatOutput(virtualTabId, [], clear);
     }
     if (result.__error != null) {

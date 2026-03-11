@@ -29,6 +29,7 @@
  *   T24 — limit returns results in chronological (oldest-first) order
  *   T25 — tab closed during executeScript: rejects with tab-closed error; listener removed
  *   T26 — status 0 without error event: shows "0 (no response)"
+ *   T27 — executeScript timeout after 30s: rejects with timeout error
  */
 
 "use strict";
@@ -442,5 +443,32 @@ describe("read_network_requests tool", () => {
         const result = await handler({ tabId: 1 });
 
         expect(result).toContain("0 (no response)");
+    });
+
+    test("T27 — executeScript timeout after 30s: rejects with timeout error", async () => {
+        jest.useFakeTimers();
+        const resolveTab = jest.fn(async () => 42);
+        const browser = {
+            tabs: {
+                executeScript: jest.fn(() => new Promise(() => { /* never resolves */ })),
+                onRemoved: {
+                    addListener: jest.fn(),
+                    removeListener: jest.fn(),
+                },
+            },
+        };
+        const handler = loadReadNetwork({ browser, resolveTab });
+
+        const promise = handler({ tabId: 1 });
+        // Flush microtasks so resolveTab settles and the handler reaches
+        // executeScriptWithTabGuard (where setTimeout is registered).
+        await Promise.resolve();
+        await Promise.resolve();
+        jest.advanceTimersByTime(30000);
+
+        await expect(promise).rejects.toThrow(/timed out after 30s/);
+        expect(browser.tabs.onRemoved.removeListener).toHaveBeenCalled();
+
+        jest.useRealTimers();
     });
 });
