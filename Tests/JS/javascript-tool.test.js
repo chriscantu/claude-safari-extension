@@ -41,6 +41,10 @@ function makeBrowserMock(opts = {}) {
                 if (scriptError) throw scriptError;
                 return scriptResult;
             }),
+            onRemoved: {
+                addListener: jest.fn(),
+                removeListener: jest.fn(),
+            },
         },
     };
 }
@@ -271,6 +275,37 @@ describe("javascript_tool", () => {
             await expect(handler({ action: "javascript_exec", text: "1+1" }))
                 .rejects.toThrow(/no result/i);
         });
+
+        test("tab closed during execution rejects with tab-closed error immediately", async () => {
+            // executeScript hangs forever; onRemoved fires immediately to win the race.
+            const browser = {
+                tabs: {
+                    executeScript: jest.fn(() => new Promise(() => {})),
+                    onRemoved: {
+                        addListener: jest.fn((cb) => { cb(7); }),
+                        removeListener: jest.fn(),
+                    },
+                },
+            };
+            const handler = loadJavaScriptTool({ browser, resolveTab: jest.fn(async () => 7) });
+            await expect(handler({ action: "javascript_exec", text: "1+1" }))
+                .rejects.toThrow(/was closed during/i);
+        });
+
+        test("onRemoved listener is removed on successful execution", async () => {
+            const browser = makeBrowserMock({ scriptResult: [{ value: "ok" }] });
+            const handler = loadJavaScriptTool({ browser, resolveTab: jest.fn(async () => 1) });
+            await handler({ action: "javascript_exec", text: "1" });
+            expect(browser.tabs.onRemoved.removeListener).toHaveBeenCalled();
+        });
+
+        test("onRemoved listener is removed when executeScript throws", async () => {
+            const browser = makeBrowserMock({ scriptError: new Error("No tab with id 1") });
+            const handler = loadJavaScriptTool({ browser, resolveTab: jest.fn(async () => 1) });
+            await expect(handler({ action: "javascript_exec", text: "1" }))
+                .rejects.toThrow();
+            expect(browser.tabs.onRemoved.removeListener).toHaveBeenCalled();
+        });
     });
 
     describe("tab resolution", () => {
@@ -324,6 +359,7 @@ describe("javascript_tool", () => {
                         capturedCode = code;
                         return [{ value: "ok" }];
                     }),
+                    onRemoved: { addListener: jest.fn(), removeListener: jest.fn() },
                 },
             };
             const handler = loadJavaScriptTool({ browser, resolveTab: jest.fn(async () => 1) });
