@@ -12,7 +12,8 @@
  *   T7  — clear: true passes clear flag into injected script
  *   T8  — limit: returns only the most recent N messages
  *   T9  — no console messages: returns "No console messages found" string
- *   T10 — tab not found: rejects with classifyExecuteScriptError message
+ *   T10 — tab not found: rejects with could not resolve tab message
+ *   T10b — executeScript failure: classifyExecuteScriptError wraps error with guidance
  *   T11 — unhandled error entry (level=error, message with filename): included
  *   T12 — unhandled rejection entry: included with "Unhandled rejection:" prefix
  *   T13 — content script not loaded (result null): returns empty, not error

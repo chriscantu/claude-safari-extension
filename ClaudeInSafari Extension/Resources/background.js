@@ -133,7 +133,7 @@ if (typeof browser.alarms !== "undefined") {
             }
         });
     }).catch((err) => {
-        console.warn("read_console_messages: stale alarm cleanup failed (non-critical):", err);
+        console.warn("computer: stale alarm cleanup failed (non-critical):", err);
     });
 }
 
