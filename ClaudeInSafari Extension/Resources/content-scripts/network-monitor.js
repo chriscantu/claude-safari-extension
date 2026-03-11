@@ -54,6 +54,16 @@
     };
 
     XMLHttpRequest.prototype.send = function (...args) {
+        this.addEventListener("error", () => {
+            if (this.__claudeEntry) {
+                this.__claudeEntry.error = "Network request failed";
+            }
+        });
+        this.addEventListener("abort", () => {
+            if (this.__claudeEntry) {
+                this.__claudeEntry.error = "Request aborted";
+            }
+        });
         this.addEventListener("loadend", () => {
             if (this.__claudeEntry) {
                 this.__claudeEntry.status = this.status;

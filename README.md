@@ -99,11 +99,11 @@ This project follows the principles in [PRINCIPLES.md](PRINCIPLES.md):
 | `find` — find elements by natural language | ✅ Done |
 | `form_input` — fill inputs, checkboxes, selects | ✅ Done |
 | `get_page_text` — extract article/main text | ✅ Done |
-| `javascript_tool` — run JS in page context | 🔲 Planned |
-| `read_console_messages` — captured console logs | 🔲 Planned (content script scaffolded) |
-| `read_network_requests` — captured network log | 🔲 Planned (content script scaffolded) |
-| `computer` — mouse, keyboard, scroll | 🔲 Planned |
-| `computer` (screenshot) — ScreenCaptureKit | 🔲 Planned |
+| `javascript_tool` — run JS in page context | ✅ Done |
+| `read_console_messages` — captured console logs | ✅ Done |
+| `read_network_requests` — captured network log | ✅ Done |
+| `computer` — mouse, keyboard, scroll | ✅ Done |
+| `computer` (screenshot) — ScreenCaptureKit | ✅ Done |
 | `resize_window` — AppleScript window management | 🔲 Planned |
 | `tabs_context_mcp` / `tabs_create_mcp` | ✅ Done |
 | `gif_creator` | 🔲 Planned |

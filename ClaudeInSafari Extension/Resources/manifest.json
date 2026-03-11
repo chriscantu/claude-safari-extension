@@ -26,6 +26,7 @@
             "tools/computer.js",
             "tools/javascript-tool.js",
             "tools/read-console.js",
+            "tools/read-network.js",
             "background.js"
         ],
         "persistent": false
