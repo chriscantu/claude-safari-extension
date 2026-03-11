@@ -25,6 +25,7 @@
             "tools/get-page-text.js",
             "tools/computer.js",
             "tools/javascript-tool.js",
+            "tools/read-console.js",
             "background.js"
         ],
         "persistent": false

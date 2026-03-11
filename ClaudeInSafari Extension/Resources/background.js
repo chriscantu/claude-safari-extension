@@ -14,7 +14,8 @@
  *   8. tools/get-page-text.js  — registers get_page_text
  *   9. tools/computer.js       — registers computer
  *  10. tools/javascript-tool.js — registers javascript_tool
- *  11. background.js           — this file; starts the poll loop
+ *  11. tools/read-console.js   — registers read_console_messages
+ *  12. background.js           — this file; starts the poll loop
  */
 
 const POLL_INTERVAL_MS = 100;
