@@ -86,11 +86,8 @@ function loadReadNetwork({ browser, resolveTab }) {
     globalThis.browser = browser;
     globalThis.resolveTab = resolveTab;
 
-    // classifyExecuteScriptError must be available before loading the tool
-    globalThis.classifyExecuteScriptError = jest.fn((toolName, tabId, err) => {
-        return new Error(`${toolName}: cannot inject into this page (tab ${tabId}): ${err.message}`);
-    });
-
+    // Load tool-registry.js first — it sets globalThis.classifyExecuteScriptError
+    // and globalThis.executeScriptWithTabGuard (used by the tool handler).
     jest.isolateModules(() => {
         require("../../ClaudeInSafari Extension/Resources/tools/tool-registry.js");
     });
@@ -116,6 +113,7 @@ describe("read_network_requests tool", () => {
         delete globalThis.resolveTab;
         delete globalThis.registerTool;
         delete globalThis.classifyExecuteScriptError;
+        delete globalThis.executeScriptWithTabGuard;
         delete globalThis.executeTool;
     });
 

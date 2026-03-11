@@ -82,6 +82,7 @@ claude-safari-extension/
 │       │   └── SafariWebExtensionHandlerTests.swift
 │       └── JS/                              # JavaScript test suites
 │           ├── tool-registry.test.js
+│           ├── background.test.js
 │           ├── read-page.test.js
 │           ├── find.test.js
 │           ├── form-input.test.js
@@ -91,6 +92,8 @@ claude-safari-extension/
 │           ├── navigate.test.js
 │           ├── tabs-manager.test.js
 │           ├── read-console.test.js
+│           ├── read-network.test.js
+│           ├── accessibility-tree.test.js
 │           ├── console-monitor.test.js
 │           ├── network-monitor.test.js
 │           └── gif-creator.test.js

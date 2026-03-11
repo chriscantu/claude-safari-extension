@@ -84,9 +84,67 @@ function classifyExecuteScriptError(toolName, realTabId, err) {
     return new Error(`${toolName}: executeScript failed: ${msg}`);
 }
 
+/**
+ * Wraps browser.tabs.executeScript with three safety mechanisms:
+ *   1. A settled-flag guard preventing double-settlement races.
+ *   2. An onRemoved listener that rejects immediately if the tab closes.
+ *   3. A 30-second timeout that rejects if the script never completes.
+ *
+ * Callers should check `err.message` for "was closed during" before calling
+ * classifyExecuteScriptError, so the tab-closed message is not overwritten.
+ *
+ * @param {number} realTabId  - resolved browser tab ID
+ * @param {string} scriptCode - JS source to inject (IIFE string)
+ * @param {string} toolName   - e.g. "read_network_requests" (for error messages)
+ * @returns {Promise<any[]>} the raw executeScript result array
+ */
+function executeScriptWithTabGuard(realTabId, scriptCode, toolName) {
+    return new Promise((resolve, reject) => {
+        let settled = false;
+        let timeoutId;
+
+        function cleanup() {
+            browser.tabs.onRemoved.removeListener(onTabRemoved);
+            clearTimeout(timeoutId);
+        }
+
+        function onTabRemoved(tabId) {
+            if (tabId !== realTabId || settled) return;
+            settled = true;
+            cleanup();
+            reject(new Error(`Tab ${realTabId} was closed during ${toolName}`));
+        }
+
+        browser.tabs.onRemoved.addListener(onTabRemoved);
+
+        timeoutId = setTimeout(() => {
+            if (settled) return;
+            settled = true;
+            cleanup();
+            reject(new Error(`${toolName}: executeScript timed out after 30s`));
+        }, 30000);
+
+        browser.tabs.executeScript(realTabId, {
+            code: scriptCode,
+            runAt: "document_idle",
+        }).then((r) => {
+            if (settled) return;
+            settled = true;
+            cleanup();
+            resolve(r);
+        }).catch((err) => {
+            if (settled) return;
+            settled = true;
+            cleanup();
+            reject(err);
+        });
+    });
+}
+
 // Export for use by background.js
 if (typeof globalThis !== "undefined") {
     globalThis.registerTool = registerTool;
     globalThis.executeTool = executeTool;
     globalThis.classifyExecuteScriptError = classifyExecuteScriptError;
+    globalThis.executeScriptWithTabGuard = executeScriptWithTabGuard;
 }

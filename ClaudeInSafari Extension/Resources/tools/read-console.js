@@ -128,45 +128,21 @@ async function handleReadConsoleMessages(args) {
     }
 
     // If the tab is removed mid-execution Safari may never settle the executeScript
-    // promise, blocking the poll loop. The onRemoved guard wins the race and rejects
-    // immediately. The listener is removed on all three exit paths (success,
-    // executeScript error, tab removal) per CLAUDE.md lifecycle rules.
+    // promise, blocking the poll loop. executeScriptWithTabGuard provides an onRemoved
+    // guard, settled-flag race prevention, and a 30s timeout per CLAUDE.md lifecycle rules.
     let results;
     try {
-        results = await new Promise((resolve, reject) => {
-            let settled = false;
-
-            function cleanup() {
-                browser.tabs.onRemoved.removeListener(onTabRemoved);
-            }
-
-            function onTabRemoved(tabId) {
-                if (tabId !== realTabId || settled) return;
-                settled = true;
-                cleanup();
-                reject(new Error(`Tab ${realTabId} was closed during read_console_messages`));
-            }
-
-            browser.tabs.onRemoved.addListener(onTabRemoved);
-
-            browser.tabs.executeScript(realTabId, {
-                code: buildReadConsoleScript(clear),
-                runAt: "document_idle",
-            }).then((r) => {
-                if (settled) return;
-                settled = true;
-                cleanup();
-                resolve(r);
-            }).catch((err) => {
-                if (settled) return;
-                settled = true;
-                cleanup();
-                reject(err);
-            });
-        });
+        results = await globalThis.executeScriptWithTabGuard(
+            realTabId,
+            buildReadConsoleScript(clear),
+            "read_console_messages"
+        );
     } catch (err) {
-        if (/was closed during/.test(err.message)) throw err;
-        throw globalThis.classifyExecuteScriptError("read_console_messages", realTabId, err);
+        if (err && /was closed during/.test(err.message)) throw err;
+        if (typeof globalThis.classifyExecuteScriptError === "function") {
+            throw globalThis.classifyExecuteScriptError("read_console_messages", realTabId, err);
+        }
+        throw err;
     }
 
     if (!results || results.length === 0) {

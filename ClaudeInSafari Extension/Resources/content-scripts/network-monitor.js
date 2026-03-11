@@ -75,14 +75,12 @@
         return originalSend.apply(this, args);
     };
 
-    // Supplement with PerformanceObserver for resource timing
+    // Register a PerformanceObserver so resource-timing entries are buffered by
+    // the browser and available for future use. The callback is intentionally
+    // empty — all capture is handled by the fetch/XHR patches above.
     if (window.PerformanceObserver) {
         try {
-            const observer = new PerformanceObserver(() => {
-                // Resource entries are available but we primarily rely on fetch/XHR patching.
-                // This observer ensures we don't miss any requests.
-            });
-            observer.observe({ entryTypes: ["resource"] });
+            new PerformanceObserver(() => {}).observe({ entryTypes: ["resource"] });
         } catch {
             // PerformanceObserver may not support 'resource' in all contexts
         }

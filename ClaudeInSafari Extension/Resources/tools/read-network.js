@@ -47,12 +47,14 @@ function buildReadNetworkScript(clear) {
 
 /**
  * Formats a single network request entry into the spec output line.
+ * Named with a "Network" prefix to avoid colliding with formatEntry in other
+ * tool files that share the MV2 background script's global scope.
  *
  * @param {{ type: string, method: string, url: string, status: number|null,
  *           statusText?: string, error?: string, startTime: number, endTime?: number }} entry
  * @returns {string}
  */
-function formatEntry(entry) {
+function formatNetworkEntry(entry) {
     const type = entry.type || "fetch";
     const method = (entry.method || "GET").toUpperCase();
     const url = entry.url || "(unknown)";
@@ -80,20 +82,22 @@ function formatEntry(entry) {
 
 /**
  * Formats the final list of requests into the spec output string.
+ * Named with a "Network" prefix to avoid colliding with formatOutput in other
+ * tool files that share the MV2 background script's global scope.
  *
  * @param {number} virtualTabId
  * @param {Array} requests
  * @param {boolean} cleared
  * @returns {string}
  */
-function formatOutput(virtualTabId, requests, cleared) {
+function formatNetworkOutput(virtualTabId, requests, cleared) {
     let out;
     if (requests.length === 0) {
         out = `No network requests found for tab ${virtualTabId}.`;
     } else {
         const lines = [`Network requests for tab ${virtualTabId} (${requests.length} requests):`, ""];
         for (const entry of requests) {
-            lines.push(formatEntry(entry));
+            lines.push(formatNetworkEntry(entry));
         }
         out = lines.join("\n");
     }
@@ -111,6 +115,12 @@ function formatOutput(virtualTabId, requests, cleared) {
 /**
  * @param {{ tabId: number, urlPattern?: string, clear?: boolean, limit?: number }} args
  * @returns {Promise<string>} formatted network requests
+ * @throws {Error} "read_network_requests: tabId parameter is required" when tabId is missing
+ * @throws {Error} "read_network_requests: could not resolve tab..." when tab resolution fails
+ * @throws {Error} "read_network_requests: ..." when executeScript rejects (classifyExecuteScriptError)
+ * @throws {Error} "read_network_requests: executeScript returned no result (unexpected)" when
+ *   executeScript returns an empty array (indicates Safari content-script injection failure, not
+ *   an empty buffer — an empty buffer returns { requests: [] }, not []).
  */
 async function handleReadNetworkRequests(args) {
     const {
@@ -129,47 +139,24 @@ async function handleReadNetworkRequests(args) {
         realTabId = await globalThis.resolveTab(virtualTabId);
     } catch (err) {
         throw new Error(
-            `read_network_requests: could not resolve tab (tabId=${virtualTabId}): ${err.message || String(err)}. ` +
+            `read_network_requests: could not resolve tab (tabId=${virtualTabId}): ${(err && err.message) || String(err)}. ` +
             `Use tabs_context_mcp to list available tabs.`
         );
     }
 
     let results;
     try {
-        results = await new Promise((resolve, reject) => {
-            let settled = false;
-
-            function cleanup() {
-                browser.tabs.onRemoved.removeListener(onTabRemoved);
-            }
-
-            function onTabRemoved(tabId) {
-                if (tabId !== realTabId || settled) return;
-                settled = true;
-                cleanup();
-                reject(new Error(`Tab ${realTabId} was closed during read_network_requests`));
-            }
-
-            browser.tabs.onRemoved.addListener(onTabRemoved);
-
-            browser.tabs.executeScript(realTabId, {
-                code: buildReadNetworkScript(clear),
-                runAt: "document_idle",
-            }).then((r) => {
-                if (settled) return;
-                settled = true;
-                cleanup();
-                resolve(r);
-            }).catch((err) => {
-                if (settled) return;
-                settled = true;
-                cleanup();
-                reject(err);
-            });
-        });
+        results = await globalThis.executeScriptWithTabGuard(
+            realTabId,
+            buildReadNetworkScript(clear),
+            "read_network_requests"
+        );
     } catch (err) {
-        if (/was closed during/.test(err.message)) throw err;
-        throw globalThis.classifyExecuteScriptError("read_network_requests", realTabId, err);
+        if (err && /was closed during/.test(err.message)) throw err;
+        if (typeof globalThis.classifyExecuteScriptError === "function") {
+            throw globalThis.classifyExecuteScriptError("read_network_requests", realTabId, err);
+        }
+        throw err;
     }
 
     if (!results || results.length === 0) {
@@ -178,7 +165,7 @@ async function handleReadNetworkRequests(args) {
     const result = results[0];
     if (result === undefined || result === null) {
         // Content script not yet loaded — return empty rather than error (spec: T12).
-        return formatOutput(virtualTabId, [], clear);
+        return formatNetworkOutput(virtualTabId, [], clear);
     }
     if (result.__error != null) {
         throw new Error(`read_network_requests: page script error: ${result.__error}`);
@@ -203,7 +190,7 @@ async function handleReadNetworkRequests(args) {
         requests = requests.slice(-limit);
     }
 
-    return formatOutput(virtualTabId, requests, clear);
+    return formatNetworkOutput(virtualTabId, requests, clear);
 }
 
 // ---------------------------------------------------------------------------
