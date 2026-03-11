@@ -343,9 +343,16 @@ describe("javascript_tool", () => {
             expect(code).toContain("var MAX_OUT = 100000");
         });
 
-        test("generated code embeds the RESULT_FLAG literal value", async () => {
+        test("generated code embeds the RESULT_FLAG base prefix", async () => {
             const code = await captureGeneratedCode("1+1");
             expect(code).toContain("__claudeJsToolResult");
+        });
+
+        test("RFLAG is nonce-suffixed per invocation to prevent concurrent-call cross-contamination", async () => {
+            const code = await captureGeneratedCode("1+1");
+            // RFLAG must be assigned at bridge-runtime using Math.random(), not a static string
+            expect(code).toContain("Math.random()");
+            expect(code).toMatch(/var RFLAG\s*=\s*"__claudeJsToolResult_" \+ Math\.random\(\)/);
         });
 
         test("generated code uses AsyncFunction for last-expression return semantics", async () => {

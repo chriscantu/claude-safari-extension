@@ -20,6 +20,11 @@
  * without waiting for the 30-second timeout. A unique nonce per invocation
  * prevents concurrent calls from sharing the same probe attribute.
  *
+ * Concurrent-call isolation: RFLAG (the postMessage channel key) is suffixed
+ * with a per-invocation random nonce, so two concurrent calls on the same tab
+ * cannot cross-contaminate each other's results. Without this, both onMessage
+ * listeners would fire for the first postMessage that arrives.
+ *
  * eval() semantics: the main-world script uses eval() inside an AsyncFunction
  * to provide console-like last-expression return semantics. eval() returns the
  * completion value of the last statement (e.g. eval('1+1') returns 2, not
@@ -75,7 +80,7 @@ const TIMEOUT_MS   = 30000;
 function buildJavaScriptExecScript(text) {
     return `(function(userCode) {
         "use strict";
-        var RFLAG   = ${JSON.stringify(RESULT_FLAG)};
+        var RFLAG   = ${JSON.stringify(RESULT_FLAG + "_")} + Math.random().toString(36).slice(2);
         var MAX_OUT = ${MAX_OUTPUT};
         var TIMEOUT = ${TIMEOUT_MS};
 
@@ -127,11 +132,14 @@ function buildJavaScriptExecScript(text) {
                 return;
             }
 
+            // Register listener before starting the timer: canonical order per
+            // CLAUDE.md event listener lifecycle guidance — listener → timer → inject.
+            // This ensures the clock never runs against an unregistered handler.
+            window.addEventListener("message", onMessage);
+
             timer = setTimeout(function() {
                 settle({ error: "Script execution timed out after 30 seconds" });
             }, TIMEOUT);
-
-            window.addEventListener("message", onMessage);
 
             // Build and inject main-world script.
             // userCode is embedded via JSON.stringify(userCode) at bridge-build time
