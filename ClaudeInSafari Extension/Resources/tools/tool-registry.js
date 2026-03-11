@@ -93,27 +93,42 @@ function classifyExecuteScriptError(toolName, realTabId, err) {
  * Callers should check `err.message` for "was closed during" before calling
  * classifyExecuteScriptError, so the tab-closed message is not overwritten.
  *
+ * Callers that need to abandon the promise early (e.g. racing against another
+ * promise) MUST call `.cancel()` on the returned promise to release the
+ * onRemoved listener and the timeout timer.
+ *
+ * @note MV2 non-persistent risk: if the background page is suspended between
+ *   addListener and executeScript resolving, both the onRemoved listener and
+ *   the 30 s setTimeout are silently dropped, leaving this Promise permanently
+ *   unresettled. The alarms keepalive (every 24 s) reduces but does not
+ *   eliminate this window. Callers that depend on guaranteed settlement must
+ *   account for background-page suspension.
+ *
  * @param {number} realTabId  - resolved browser tab ID
  * @param {string} scriptCode - JS source to inject (IIFE string)
  * @param {string} toolName   - e.g. "read_console_messages" or "read_network_requests" (used in rejection messages)
- * @returns {Promise<any[]>} the raw executeScript result array
+ * @returns {Promise<any[]> & { cancel(): void }} the raw executeScript result array;
+ *   call `.cancel()` to release resources if abandoning early
  */
 function executeScriptWithTabGuard(realTabId, scriptCode, toolName) {
-    return new Promise((resolve, reject) => {
-        let settled = false;
-        let timeoutId;
+    let settled = false;
+    let timeoutId;
+    let _reject;
 
-        function cleanup() {
-            browser.tabs.onRemoved.removeListener(onTabRemoved);
-            clearTimeout(timeoutId);
-        }
+    function cleanup() {
+        browser.tabs.onRemoved.removeListener(onTabRemoved);
+        clearTimeout(timeoutId);
+    }
 
-        function onTabRemoved(tabId) {
-            if (tabId !== realTabId || settled) return;
-            settled = true;
-            cleanup();
-            reject(new Error(`Tab ${realTabId} was closed during ${toolName}`));
-        }
+    function onTabRemoved(tabId) {
+        if (tabId !== realTabId || settled) return;
+        settled = true;
+        cleanup();
+        _reject(new Error(`Tab ${realTabId} was closed during ${toolName}`));
+    }
+
+    const promise = new Promise((resolve, reject) => {
+        _reject = reject;
 
         browser.tabs.onRemoved.addListener(onTabRemoved);
 
@@ -145,6 +160,15 @@ function executeScriptWithTabGuard(realTabId, scriptCode, toolName) {
             reject(err);
         });
     });
+
+    promise.cancel = function () {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        _reject(new Error(`${toolName}: executeScript cancelled`));
+    };
+
+    return promise;
 }
 
 // Export for use by background.js

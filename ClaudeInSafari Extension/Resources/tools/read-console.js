@@ -67,7 +67,7 @@ function formatTimestamp(timestamp) {
  * @param {boolean} cleared
  * @returns {string}
  */
-function formatOutput(virtualTabId, messages, cleared) {
+function formatConsoleOutput(virtualTabId, messages, cleared) {
     let out;
     if (messages.length === 0) {
         out = `No console messages found for tab ${virtualTabId}.`;
@@ -153,7 +153,7 @@ async function handleReadConsoleMessages(args) {
         // executeScript returned null — content script may not have loaded yet.
         // Return empty rather than error per spec, but log so it's visible.
         console.warn("[read_console_messages] executeScript returned null; console-monitor.js may not have loaded yet");
-        return formatOutput(virtualTabId, [], clear);
+        return formatConsoleOutput(virtualTabId, [], false); // nothing was cleared
     }
     if (result.__error != null) {
         throw new Error(`read_console_messages: page script error: ${result.__error}`);
@@ -181,7 +181,7 @@ async function handleReadConsoleMessages(args) {
         messages = messages.slice(-limit);
     }
 
-    return formatOutput(virtualTabId, messages, clear);
+    return formatConsoleOutput(virtualTabId, messages, clear);
 }
 
 // ---------------------------------------------------------------------------

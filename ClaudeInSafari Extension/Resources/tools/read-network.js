@@ -171,7 +171,7 @@ async function handleReadNetworkRequests(args) {
         // executeScript returned null — content script may not have loaded yet.
         // Return empty rather than error per spec (T12), but log so it's visible.
         console.warn("[read_network_requests] executeScript returned null; network-monitor.js may not have loaded yet");
-        return formatNetworkOutput(virtualTabId, [], clear);
+        return formatNetworkOutput(virtualTabId, [], false); // nothing was cleared
     }
     if (result.__error != null) {
         throw new Error(`read_network_requests: page script error: ${result.__error}`);
@@ -188,7 +188,7 @@ async function handleReadNetworkRequests(args) {
 
     if (urlPattern != null) {
         const lower = urlPattern.toLowerCase();
-        requests = requests.filter((r) => (r.url || "").toLowerCase().includes(lower));
+        requests = requests.filter((r) => ((r && r.url) || "").toLowerCase().includes(lower));
     }
 
     // limit: keep most recent N, then output in chronological (oldest-first) order
