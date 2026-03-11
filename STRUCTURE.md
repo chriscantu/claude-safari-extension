@@ -90,6 +90,7 @@ claude-safari-extension/
 │           ├── javascript-tool.test.js
 │           ├── navigate.test.js
 │           ├── tabs-manager.test.js
+│           ├── read-console.test.js
 │           ├── console-monitor.test.js
 │           ├── network-monitor.test.js
 │           └── gif-creator.test.js

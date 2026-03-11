@@ -211,12 +211,22 @@ describe("read_console_messages tool", () => {
         expect(result).toMatch(/No console messages found for tab 1\./);
     });
 
-    test("T10 — tab not found: rejects via classifyExecuteScriptError", async () => {
+    test("T10 — tab not found: rejects with could not resolve tab message", async () => {
         const resolveTab = jest.fn(async () => { throw new Error("Tab not found: 99"); });
         const browser = makeBrowserMock({ scriptResult: [{ messages: [] }] });
         const handler = loadReadConsole({ browser, resolveTab });
 
         await expect(handler({ tabId: 99 })).rejects.toThrow(/could not resolve tab/);
+    });
+
+    test("T10b — executeScript failure: classifyExecuteScriptError wraps error with guidance", async () => {
+        const resolveTab = jest.fn(async () => 42);
+        const browser = makeBrowserMock({
+            scriptError: new Error("Cannot access contents of the page"),
+        });
+        const handler = loadReadConsole({ browser, resolveTab });
+
+        await expect(handler({ tabId: 1 })).rejects.toThrow(/cannot inject into this page/);
     });
 
     test("T11 — unhandled error entry included with filename info", async () => {

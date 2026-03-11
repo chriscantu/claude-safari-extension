@@ -93,8 +93,7 @@ function formatOutput(virtualTabId, messages, cleared) {
 /**
  * @param {{ tabId?: number|null, onlyErrors?: boolean, clear?: boolean, pattern?: string, limit?: number }} args
  * @returns {Promise<string>} formatted console messages
- * @throws {Error} "read_console_messages: tabId parameter is required" when tabId missing and no active tab
- * @throws {Error} "read_console_messages: could not resolve tab ..." when tab resolution fails
+ * @throws {Error} "read_console_messages: could not resolve tab (tabId=<N>): <reason>. Use tabs_context_mcp ..." when tab resolution fails
  * @throws {Error} "read_console_messages: Invalid regex pattern: ..." when pattern is invalid regex
  * @throws {Error} "read_console_messages: ..." when executeScript rejects (classifyExecuteScriptError)
  */
@@ -142,8 +141,11 @@ async function handleReadConsoleMessages(args) {
     }
     const result = results[0];
     if (result === undefined || result === null) {
-        // Content script not loaded yet — return empty (not an error per spec)
-        return formatOutput(virtualTabId, [], false);
+        // executeScript returned null — treat as empty buffer (content script may not have run yet).
+        // The || [] guard in the IIFE means a missing window.__claudeConsoleMessages returns
+        // { messages: [] }, not null; null here indicates a Safari-level injection issue,
+        // but the spec says to return empty rather than error in this case.
+        return formatOutput(virtualTabId, [], clear);
     }
     if (result.__error != null) {
         throw new Error(`read_console_messages: page script error: ${result.__error}`);
