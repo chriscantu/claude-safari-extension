@@ -127,11 +127,13 @@ if (typeof browser.alarms !== "undefined") {
     browser.storage.session.get("computer-wait-alarmName").then((stored) => {
         const alarmName = stored["computer-wait-alarmName"];
         if (!alarmName) return;
-        browser.alarms.get(alarmName).then((alarm) => {
+        return browser.alarms.get(alarmName).then((alarm) => {
             if (!alarm) {
-                browser.storage.session.remove("computer-wait-alarmName");
+                return browser.storage.session.remove("computer-wait-alarmName");
             }
         });
+    }).catch((err) => {
+        console.warn("read_console_messages: stale alarm cleanup failed (non-critical):", err);
     });
 }
 

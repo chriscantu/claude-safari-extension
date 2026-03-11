@@ -68,18 +68,19 @@ function formatTimestamp(timestamp) {
  * @returns {string}
  */
 function formatOutput(virtualTabId, messages, cleared) {
+    let out;
     if (messages.length === 0) {
-        return `No console messages found for tab ${virtualTabId}.`;
+        out = `No console messages found for tab ${virtualTabId}.`;
+    } else {
+        const lines = [`Console messages for tab ${virtualTabId} (${messages.length} messages):`, ""];
+        for (const msg of messages) {
+            const ts = formatTimestamp(msg.timestamp);
+            const level = String(msg.level).toUpperCase();
+            lines.push(`[${ts}] [${level}] ${msg.message}`);
+        }
+        out = lines.join("\n");
     }
 
-    const lines = [`Console messages for tab ${virtualTabId} (${messages.length} messages):`, ""];
-    for (const msg of messages) {
-        const ts = formatTimestamp(msg.timestamp);
-        const level = String(msg.level).toUpperCase();
-        lines.push(`[${ts}] [${level}] ${msg.message}`);
-    }
-
-    let out = lines.join("\n");
     if (cleared) {
         out += "\n(Messages cleared)";
     }
@@ -126,13 +127,45 @@ async function handleReadConsoleMessages(args) {
         );
     }
 
+    // If the tab is removed mid-execution Safari may never settle the executeScript
+    // promise, blocking the poll loop. The onRemoved guard wins the race and rejects
+    // immediately. The listener is removed on all three exit paths (success,
+    // executeScript error, tab removal) per CLAUDE.md lifecycle rules.
     let results;
     try {
-        results = await browser.tabs.executeScript(realTabId, {
-            code: buildReadConsoleScript(clear),
-            runAt: "document_idle",
+        results = await new Promise((resolve, reject) => {
+            let settled = false;
+
+            function cleanup() {
+                browser.tabs.onRemoved.removeListener(onTabRemoved);
+            }
+
+            function onTabRemoved(tabId) {
+                if (tabId !== realTabId || settled) return;
+                settled = true;
+                cleanup();
+                reject(new Error(`Tab ${realTabId} was closed during read_console_messages`));
+            }
+
+            browser.tabs.onRemoved.addListener(onTabRemoved);
+
+            browser.tabs.executeScript(realTabId, {
+                code: buildReadConsoleScript(clear),
+                runAt: "document_idle",
+            }).then((r) => {
+                if (settled) return;
+                settled = true;
+                cleanup();
+                resolve(r);
+            }).catch((err) => {
+                if (settled) return;
+                settled = true;
+                cleanup();
+                reject(err);
+            });
         });
     } catch (err) {
+        if (/was closed during/.test(err.message)) throw err;
         throw globalThis.classifyExecuteScriptError("read_console_messages", realTabId, err);
     }
 

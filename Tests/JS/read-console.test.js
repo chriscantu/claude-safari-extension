@@ -27,6 +27,8 @@
  *   T22 — timestamp formatted as HH:MM:SS.mmm (UTC)
  *   T23 — limit defaults to 100 when not specified
  *   T24 — unexpected result shape: throws unexpected shape error
+ *   T25 — clear: true with empty buffer still appends "(Messages cleared)"
+ *   T26 — tab closed during executeScript: rejects with tab-closed error; listener removed
  */
 
 "use strict";
@@ -48,6 +50,7 @@ function makeMsg(level, message, timestamp = 0) {
 
 /**
  * Browser mock that returns pre-canned executeScript results.
+ * Includes a no-op browser.tabs.onRemoved stub required by the onRemoved guard.
  */
 function makeBrowserMock(opts = {}) {
     const { scriptResult, scriptError = null } = opts;
@@ -57,6 +60,10 @@ function makeBrowserMock(opts = {}) {
                 if (scriptError) throw scriptError;
                 return scriptResult;
             }),
+            onRemoved: {
+                addListener: jest.fn(),
+                removeListener: jest.fn(),
+            },
         },
     };
 }
@@ -379,5 +386,41 @@ describe("read_console_messages tool", () => {
         const handler = loadReadConsole({ browser, resolveTab });
 
         await expect(handler({ tabId: 1 })).rejects.toThrow(/unexpected result shape/);
+    });
+
+    test("T25 — clear: true with empty buffer appends \"(Messages cleared)\" to no-messages output", async () => {
+        const resolveTab = jest.fn(async () => 42);
+        const browser = makeBrowserMock({ scriptResult: [{ messages: [] }] });
+        const handler = loadReadConsole({ browser, resolveTab });
+
+        const result = await handler({ tabId: 1, clear: true });
+
+        expect(result).toContain("No console messages found");
+        expect(result).toContain("(Messages cleared)");
+    });
+
+    test("T26 — tab closed during execution: rejects with tab-closed error", async () => {
+        const resolveTab = jest.fn(async () => 42);
+        // Mock that captures the onRemoved listener and fires it before executeScript resolves
+        let capturedOnRemoved = null;
+        const browser = {
+            tabs: {
+                executeScript: jest.fn(() => new Promise(() => { /* never resolves */ })),
+                onRemoved: {
+                    addListener: jest.fn((fn) => { capturedOnRemoved = fn; }),
+                    removeListener: jest.fn(),
+                },
+            },
+        };
+        const handler = loadReadConsole({ browser, resolveTab });
+
+        const promise = handler({ tabId: 1 });
+        // Yield to the microtask queue so the async handler progresses past the
+        // resolveTab await and registers the onRemoved listener before we fire it.
+        await Promise.resolve();
+        capturedOnRemoved(42);
+
+        await expect(promise).rejects.toThrow(/was closed during/);
+        expect(browser.tabs.onRemoved.removeListener).toHaveBeenCalled();
     });
 });
