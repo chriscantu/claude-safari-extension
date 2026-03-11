@@ -24,6 +24,7 @@
             "tools/form-input.js",
             "tools/get-page-text.js",
             "tools/computer.js",
+            "tools/javascript-tool.js",
             "background.js"
         ],
         "persistent": false
