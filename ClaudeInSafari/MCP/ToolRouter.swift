@@ -5,6 +5,7 @@ import Foundation
 class ToolRouter: MCPSocketServerDelegate {
     private weak var server: MCPSocketServer?
     private let screenshotService = ScreenshotService()
+    private let appleScriptBridge = AppleScriptBridge()
 
     /// Tools handled natively by the Swift app (not forwarded to the extension).
     private let nativeTools: Set<String> = ["resize_window"]
@@ -82,6 +83,8 @@ class ToolRouter: MCPSocketServerDelegate {
            let action = arguments["action"] as? String,
            action == "screenshot" || action == "zoom" {
             handleScreenshotAction(action: action, arguments: arguments, id: id, clientId: clientId)
+        } else if toolName == "resize_window" {
+            handleResizeWindow(arguments: arguments, id: id, clientId: clientId)
         } else if nativeTools.contains(toolName) {
             sendError(id: id, code: -32000, message: "Native tool '\(toolName)' not yet implemented", to: clientId)
         } else {
@@ -142,6 +145,38 @@ class ToolRouter: MCPSocketServerDelegate {
                 ["type": "text", "text": label]
             ]
             sendResult(id: id, result: ["content": content], to: clientId)
+        }
+    }
+
+    // MARK: - Native Window Resize
+
+    private func handleResizeWindow(arguments: [String: Any], id: Any?, clientId: String) {
+        guard arguments["width"] != nil, arguments["height"] != nil else {
+            sendError(id: id, code: -32000, message: "Both width and height parameters are required", to: clientId)
+            return
+        }
+
+        // Tolerate Int, Double, or NSNumber — same pattern used for zoom region parsing.
+        func asDouble(_ val: Any) -> Double? {
+            if let i = val as? Int { return Double(i) }
+            if let d = val as? Double { return d }
+            if let n = val as? NSNumber { return n.doubleValue }
+            return nil
+        }
+
+        guard let w = asDouble(arguments["width"]!), let h = asDouble(arguments["height"]!) else {
+            sendError(id: id, code: -32000, message: "Width and height must be numbers", to: clientId)
+            return
+        }
+
+        // Truncate to integers per spec (e.g. 1024.7 → 1024).
+        do {
+            let message = try appleScriptBridge.resizeWindow(width: Int(w), height: Int(h))
+            sendResult(id: id, result: ["content": [["type": "text", "text": message]]], to: clientId)
+        } catch let error as AppleScriptBridge.ResizeError {
+            sendError(id: id, code: -32000, message: error.userMessage, to: clientId)
+        } catch {
+            sendError(id: id, code: -32000, message: "Failed to resize window: \(error.localizedDescription)", to: clientId)
         }
     }
 
