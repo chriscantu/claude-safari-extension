@@ -137,20 +137,21 @@ the active application.
 
 ### Hybrid Native + Extension Flow
 
-Unlike Chrome (where screenshots are stored in the service worker's memory and accessed
-directly), Safari's screenshots are stored in the **native app** (`ScreenshotService.swift`).
-The upload flow requires an extra round-trip:
+Unlike Chrome (where screenshots are stored in the service worker's memory),
+Safari's screenshots are stored in the **native app** (`ScreenshotService.swift`).
+Under Option B, `ToolRouter` retrieves the image before the extension is invoked:
 
 ```
-Extension (upload-image.js)
-    → Native message: "get image <imageId>"
-    → Native app (ScreenshotService)
-    → Native message response: { base64: "...", format: "png" }
-    → Extension injects File into page
+CLI → socket → ToolRouter.handleUploadImage
+    → screenshotService.retrieveImage(imageId)   (~0ms, in-memory)
+    → inject imageData into forwarded args
+    → file queue → extension upload-image.js
+    → browser.tabs.executeScript (injected IIFE)
+    → response file → ToolRouter → CLI
 ```
 
-**Impact:** Slightly slower than Chrome due to the native messaging round-trip (~10-50ms).
-Functionally identical.
+**Impact:** No extra round-trip vs Chrome. The image data travels as part of the
+tool request payload rather than via a sub-request. Performance is equivalent.
 
 ### DataTransfer Compatibility
 
@@ -174,7 +175,7 @@ in both Chrome and Safari.
 | Reference previously captured screenshot | ✅ | ✅ | None |
 | Custom filename | ✅ | ✅ | None |
 | Works when browser in background | ✅ | ❌ | Safari must be frontmost |
-| Image retrieval speed | In-process | Native round-trip | ~10-50ms slower |
+| Image retrieval speed | In-process | ToolRouter pre-fetch | Equivalent (~0ms) |
 
 ## Test Cases
 
