@@ -104,7 +104,8 @@ height change. This prevents the window from jumping to a new position during au
 | `width` or `height` missing | `isError: true`, "Both width and height parameters are required" |
 | Non-numeric width/height | `isError: true`, "Width and height must be numbers" |
 | Width or height ≤ 0 | `isError: true`, "Width and height must be positive numbers" |
-| Exceeds 7680 × 4320 | `isError: true`, "Dimensions exceed 8K resolution limit" |
+| Width > 7680 | `isError: true`, "Width exceeds 8K resolution limit" |
+| Height > 4320 | `isError: true`, "Height exceeds 8K resolution limit" |
 | Width < 200 | `isError: true`, "Width must be at least 200 pixels" |
 | Height < 200 | `isError: true`, "Height must be at least 200 pixels" |
 | Safari window is fullscreen | `isError: true`, "Cannot resize a fullscreen window. Exit fullscreen first." |

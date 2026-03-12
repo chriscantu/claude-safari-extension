@@ -165,19 +165,19 @@ class ToolRouter: MCPSocketServerDelegate {
 
         // Truncate to integers per spec (e.g. 1024.7 → 1024).
         // Note: values near the 200-pixel minimum truncate down — 199.9 becomes 199 and will fail validation.
-        do {
-            var message = try appleScriptBridge.resizeWindow(width: Int(w), height: Int(h))
-            // Warn callers that tabId is accepted but ignored — tabId→window resolution
-            // requires extension routing which is not yet implemented (Spec 016 §Window Resolution).
-            if arguments["tabId"] != nil {
-                message += " (tabId ignored — always resizes the frontmost Safari window)"
+        let tabIdSupplied = arguments["tabId"] != nil
+        // Warn callers that tabId is accepted but ignored — tabId→window resolution
+        // requires extension routing which is not yet implemented (Spec 016 §Window Resolution).
+        appleScriptBridge.resizeWindow(width: Int(w), height: Int(h)) { [self] result in
+            switch result {
+            case .success(var message):
+                if tabIdSupplied {
+                    message += " (tabId ignored — always resizes the frontmost Safari window)"
+                }
+                sendResult(id: id, result: ["content": [["type": "text", "text": message]]], to: clientId)
+            case .failure(let error):
+                sendError(id: id, code: -32000, message: error.userMessage, to: clientId)
             }
-            sendResult(id: id, result: ["content": [["type": "text", "text": message]]], to: clientId)
-        } catch let error as AppleScriptBridge.ResizeError {
-            sendError(id: id, code: -32000, message: error.userMessage, to: clientId)
-        } catch {
-            NSLog("ToolRouter: unexpected error in handleResizeWindow — %@", error.localizedDescription)
-            sendError(id: id, code: -32000, message: "Failed to resize window: \(error.localizedDescription)", to: clientId)
         }
     }
 

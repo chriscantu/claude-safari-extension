@@ -57,15 +57,36 @@ class AppleScriptBridge {
     /// this method always resizes the frontmost Safari window (window 1).
     /// See Spec 016 §Window Resolution for the architectural rationale.
     ///
+    /// Dimension validation runs synchronously on the caller's thread (fast, no I/O).
+    /// The AppleScript subprocess is dispatched onto a background GCD queue so the
+    /// caller's thread (the MCP receive queue) is never blocked by `waitUntilExit()`.
+    ///
     /// - Parameters:
     ///   - width: Target window width in pixels (200–7680)
     ///   - height: Target window height in pixels (200–4320)
-    /// - Returns: Success message describing the new dimensions
-    /// - Throws: ResizeError on validation failure or AppleScript execution error
-    func resizeWindow(width: Int, height: Int) throws -> String {
-        try validateDimensions(width: width, height: height)
-        try runAppleScript(buildResizeScript(width: width, height: height))
-        return "Resized Safari window to \(width)x\(height) pixels"
+    ///   - completion: Called on an unspecified background queue with `.success(message)`
+    ///     or `.failure(ResizeError)`.
+    func resizeWindow(width: Int, height: Int, completion: @escaping (Result<String, ResizeError>) -> Void) {
+        do {
+            try validateDimensions(width: width, height: height)
+        } catch let error as ResizeError {
+            completion(.failure(error))
+            return
+        } catch {
+            completion(.failure(.executionFailed(error.localizedDescription)))
+            return
+        }
+
+        DispatchQueue.global(qos: .userInitiated).async {
+            do {
+                try self.runAppleScript(self.buildResizeScript(width: width, height: height))
+                completion(.success("Resized Safari window to \(width)x\(height) pixels"))
+            } catch let error as ResizeError {
+                completion(.failure(error))
+            } catch {
+                completion(.failure(.executionFailed(error.localizedDescription)))
+            }
+        }
     }
 
     // MARK: - Validation (testable without a live Safari instance)
@@ -131,11 +152,8 @@ class AppleScriptBridge {
         // Use osascript subprocess rather than NSAppleScript so the Apple Events
         // call runs under osascript's own TCC entry, avoiding Hardened Runtime
         // permission issues with the app's own bundle ID.
-        //
-        // TODO: Run osascript on a background thread and accept a completion handler
-        // to avoid blocking the MCP receive queue. On first-run (before Automation
-        // permission is granted) macOS presents a TCC dialog; waitUntilExit() will
-        // hang indefinitely until the user responds, freezing all MCP request handling.
+        // Called from a background GCD queue (dispatched by resizeWindow) so
+        // waitUntilExit() does not block the MCP receive queue.
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
         process.arguments = ["-e", source]
