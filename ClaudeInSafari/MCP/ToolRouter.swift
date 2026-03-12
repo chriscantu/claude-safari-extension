@@ -5,9 +5,13 @@ import Foundation
 class ToolRouter: MCPSocketServerDelegate {
     private weak var server: MCPSocketServer?
     private let screenshotService = ScreenshotService()
+    private let appleScriptBridge = AppleScriptBridge()
 
-    /// Tools handled natively by the Swift app (not forwarded to the extension).
-    private let nativeTools: Set<String> = ["resize_window"]
+    /// Fallback guard for tools that are handled natively but whose handler branch
+    /// has not yet been added to handleToolCall(). Any tool listed here that lacks
+    /// an explicit dispatch branch will return "not yet implemented" rather than being
+    /// silently forwarded to the extension.
+    private let nativeTools: Set<String> = []
 
     /// Maps requestId → (clientId, jsonrpcId) for in-flight extension calls.
     private var pendingRequests = [String: (clientId: String, jsonrpcId: Any?)]()
@@ -82,6 +86,8 @@ class ToolRouter: MCPSocketServerDelegate {
            let action = arguments["action"] as? String,
            action == "screenshot" || action == "zoom" {
             handleScreenshotAction(action: action, arguments: arguments, id: id, clientId: clientId)
+        } else if toolName == "resize_window" {
+            handleResizeWindow(arguments: arguments, id: id, clientId: clientId)
         } else if nativeTools.contains(toolName) {
             sendError(id: id, code: -32000, message: "Native tool '\(toolName)' not yet implemented", to: clientId)
         } else {
@@ -143,6 +149,54 @@ class ToolRouter: MCPSocketServerDelegate {
             ]
             sendResult(id: id, result: ["content": content], to: clientId)
         }
+    }
+
+    // MARK: - Native Window Resize
+
+    private func handleResizeWindow(arguments: [String: Any], id: Any?, clientId: String) {
+        guard let (w, h) = parseResizeDimensions(arguments) else {
+            if arguments["width"] == nil || arguments["height"] == nil {
+                sendError(id: id, code: -32000, message: "Both width and height parameters are required", to: clientId)
+            } else {
+                sendError(id: id, code: -32000, message: "Width and height must be numbers", to: clientId)
+            }
+            return
+        }
+
+        // Truncate to integers per spec (e.g. 1024.7 → 1024).
+        // Note: values near the 200-pixel minimum truncate down — 199.9 becomes 199 and will fail validation.
+        let tabIdSupplied = arguments["tabId"] != nil
+        // Warn callers that tabId is accepted but ignored — tabId→window resolution
+        // requires extension routing which is not yet implemented (Spec 016 §Window Resolution).
+        appleScriptBridge.resizeWindow(width: Int(w), height: Int(h)) { [self] result in
+            switch result {
+            case .success(var message):
+                if tabIdSupplied {
+                    message += " (tabId ignored — always resizes the frontmost Safari window)"
+                }
+                sendResult(id: id, result: ["content": [["type": "text", "text": message]]], to: clientId)
+            case .failure(let error):
+                sendError(id: id, code: -32000, message: error.userMessage, to: clientId)
+            }
+        }
+    }
+
+    /// Parse width and height from tool arguments, tolerating Int, Double, or NSNumber.
+    /// Returns nil if either argument is missing or cannot be converted to a Double.
+    /// Separated from handleResizeWindow for testability.
+    func parseResizeDimensions(_ arguments: [String: Any]) -> (width: Double, height: Double)? {
+        // Tolerate Int, Double, or NSNumber — same pattern used for zoom region parsing.
+        func asDouble(_ val: Any) -> Double? {
+            if let i = val as? Int { return Double(i) }
+            if let d = val as? Double { return d }
+            if let n = val as? NSNumber { return n.doubleValue }
+            return nil
+        }
+        guard let wRaw = arguments["width"], let hRaw = arguments["height"],
+              let w = asDouble(wRaw), let h = asDouble(hRaw) else {
+            return nil
+        }
+        return (w, h)
     }
 
     // MARK: - Extension Forwarding

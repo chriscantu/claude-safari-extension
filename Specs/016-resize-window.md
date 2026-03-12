@@ -53,10 +53,23 @@ Where `{x, y}` is the window's current top-left position (preserved during resiz
 
 ### Window Resolution
 
-Unlike most tools, `resize_window` is a **native tool** but needs tab/window information
-from the extension. The architecture routes through the extension first:
+`resize_window` is a **pure-native tool** — it never passes through the extension.
+This means the extension's `globalThis.resolveTab` and `browser.tabs.get` APIs are
+unavailable at the time the tool runs.
 
-If `tabId` is provided:
+**Current behaviour (v0.4):** `tabId` is accepted but **ignored**. The tool always
+resizes the frontmost Safari window (`window 1` in AppleScript). When `tabId` is
+supplied, the success message includes a warning:
+
+> "Resized Safari window to 1024×768 pixels (tabId ignored — always resizes the frontmost Safari window)"
+
+**Rationale:** Routing through the extension to resolve a virtual tab ID → AppleScript
+window index would require a round-trip extension→native call before the resize can
+happen. This adds architectural complexity with limited benefit — in practice, the
+frontmost window is always the target window for automation workflows. Full tabId
+resolution is deferred to a future iteration.
+
+**Future implementation (if needed):**
 1. The extension resolves the virtual tab ID to a real tab ID via `globalThis.resolveTab`.
 2. The extension calls `browser.tabs.get(realTabId)` to get the `windowId`.
 3. The extension calls `browser.windows.getAll({ populate: false })` and finds the
@@ -65,13 +78,10 @@ If `tabId` is provided:
    requested `width` and `height` to the native app via native messaging.
 5. The native app executes AppleScript with `window <index>`.
 
-If `tabId` is omitted:
-1. Resize the frontmost Safari window (`window 1` in AppleScript).
-
 **Note:** `browser.windows` IDs are not the same as AppleScript window indices. The
 mapping above (sort by window ID, find index) is the only reliable cross-API bridge.
 This mapping can break if windows are opened/closed between the query and the AppleScript
-call — document this as an inherent race condition.
+call — an inherent race condition.
 
 ### Dimension Validation
 
@@ -94,33 +104,43 @@ height change. This prevents the window from jumping to a new position during au
 | `width` or `height` missing | `isError: true`, "Both width and height parameters are required" |
 | Non-numeric width/height | `isError: true`, "Width and height must be numbers" |
 | Width or height ≤ 0 | `isError: true`, "Width and height must be positive numbers" |
-| Exceeds 7680 × 4320 | `isError: true`, "Dimensions exceed 8K resolution limit" |
+| Width > 7680 | `isError: true`, "Width exceeds 8K resolution limit" |
+| Height > 4320 | `isError: true`, "Height exceeds 8K resolution limit" |
 | Width < 200 | `isError: true`, "Width must be at least 200 pixels" |
 | Height < 200 | `isError: true`, "Height must be at least 200 pixels" |
 | Safari window is fullscreen | `isError: true`, "Cannot resize a fullscreen window. Exit fullscreen first." |
-| Accessibility permission not granted | `isError: true`, "Accessibility permission required. Grant access in System Settings > Privacy & Security > Accessibility." |
+| Accessibility or Automation permission not granted | `isError: true`, "Permission denied. Grant access in System Settings > Privacy & Security > Automation (osascript → Safari) and Accessibility." |
 | No Safari window found | `isError: true`, "No Safari window found" |
 | AppleScript execution fails | `isError: true`, "Failed to resize window: `<error>`" |
 | Tab not found | `isError: true`, "Tab not found: `<tabId>`" |
 
 ## Safari Considerations
 
-### ⚠ Accessibility Permission Required
+### ⚠ Two TCC Permissions Required
 
-AppleScript control of other applications requires the **Accessibility** permission in
-System Settings > Privacy & Security > Accessibility. The native app must be listed and
-toggled on.
+This tool requires **two separate** macOS permissions, both granted to the `osascript`
+subprocess (not the native app — they have independent TCC entries):
 
-**Impact:** First-time users must grant an additional system permission (beyond Screen
+1. **Automation** (System Settings > Privacy & Security > Automation > osascript → Safari):
+   Required to send Apple Events to Safari. Denied → osascript exits with `-1743`
+   (`errAEEventNotPermitted`).
+
+2. **Accessibility** (System Settings > Privacy & Security > Accessibility > osascript):
+   Required for the `System Events` AXFullScreen check. Denied → osascript exits with
+   `-25212` (`errAXError`).
+
+Both are detected by matching numeric error codes in osascript's stderr output —
+locale-independent and unambiguous. `AXIsProcessTrusted()` is **not** used because it
+checks the native app's TCC entry, not osascript's.
+
+**Impact:** First-time users must grant two additional system permissions (beyond Screen
 Recording for screenshots). This is a macOS sandboxing requirement that Chrome doesn't
 face — Chrome's `windows.update()` API works without any OS-level permissions.
 
 **Mitigation:**
-- The native app's setup wizard (Phase 7) should detect missing Accessibility permission
-  and guide the user.
-- The error message should include the exact System Settings path.
-- Consider requesting the `com.apple.security.temporary-exception.apple-events` entitlement
-  targeting Safari specifically, which may reduce the permission scope.
+- The native app's setup wizard (Phase 7) should detect both missing permissions and
+  guide the user through granting them.
+- The error message names both settings panes.
 
 ### ⚠ Entitlement Requirement
 
@@ -174,7 +194,7 @@ Chrome's `windows.update()` has the same behavior — it sets outer window dimen
 | T6 | `width: -100, height: 500` | `isError: true`, not positive |
 | T7 | `width: 10000, height: 10000` | `isError: true`, exceeds 8K limit |
 | T8 | `width: 100, height: 100` | `isError: true`, below minimum |
-| T9 | No Accessibility permission | `isError: true` with instructions |
+| T9 | Accessibility or Automation permission not granted | `isError: true` with instructions for both settings panes |
 | T10 | No Safari window open | `isError: true` |
 | T11 | Resize preserves window position | Top-left corner unchanged |
 | T12 | `width: 1024.7, height: 768.3` | Truncated to 1024×768 |
