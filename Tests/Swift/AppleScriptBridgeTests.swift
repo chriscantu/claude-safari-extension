@@ -165,12 +165,11 @@ final class AppleScriptBridgeTests: XCTestCase {
         XCTAssertEqual(error.userMessage, "Cannot resize a fullscreen window. Exit fullscreen first.")
     }
 
-    func testResizeError_accessibilityDenied_userMessage() {
-        let error = AppleScriptBridge.ResizeError.accessibilityDenied
-        XCTAssertEqual(
-            error.userMessage,
-            "Accessibility permission required. Grant access in System Settings > Privacy & Security > Accessibility."
-        )
+    func testResizeError_permissionDenied_userMessage() {
+        let error = AppleScriptBridge.ResizeError.permissionDenied
+        XCTAssertTrue(error.userMessage.contains("Automation"))
+        XCTAssertTrue(error.userMessage.contains("Accessibility"))
+        XCTAssertTrue(error.userMessage.contains("System Settings"))
     }
 
     func testResizeError_executionFailed_userMessage() {
