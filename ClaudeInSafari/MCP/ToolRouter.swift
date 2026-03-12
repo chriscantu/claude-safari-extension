@@ -231,9 +231,20 @@ class ToolRouter: MCPSocketServerDelegate {
             showWatermark: (optsDict["showWatermark"] as? Bool) ?? true
         )
 
+        // Capture server before the async block so we can send an error even if self is deallocated.
+        // id and clientId are already captured by value in the closure.
+        let capturedServer = server
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             guard let self else {
-                NSLog("handleGifExport: ToolRouter deallocated before export completed — client will receive no response")
+                NSLog("handleGifExport: ToolRouter deallocated before export completed — sending error to client")
+                var errorResponse: [String: Any] = [
+                    "jsonrpc": "2.0",
+                    "error": ["code": -32000, "message": "GIF export failed: router was torn down during encoding"] as [String: Any]
+                ]
+                if let id = id { errorResponse["id"] = id }
+                if let data = try? JSONSerialization.data(withJSONObject: errorResponse) {
+                    capturedServer?.send(data: data, to: clientId)
+                }
                 return
             }
             switch self.gifService.exportGIF(tabId: tabId, options: options) {

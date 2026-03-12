@@ -58,10 +58,13 @@ class GifService {
     }
 
     struct GifOptions {
-        var showClicks: Bool    = true
-        var showActions: Bool   = true
-        var showProgress: Bool  = true
-        var showWatermark: Bool = true
+        let showClicks: Bool    // default: true
+        let showActions: Bool   // default: true
+        let showProgress: Bool  // default: true
+        let showWatermark: Bool // default: true
+        // Explicit memberwise init with all-true defaults.
+        init(showClicks: Bool = true, showActions: Bool = true,
+             showProgress: Bool = true, showWatermark: Bool = true)
     }
 
     func startRecording(tabId: Int) -> String
@@ -78,7 +81,8 @@ class GifService {
 
     // Snapshot semantics: copies frame array under NSLock, releases lock, encodes from snapshot.
     // Concurrent addFrame calls during encoding are safe.
-    func exportGIF(tabId: Int, options: GifOptions, filename: String) -> Result<Data, Error>
+    // Returns (encodedData, encodedFrameCount). Filename handling moved to ToolRouter.handleGifExport.
+    func exportGIF(tabId: Int, options: GifOptions) -> Result<(Data, Int), Error>
 
     func clearFrames(tabId: Int) -> String
 }
@@ -100,18 +104,9 @@ let elapsed = nextFrame.timestamp.timeIntervalSince(currentFrame.timestamp)
 let delay = min(max(elapsed, 0.3), 3.0)
 ```
 
-The table below is a **fallback only** — used for the last frame (which has no successor
-timestamp) and for any single-frame export:
-
-| Action type | Fallback delay (s) |
-|-------------|-----------|
-| `screenshot`, `zoom` | 0.3 |
-| `scroll`, `scroll_to`, `navigate`, `type`, `key`, `hover` | 0.8 |
-| `left_click`, `right_click`, `double_click`, `triple_click`, `left_click_drag` | 1.5 |
-| (default) | 0.8 |
-
 **Last frame hold:** the final frame always uses a 3.0s delay (regardless of elapsed time
-or action type) so the viewer can see the end state before the GIF loops.
+or action type) so the viewer can see the end state before the GIF loops. For a single-frame
+export, that frame is the last frame and therefore also uses 3.0s.
 
 **Visual overlays** (CGContext drawing):
 - `showClicks`: red filled circle r=12pt + outer ring r=20pt 2pt stroke at coordinate
@@ -198,10 +193,10 @@ sequenceDiagram
 
     Note over C,Ext: Export
     C->>TR: gif_creator {action:"export", tabId:5, filename:"demo.gif"}
-    TR->>GS: exportGIF(5, options, "demo.gif") [DispatchQueue.global]
+    TR->>GS: exportGIF(5, options) [DispatchQueue.global]
     Note over GS: 1. Snapshot frames under NSLock<br/>2. Sort by sequenceNumber<br/>3. Apply overlays via CGContext<br/>4. Encode via ImageIO
-    GS-->>TR: Data (GIF bytes)
-    TR->>TR: Write ~/Desktop/demo.gif
+    GS-->>TR: (Data, encodedFrameCount)
+    TR->>TR: Write ~/Desktop/demo.gif (filename sanitised via lastPathComponent)
     TR-->>C: ✅ [image/gif base64] + "GIF saved to ~/Desktop/demo.gif (2 frames)"
 ```
 
@@ -266,7 +261,7 @@ only; no capture overhead.
 | T6 | exportGIF produces Data with GIF magic bytes ("GIF8") |
 | T7 | exportGIF mid-sequence delay = elapsed time clamped to [0.3, 3.0]s |
 | T7b | exportGIF last frame always uses 3.0s delay |
-| T7c | exportGIF single-frame export uses fallback timing table |
+| T7c | exportGIF single-frame export uses last-frame 3.0s hold (single frame is always the last frame) |
 | T8 | clearFrames → frameCount==0, isRecording false |
 | T9 | Concurrent addFrame → no crash, correct count |
 | T10 | exportGIF concurrent with addFrame → no data race |
