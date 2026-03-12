@@ -23,9 +23,9 @@ enum GifError: Error, LocalizedError {
 // MARK: - GifService
 
 /// Manages GIF recording state, frame buffering, and GIF encoding for the gif_creator tool.
-/// Thread-safe via NSLock. Snapshot semantics for exportGIF: copies frame array under lock,
-/// releases immediately, encodes from snapshot.
-/// See Spec 017 (Revised Architecture v3) for full specification.
+/// Thread-safe via NSLock. All mutable state (recordingTabs, frameBuffers, sequenceCounter)
+/// is protected by a single NSLock. exportGIF uses copy-then-release to avoid holding the
+/// lock during GIF encoding. See Spec 017 for full specification.
 class GifService {
 
     // MARK: - Types
@@ -41,10 +41,18 @@ class GifService {
     }
 
     struct GifOptions {
-        var showClicks: Bool    = true
-        var showActions: Bool   = true
-        var showProgress: Bool  = true
-        var showWatermark: Bool = true
+        let showClicks: Bool
+        let showActions: Bool
+        let showProgress: Bool
+        let showWatermark: Bool
+
+        init(showClicks: Bool = true, showActions: Bool = true,
+             showProgress: Bool = true, showWatermark: Bool = true) {
+            self.showClicks = showClicks
+            self.showActions = showActions
+            self.showProgress = showProgress
+            self.showWatermark = showWatermark
+        }
     }
 
     // MARK: - Private State
@@ -109,12 +117,18 @@ class GifService {
 
     // MARK: - Frame Buffer
 
-    /// Append a frame to the ring buffer for the given tabId.
-    /// Enforces 50-frame maximum by evicting the oldest frame.
+    /// Append a frame to the capped frame buffer for the given tabId.
+    /// Enforces a 50-frame maximum by evicting the oldest frame (O(n) via Array.removeFirst).
+    /// Silently drops frames for tabs that are not currently recording (e.g., frames arriving
+    /// after stopRecording due to async capture delay).
     func addFrame(_ frame: GifFrame, tabId: Int) {
         lock.lock()
         defer { lock.unlock() }
-        guard recordingTabs.contains(tabId) else { return }
+        guard recordingTabs.contains(tabId) else {
+            NSLog("GifService.addFrame: dropping frame seq=%d action=%@ — tabId=%d is not recording",
+                  frame.sequenceNumber, frame.actionType, tabId)
+            return
+        }
         var frames = frameBuffers[tabId] ?? []
         frames.append(frame)
         if frames.count > GifService.maxFrames {
@@ -134,10 +148,12 @@ class GifService {
 
     // MARK: - Export
 
-    /// Encode captured frames as an animated GIF.
+    /// Encode captured frames as an animated GIF. Returns the GIF data and the number of
+    /// frames successfully encoded (may be less than the buffer count if any PNG frames
+    /// fail to decode).
     /// Snapshot semantics: copies frame array under lock, releases immediately, encodes from snapshot.
     /// Sorts by sequenceNumber to handle out-of-order async captures.
-    func exportGIF(tabId: Int, options: GifOptions, filename: String) -> Result<Data, Error> {
+    func exportGIF(tabId: Int, options: GifOptions) -> Result<(Data, Int), Error> {
         lock.lock()
         let snapshot = (frameBuffers[tabId] ?? []).sorted { $0.sequenceNumber < $1.sequenceNumber }
         lock.unlock()
@@ -151,10 +167,43 @@ class GifService {
 
     // MARK: - GIF Encoding
 
-    private func encodeGIF(frames: [GifFrame], options: GifOptions) -> Result<Data, Error> {
+    private func encodeGIF(frames: [GifFrame], options: GifOptions) -> Result<(Data, Int), Error> {
+        // First pass: decode all PNG frames and compute delays.
+        // Pre-counting valid frames before creating CGImageDestination avoids a count mismatch
+        // if any frames have corrupt PNG data — ImageIO behaviour is undefined when actual
+        // image count is less than the declared count.
+        struct ValidFrame {
+            let cgImage: CGImage
+            let frame: GifFrame
+            let delay: Double
+        }
+        var validFrames: [ValidFrame] = []
+        for (index, frame) in frames.enumerated() {
+            guard let source = CGImageSourceCreateWithData(frame.imageData as CFData, nil),
+                  let cgImage = CGImageSourceCreateImageAtIndex(source, 0, nil) else {
+                NSLog("GifService.encodeGIF: skipping frame seq=%d (action=%@, dataLength=%d) — invalid PNG data",
+                      frame.sequenceNumber, frame.actionType, frame.imageData.count)
+                continue
+            }
+            // Frame delay: elapsed time to next frame, clamped to [0.3, 3.0]s.
+            // Last frame always holds for 3.0s regardless of action type.
+            let delay: Double
+            if index == frames.count - 1 {
+                delay = 3.0
+            } else {
+                let elapsed = frames[index + 1].timestamp.timeIntervalSince(frame.timestamp)
+                delay = min(max(elapsed, 0.3), 3.0)
+            }
+            validFrames.append(ValidFrame(cgImage: cgImage, frame: frame, delay: delay))
+        }
+
+        guard !validFrames.isEmpty else {
+            return .failure(GifError.encodingFailed("All frames had invalid PNG data"))
+        }
+
         let mutableData = NSMutableData()
         guard let dest = CGImageDestinationCreateWithData(
-            mutableData, "com.compuserve.gif" as CFString, frames.count, nil
+            mutableData, "com.compuserve.gif" as CFString, validFrames.count, nil
         ) else {
             return .failure(GifError.encodingFailed("Failed to create CGImageDestination"))
         }
@@ -167,43 +216,34 @@ class GifService {
         ]
         CGImageDestinationSetProperties(dest, gifGlobalProps as CFDictionary)
 
-        for (index, frame) in frames.enumerated() {
-            // Frame delay: elapsed time to next frame, clamped to [0.3, 3.0]s.
-            // Last frame always holds for 3.0s regardless of action type.
-            let delay: Double
-            if index == frames.count - 1 {
-                delay = 3.0
-            } else {
-                let elapsed = frames[index + 1].timestamp.timeIntervalSince(frame.timestamp)
-                delay = min(max(elapsed, 0.3), 3.0)
-            }
-
-            // Decode PNG → CGImage
-            guard let source = CGImageSourceCreateWithData(frame.imageData as CFData, nil),
-                  let cgImage = CGImageSourceCreateImageAtIndex(source, 0, nil) else {
-                continue  // skip frames with invalid PNG data
-            }
-
-            // Apply visual overlays via CGContext
-            let overlaid = applyOverlays(
-                to: cgImage, frame: frame,
-                frameIndex: index, totalFrames: frames.count,
+        for (index, valid) in validFrames.enumerated() {
+            // Apply visual overlays via CGContext. Log and fall back to base image on failure.
+            let imageToAdd: CGImage
+            if let overlaid = applyOverlays(
+                to: valid.cgImage, frame: valid.frame,
+                frameIndex: index, totalFrames: validFrames.count,
                 options: options
-            ) ?? cgImage
+            ) {
+                imageToAdd = overlaid
+            } else {
+                NSLog("GifService.encodeGIF: applyOverlays returned nil for frame seq=%d (action=%@, size=%dx%d) — using base image",
+                      valid.frame.sequenceNumber, valid.frame.actionType, valid.cgImage.width, valid.cgImage.height)
+                imageToAdd = valid.cgImage
+            }
 
             let frameProps: [String: Any] = [
                 kCGImagePropertyGIFDictionary as String: [
-                    kCGImagePropertyGIFUnclampedDelayTime as String: delay,
-                    kCGImagePropertyGIFDelayTime as String: delay
+                    kCGImagePropertyGIFUnclampedDelayTime as String: valid.delay,
+                    kCGImagePropertyGIFDelayTime as String: valid.delay
                 ]
             ]
-            CGImageDestinationAddImage(dest, overlaid, frameProps as CFDictionary)
+            CGImageDestinationAddImage(dest, imageToAdd, frameProps as CFDictionary)
         }
 
         guard CGImageDestinationFinalize(dest) else {
             return .failure(GifError.encodingFailed("CGImageDestinationFinalize failed"))
         }
-        return .success(mutableData as Data)
+        return .success((mutableData as Data, validFrames.count))
     }
 
     // MARK: - Visual Overlays
@@ -314,6 +354,7 @@ class GifService {
         ]
         let attrStr = NSAttributedString(string: text, attributes: attrs)
         let line = CTLineCreateWithAttributedString(attrStr)
+        // d: -1 flips text upright — CTLineDraw in a CGContext uses a flipped y relative to the drawing context
         ctx.textMatrix = CGAffineTransform(a: 1, b: 0, c: 0, d: -1, tx: 0, ty: 0)
         ctx.textPosition = point
         CTLineDraw(line, ctx)
