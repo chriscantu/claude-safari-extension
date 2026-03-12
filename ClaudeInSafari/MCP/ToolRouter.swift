@@ -4,17 +4,35 @@ import Foundation
 /// Implements the MCP stdio transport protocol: initialize handshake, tools/list, and tools/call.
 class ToolRouter: MCPSocketServerDelegate {
     private weak var server: MCPSocketServer?
-    private let screenshotService = ScreenshotService()
+    private let screenshotService: ScreenshotService
     private let appleScriptBridge = AppleScriptBridge()
+    private let gifService: GifService
 
-    /// Fallback guard for tools that are handled natively but whose handler branch
-    /// has not yet been added to handleToolCall(). Any tool listed here that lacks
-    /// an explicit dispatch branch will return "not yet implemented" rather than being
-    /// silently forwarded to the extension.
+    // Production init — all services created fresh
+    convenience init() {
+        self.init(
+            screenshotService: ScreenshotService(),
+            gifService: GifService()
+        )
+    }
+
+    // Testable init — inject mock services for unit tests
+    init(screenshotService: ScreenshotService, gifService: GifService) {
+        self.screenshotService = screenshotService
+        self.gifService = gifService
+    }
+
+    /// Staging set for native tools whose handler branch is not yet wired up in handleToolCall().
+    /// Empty by default. Add a tool name here to have it return "not yet implemented" instead of
+    /// being silently forwarded to the extension (useful while developing a new native handler).
     private let nativeTools: Set<String> = []
 
     /// Maps requestId → (clientId, jsonrpcId) for in-flight extension calls.
     private var pendingRequests = [String: (clientId: String, jsonrpcId: Any?)]()
+    /// Maps requestId → (toolName, arguments) for gif post-action hook context.
+    /// Protected by the same `pendingRequestsLock` as `pendingRequests`.
+    /// All reads and writes must be performed under pendingRequestsLock.
+    private var pendingToolContext = [String: (toolName: String, arguments: [String: Any])]()
     private let pendingRequestsLock = NSLock()
 
     func setServer(_ server: MCPSocketServer) {
@@ -56,7 +74,10 @@ class ToolRouter: MCPSocketServerDelegate {
         NSLog("MCP client disconnected: \(clientId)")
         pendingRequestsLock.lock()
         let toCancel = pendingRequests.filter { $0.value.clientId == clientId }.map { $0.key }
-        toCancel.forEach { pendingRequests.removeValue(forKey: $0) }
+        toCancel.forEach {
+            pendingRequests.removeValue(forKey: $0)
+            pendingToolContext.removeValue(forKey: $0)
+        }
         pendingRequestsLock.unlock()
     }
 
@@ -88,6 +109,8 @@ class ToolRouter: MCPSocketServerDelegate {
             handleScreenshotAction(action: action, arguments: arguments, id: id, clientId: clientId)
         } else if toolName == "resize_window" {
             handleResizeWindow(arguments: arguments, id: id, clientId: clientId)
+        } else if toolName == "gif_creator" {
+            handleGifCreator(arguments: arguments, id: id, clientId: clientId)
         } else if nativeTools.contains(toolName) {
             sendError(id: id, code: -32000, message: "Native tool '\(toolName)' not yet implemented", to: clientId)
         } else {
@@ -97,17 +120,22 @@ class ToolRouter: MCPSocketServerDelegate {
                 args: arguments.mapValues { AnyCodable($0) },
                 context: NativeMessageContext(clientId: clientId, tabGroupId: nil)
             )
-            forwardToExtension(queued, id: id, clientId: clientId)
+            forwardToExtension(queued, id: id, clientId: clientId, arguments: arguments)
         }
     }
 
     // MARK: - Native Screenshot / Zoom
 
     private func handleScreenshotAction(action: String, arguments: [String: Any], id: Any?, clientId: String) {
-        let tabId = arguments["tabId"] as? Int
+        let tabIdOpt = arguments["tabId"] as? Int
+        let tabId = tabIdOpt ?? -1
         if action == "screenshot" {
-            screenshotService.captureScreenshot(tabId: tabId) { [self] result in
+            screenshotService.captureScreenshot(tabId: tabIdOpt) { [weak self] result in
+                guard let self else { return }
                 sendScreenshotResult(result, id: id, to: clientId)
+                if case .success(_) = result {
+                    maybeAddGifFrame(tabId: tabId, action: "screenshot", coordinate: nil)
+                }
             }
         } else {
             // zoom — parse region as [Int], tolerating JSON numbers arriving as Double or NSNumber
@@ -125,8 +153,12 @@ class ToolRouter: MCPSocketServerDelegate {
                 }
                 return nil
             }()
-            screenshotService.captureZoom(tabId: tabId, region: region) { [self] result in
+            screenshotService.captureZoom(tabId: tabIdOpt, region: region) { [weak self] result in
+                guard let self else { return }
                 sendScreenshotResult(result, region: region, id: id, to: clientId)
+                if case .success(_) = result {
+                    maybeAddGifFrame(tabId: tabId, action: "zoom", coordinate: nil)
+                }
             }
         }
     }
@@ -151,6 +183,137 @@ class ToolRouter: MCPSocketServerDelegate {
         }
     }
 
+    // MARK: - Native GIF Creator
+
+    /// Internal (not private) for unit testing via ToolRouterTests.
+    func handleGifCreator(arguments: [String: Any], id: Any?, clientId: String) {
+        guard let action = arguments["action"] as? String else {
+            sendError(id: id, code: -32000, message: "action parameter is required", to: clientId)
+            return
+        }
+        let tabId = (arguments["tabId"] as? Int) ?? -1
+
+        switch action {
+        case "start_recording":
+            let msg = gifService.startRecording(tabId: tabId)
+            sendResult(id: id, result: ["content": [["type": "text", "text": msg]]], to: clientId)
+
+        case "stop_recording":
+            let msg = gifService.stopRecording(tabId: tabId)
+            sendResult(id: id, result: ["content": [["type": "text", "text": msg]]], to: clientId)
+
+        case "clear":
+            let msg = gifService.clearFrames(tabId: tabId)
+            sendResult(id: id, result: ["content": [["type": "text", "text": msg]]], to: clientId)
+
+        case "export":
+            handleGifExport(tabId: tabId, arguments: arguments, id: id, clientId: clientId)
+
+        default:
+            sendError(id: id, code: -32000,
+                      message: "Invalid action: \"\(action)\". Must be start_recording, stop_recording, export, or clear.",
+                      to: clientId)
+        }
+    }
+
+    private func handleGifExport(tabId: Int, arguments: [String: Any], id: Any?, clientId: String) {
+        let timestamp = Int(Date().timeIntervalSince1970)
+        // Strip any path separators from caller-supplied filename so it cannot escape ~/Desktop.
+        // URL(fileURLWithPath:).lastPathComponent reduces "../../evil.plist" to "evil.plist".
+        let rawFilename = (arguments["filename"] as? String) ?? "recording-\(timestamp).gif"
+        let filename = URL(fileURLWithPath: rawFilename).lastPathComponent
+
+        let optsDict = arguments["options"] as? [String: Any] ?? [:]
+        let options = GifService.GifOptions(
+            showClicks:    (optsDict["showClicks"]    as? Bool) ?? true,
+            showActions:   (optsDict["showActions"]   as? Bool) ?? true,
+            showProgress:  (optsDict["showProgress"]  as? Bool) ?? true,
+            showWatermark: (optsDict["showWatermark"] as? Bool) ?? true
+        )
+
+        // Capture server before the async block so we can send an error even if self is deallocated.
+        // id and clientId are already captured by value in the closure.
+        let capturedServer = server
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            guard let self else {
+                NSLog("handleGifExport: ToolRouter deallocated before export completed — sending error to client")
+                var errorResponse: [String: Any] = [
+                    "jsonrpc": "2.0",
+                    "error": ["code": -32000, "message": "GIF export failed: router was torn down during encoding"] as [String: Any]
+                ]
+                if let id = id { errorResponse["id"] = id }
+                if let data = try? JSONSerialization.data(withJSONObject: errorResponse) {
+                    capturedServer?.send(data: data, to: clientId)
+                }
+                return
+            }
+            switch self.gifService.exportGIF(tabId: tabId, options: options) {
+            case .failure(let error):
+                let msg: String
+                if let gifErr = error as? GifError, case .noFrames = gifErr {
+                    msg = gifErr.errorDescription ?? error.localizedDescription
+                } else {
+                    msg = "GIF encoding failed: \(error.localizedDescription)"
+                }
+                self.sendError(id: id, code: -32000, message: msg, to: clientId)
+            case .success(let (data, encodedCount)):
+                let base64 = data.base64EncodedString()
+                let desktopURL = FileManager.default.homeDirectoryForCurrentUser
+                    .appendingPathComponent("Desktop")
+                    .appendingPathComponent(filename)
+                var pathText: String
+                do {
+                    try data.write(to: desktopURL)
+                    pathText = "GIF saved to ~/Desktop/\(filename) (\(encodedCount) frames)"
+                } catch {
+                    let ns = error as NSError
+                    NSLog("handleGifExport: Desktop write failed for '%@': domain=%@ code=%d — %@",
+                          filename, ns.domain, ns.code, ns.localizedDescription)
+                    pathText = "GIF generated (\(encodedCount) frames) — Desktop write failed: \(error.localizedDescription)"
+                }
+                let content: [[String: Any]] = [
+                    ["type": "image", "data": base64, "mimeType": "image/gif"],
+                    ["type": "text", "text": pathText]
+                ]
+                self.sendResult(id: id, result: ["content": content], to: clientId)
+            }
+        }
+    }
+
+    // MARK: - GIF Post-Action Hook
+
+    /// Capture a screenshot and add it as a GIF frame if recording is active for this tabId.
+    /// Fire-and-forget: does not block the MCP response. Only fires on success responses.
+    /// Short-circuits without capturing if: (a) action is "wait" (no meaningful state change),
+    /// or (b) recording is not active for the tabId.
+    /// Internal (not private) for unit testing via ToolRouterTests.
+    func maybeAddGifFrame(tabId: Int, action: String, coordinate: [Int]?) {
+        guard action != "wait" else { return }
+        guard gifService.isRecording(tabId: tabId) else { return }
+        let seq = gifService.nextSequenceNumber()
+        // Capture timestamp before the async screenshot call so inter-frame delays
+        // reflect when the action occurred, not ScreenCaptureKit's capture latency.
+        let capturedAt = Date()
+        screenshotService.captureScreenshot(tabId: tabId) { [weak self] result in
+            guard let self else { return }
+            switch result {
+            case .failure(let error):
+                NSLog("GifService frame capture failed for tabId=%d action=%@ seq=%d: %@",
+                      tabId, action, seq, error.userMessage)
+            case .success(let img):
+                self.gifService.addFrame(GifService.GifFrame(
+                    sequenceNumber: seq,
+                    imageData: img.data,
+                    actionType: action,
+                    coordinate: coordinate,
+                    timestamp: capturedAt,
+                    viewportWidth: img.viewportWidth,
+                    viewportHeight: img.viewportHeight
+                ), tabId: tabId)
+            }
+        }
+    }
+
     // MARK: - Native Window Resize
 
     private func handleResizeWindow(arguments: [String: Any], id: Any?, clientId: String) {
@@ -168,7 +331,8 @@ class ToolRouter: MCPSocketServerDelegate {
         let tabIdSupplied = arguments["tabId"] != nil
         // Warn callers that tabId is accepted but ignored — tabId→window resolution
         // requires extension routing which is not yet implemented (Spec 016 §Window Resolution).
-        appleScriptBridge.resizeWindow(width: Int(w), height: Int(h)) { [self] result in
+        appleScriptBridge.resizeWindow(width: Int(w), height: Int(h)) { [weak self] result in
+            guard let self else { return }
             switch result {
             case .success(var message):
                 if tabIdSupplied {
@@ -199,9 +363,27 @@ class ToolRouter: MCPSocketServerDelegate {
         return (w, h)
     }
 
+    /// Parse a coordinate value from tool arguments, tolerating Int, Double, or NSNumber.
+    /// Returns [Int] if valid (≥2 elements), nil otherwise.
+    private func parseCoordinate(_ raw: Any?) -> [Int]? {
+        guard let raw = raw else { return nil }
+        if let ints = raw as? [Int] { return ints }
+        if let any = raw as? [Any] {
+            let converted = any.compactMap { v -> Int? in
+                if let i = v as? Int { return i }
+                if let d = v as? Double { return Int(d) }
+                if let n = v as? NSNumber { return n.intValue }
+                return nil
+            }
+            return converted.count >= 2 ? converted : nil
+        }
+        return nil
+    }
+
     // MARK: - Extension Forwarding
 
-    private func forwardToExtension(_ queued: QueuedToolRequest, id: Any?, clientId: String) {
+    private func forwardToExtension(_ queued: QueuedToolRequest, id: Any?, clientId: String,
+                                     arguments: [String: Any] = [:]) {
         guard enqueueToolRequest(queued) else {
             sendError(id: id, code: -32000, message: "Failed to enqueue tool request", to: clientId)
             return
@@ -209,6 +391,7 @@ class ToolRouter: MCPSocketServerDelegate {
 
         pendingRequestsLock.lock()
         pendingRequests[queued.requestId] = (clientId: clientId, jsonrpcId: id)
+        pendingToolContext[queued.requestId] = (toolName: queued.tool, arguments: arguments)
         pendingRequestsLock.unlock()
 
         pollForExtensionResponse(requestId: queued.requestId, deadline: Date().addingTimeInterval(30))
@@ -226,9 +409,14 @@ class ToolRouter: MCPSocketServerDelegate {
             try? FileManager.default.removeItem(at: fileURL)
             pendingRequestsLock.lock()
             let pending = pendingRequests.removeValue(forKey: requestId)
+            let toolCtx = pendingToolContext.removeValue(forKey: requestId)
             pendingRequestsLock.unlock()
             if let pending = pending {
-                deliverExtensionResponse(responseString, id: pending.jsonrpcId, to: pending.clientId)
+                deliverExtensionResponse(
+                    responseString, id: pending.jsonrpcId, to: pending.clientId,
+                    toolName: toolCtx?.toolName ?? "",
+                    arguments: toolCtx?.arguments ?? [:]
+                )
             }
             return
         }
@@ -251,6 +439,7 @@ class ToolRouter: MCPSocketServerDelegate {
     private func failPendingRequest(requestId: String, message: String) {
         pendingRequestsLock.lock()
         let pending = pendingRequests.removeValue(forKey: requestId)
+        pendingToolContext.removeValue(forKey: requestId)
         pendingRequestsLock.unlock()
         if let pending = pending {
             sendError(id: pending.jsonrpcId, code: -32000, message: message, to: pending.clientId)
@@ -340,7 +529,8 @@ class ToolRouter: MCPSocketServerDelegate {
         return .failure("Malformed extension response")
     }
 
-    private func deliverExtensionResponse(_ json: String, id: Any?, to clientId: String) {
+    private func deliverExtensionResponse(_ json: String, id: Any?, to clientId: String,
+                                          toolName: String = "", arguments: [String: Any] = [:]) {
         let decoded = decodeExtensionResponse(json)
         if let result = decoded.result {
             let contentDicts = result.content.map { block -> [String: Any] in
@@ -351,9 +541,15 @@ class ToolRouter: MCPSocketServerDelegate {
                 return out
             }
             sendResult(id: id, result: ["content": contentDicts], to: clientId)
+            // Post-action hook: fire-and-forget GIF frame capture on success only
+            let tabId = (arguments["tabId"] as? Int) ?? -1
+            let action = (arguments["action"] as? String) ?? toolName
+            let coordinate = parseCoordinate(arguments["coordinate"])
+            maybeAddGifFrame(tabId: tabId, action: action, coordinate: coordinate)
         } else {
             let message = decoded.error?.content.first?.text ?? "Malformed extension response"
             sendError(id: id, code: -32000, message: message, to: clientId)
+            // Error branch: hook does NOT fire
         }
     }
 
@@ -452,8 +648,8 @@ class ToolRouter: MCPSocketServerDelegate {
         tool("gif_creator", "Manage GIF recording and export for browser automation sessions.", [
             "action": prop("string", "start_recording, stop_recording, export, or clear"),
             "tabId": prop("number", "Tab ID"),
-            "filename": prop("string", "Optional filename for exported GIF"),
-            "download": prop("boolean", "Set to true to download the GIF")
+            "filename": prop("string", "Optional filename for exported GIF (export action only)"),
+            "options": prop("object", "Export overlay options: {showClicks, showActions, showProgress, showWatermark} (all boolean, export action only)")
         ])
     ]
 

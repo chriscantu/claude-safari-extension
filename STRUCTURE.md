@@ -53,7 +53,6 @@ claude-safari-extension/
 │   │       │   ├── tabs-manager.js          # tabs_context_mcp + tabs_create_mcp: virtual tab groups
 │   │       │   ├── read-console.js          # read_console_messages: read captured console output
 │   │       │   ├── read-network.js          # read_network_requests: read captured network requests
-│   │       │   ├── gif-creator.js           # gif_creator: record, stop, export animated GIFs
 │   │       │   ├── upload-image.js          # upload_image: upload screenshot/image to page element
 │   │       │   └── file-upload.js           # file_upload: upload local file to file input
 │   │       │
@@ -72,14 +71,15 @@ claude-safari-extension/
 │   │
 │   └── Tests/                               # All test files
 │       ├── Swift/                            # XCTest suites for native app
+│       │   ├── AppleScriptBridgeTests.swift
+│       │   ├── FileServiceTests.swift
+│       │   ├── GifServiceTests.swift
 │       │   ├── MCPMessageTests.swift
 │       │   ├── MCPSocketServerTests.swift
 │       │   ├── MessageFramerTests.swift
-│       │   ├── ToolRouterTests.swift
+│       │   ├── SafariWebExtensionHandlerTests.swift
 │       │   ├── ScreenshotServiceTests.swift
-│       │   ├── AppleScriptBridgeTests.swift
-│       │   ├── FileServiceTests.swift
-│       │   └── SafariWebExtensionHandlerTests.swift
+│       │   └── ToolRouterTests.swift
 │       └── JS/                              # JavaScript test suites
 │           ├── tool-registry.test.js
 │           ├── background.test.js
@@ -95,13 +95,15 @@ claude-safari-extension/
 │           ├── read-network.test.js
 │           ├── accessibility-tree.test.js
 │           ├── console-monitor.test.js
-│           ├── network-monitor.test.js
-│           └── gif-creator.test.js
+│           └── network-monitor.test.js
 │
 ├── Makefile                                 # Dev workflow: build, run, test, send tool calls
 ├── scripts/                                 # Development and testing scripts
 │   ├── mcp-test.py                          # MCP socket test client (handshake + tool calls)
 │   └── validate-injected-scripts.js         # CI: syntax-check IIFE code strings in tool files
+│
+├── docs/
+│   └── plans/                               # Implementation plans (one per feature, YYYY-MM-DD-<feature>.md)
 │
 └── Specs/                                   # Feature specifications (one per feature)
     ├── 001-mcp-socket-server.md             # Unix domain socket server
@@ -132,6 +134,7 @@ claude-safari-extension/
 - **JavaScript files**: kebab-case (e.g., `tool-registry.js`)
 - **Test files**: Match source file name + `Tests` suffix (Swift) or `.test.js` suffix (JS)
 - **Spec files**: 3-digit number prefix + kebab-case description (e.g., `001-mcp-socket-server.md`)
+- **Plan files**: ISO date prefix + kebab-case feature name (e.g., `2026-03-12-gif-creator.md`)
 
 ## Target Requirements
 

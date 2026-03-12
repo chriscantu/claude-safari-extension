@@ -8,7 +8,8 @@
 
 /* Begin PBXBuildFile section */
 		020608970AC171717C3AD738 /* MessageFramerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 48CBDB59857AA797155E19CC /* MessageFramerTests.swift */; };
-		F011223344556677889900AA /* ScreenshotServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F011223344556677889900BB /* ScreenshotServiceTests.swift */; };
+		023CC86F2F632D9600B613D7 /* GifService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 023CC86E2F632D9600B613D7 /* GifService.swift */; };
+		023CC8712F632DBF00B613D7 /* GifServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 023CC8702F632DBF00B613D7 /* GifServiceTests.swift */; };
 		0E751393E09E0A8E2C5E8AAA /* ToolModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = DCF900FB4B4265BA727FFA21 /* ToolModels.swift */; };
 		2C8D97C719B2C8ABC14F61DA /* ToolRouter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4B4D8BEC346192E189913F39 /* ToolRouter.swift */; };
 		30EB2D0811612DBB6A50EF32 /* FileService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 658074861C8C0C7933646343 /* FileService.swift */; };
@@ -17,16 +18,17 @@
 		921D7ABA46275FD600060ED6 /* Constants.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1D372117A4FF27A236BD5F8 /* Constants.swift */; };
 		9A6E898572D7D10C996C83CC /* MCPMessage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 896C584EA45AB96EAA96797F /* MCPMessage.swift */; };
 		A1B2C3D4E5F60001A1B2C3D4 /* MCPMessageTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60002A1B2C3D4 /* MCPMessageTests.swift */; };
-		CC00112233445566778899BB /* ToolRouterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC00112233445566778899AA /* ToolRouterTests.swift */; };
-		DD00112233445566778899BB /* AppleScriptBridgeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD00112233445566778899AA /* AppleScriptBridgeTests.swift */; };
 		A9635C5FE604D747DE0D1D62 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = EAD6A30A647A7F4F5DC5DEA3 /* AppDelegate.swift */; };
-		BB112233445566778899AABB /* main.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB998877665544332211AABB /* main.swift */; };
 		AE7A3B63E56420BC88227115 /* ScreenshotService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5736A5C7E56CF23B6FF9B13A /* ScreenshotService.swift */; };
 		B0B3DAD82B9C21C2DF890362 /* AppleScriptBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 02B361326E8F2C467CF43011 /* AppleScriptBridge.swift */; };
+		BB112233445566778899AABB /* main.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB998877665544332211AABB /* main.swift */; };
 		C5C31B08E3295067213DE349 /* Constants.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1D372117A4FF27A236BD5F8 /* Constants.swift */; };
+		CC00112233445566778899BB /* ToolRouterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC00112233445566778899AA /* ToolRouterTests.swift */; };
 		D9127E282A5767DAA1C48C5D /* MessageFramer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 652C99F1EAD7FA1BDBF44D9D /* MessageFramer.swift */; };
+		DD00112233445566778899BB /* AppleScriptBridgeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD00112233445566778899AA /* AppleScriptBridgeTests.swift */; };
 		E384720735F6190C0755DC2A /* MCPSocketServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = A17192D2205200262959FCF5 /* MCPSocketServer.swift */; };
 		E9ED48328A1F0387B9334B12 /* ClaudeInSafari Extension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = A2BCAFC762E47A469BC702E3 /* ClaudeInSafari Extension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		F011223344556677889900AA /* ScreenshotServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F011223344556677889900BB /* ScreenshotServiceTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -61,10 +63,11 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		023CC86E2F632D9600B613D7 /* GifService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GifService.swift; sourceTree = "<group>"; };
+		023CC8702F632DBF00B613D7 /* GifServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GifServiceTests.swift; sourceTree = "<group>"; };
 		02B361326E8F2C467CF43011 /* AppleScriptBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppleScriptBridge.swift; sourceTree = "<group>"; };
 		14596A1FC6A28D35A07C800E /* ClaudeInSafari.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = ClaudeInSafari.entitlements; sourceTree = "<group>"; };
 		48CBDB59857AA797155E19CC /* MessageFramerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessageFramerTests.swift; sourceTree = "<group>"; };
-		F011223344556677889900BB /* ScreenshotServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenshotServiceTests.swift; sourceTree = "<group>"; };
 		4B4D8BEC346192E189913F39 /* ToolRouter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolRouter.swift; sourceTree = "<group>"; };
 		5736A5C7E56CF23B6FF9B13A /* ScreenshotService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenshotService.swift; sourceTree = "<group>"; };
 		652C99F1EAD7FA1BDBF44D9D /* MessageFramer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessageFramer.swift; sourceTree = "<group>"; };
@@ -75,15 +78,16 @@
 		9C607E28344D2484CB81B6FD /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		A17192D2205200262959FCF5 /* MCPSocketServer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MCPSocketServer.swift; sourceTree = "<group>"; };
 		A1B2C3D4E5F60002A1B2C3D4 /* MCPMessageTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MCPMessageTests.swift; sourceTree = "<group>"; };
-		CC00112233445566778899AA /* ToolRouterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolRouterTests.swift; sourceTree = "<group>"; };
-		DD00112233445566778899AA /* AppleScriptBridgeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppleScriptBridgeTests.swift; sourceTree = "<group>"; };
 		A2BCAFC762E47A469BC702E3 /* ClaudeInSafari Extension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = "ClaudeInSafari Extension.appex"; sourceTree = BUILT_PRODUCTS_DIR; };
 		B19B82BB58657A6D1B058281 /* Claude in Safari.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Claude in Safari.app"; sourceTree = BUILT_PRODUCTS_DIR; };
-		C2582CE7621B3778BA974E87 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
-		DCF900FB4B4265BA727FFA21 /* ToolModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolModels.swift; sourceTree = "<group>"; };
-		EAD6A30A647A7F4F5DC5DEA3 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
 		BB998877665544332211AABB /* main.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = main.swift; sourceTree = "<group>"; };
+		C2582CE7621B3778BA974E87 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		CC00112233445566778899AA /* ToolRouterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolRouterTests.swift; sourceTree = "<group>"; };
+		DCF900FB4B4265BA727FFA21 /* ToolModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolModels.swift; sourceTree = "<group>"; };
+		DD00112233445566778899AA /* AppleScriptBridgeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppleScriptBridgeTests.swift; sourceTree = "<group>"; };
+		EAD6A30A647A7F4F5DC5DEA3 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
 		EE112233445566778899AABB /* ClaudeInSafariExtension.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = ClaudeInSafariExtension.entitlements; sourceTree = "<group>"; };
+		F011223344556677889900BB /* ScreenshotServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenshotServiceTests.swift; sourceTree = "<group>"; };
 		F1D372117A4FF27A236BD5F8 /* Constants.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Constants.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -113,6 +117,7 @@
 		607F690CCCD242C1E420B4A0 /* Services */ = {
 			isa = PBXGroup;
 			children = (
+				023CC86E2F632D9600B613D7 /* GifService.swift */,
 				02B361326E8F2C467CF43011 /* AppleScriptBridge.swift */,
 				658074861C8C0C7933646343 /* FileService.swift */,
 				5736A5C7E56CF23B6FF9B13A /* ScreenshotService.swift */,
@@ -162,6 +167,7 @@
 		A80FB5CDD3FAA1D105EE532E /* Swift */ = {
 			isa = PBXGroup;
 			children = (
+				023CC8702F632DBF00B613D7 /* GifServiceTests.swift */,
 				48CBDB59857AA797155E19CC /* MessageFramerTests.swift */,
 				A1B2C3D4E5F60002A1B2C3D4 /* MCPMessageTests.swift */,
 				F011223344556677889900BB /* ScreenshotServiceTests.swift */,
@@ -323,6 +329,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				3E3A0B200C0A287DA885E7A5 /* Constants.swift in Sources */,
+				023CC8712F632DBF00B613D7 /* GifServiceTests.swift in Sources */,
 				020608970AC171717C3AD738 /* MessageFramerTests.swift in Sources */,
 				A1B2C3D4E5F60001A1B2C3D4 /* MCPMessageTests.swift in Sources */,
 				F011223344556677889900AA /* ScreenshotServiceTests.swift in Sources */,
@@ -336,7 +343,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				A9635C5FE604D747DE0D1D62 /* AppDelegate.swift in Sources */,
-					BB112233445566778899AABB /* main.swift in Sources */,
+				BB112233445566778899AABB /* main.swift in Sources */,
 				B0B3DAD82B9C21C2DF890362 /* AppleScriptBridge.swift in Sources */,
 				921D7ABA46275FD600060ED6 /* Constants.swift in Sources */,
 				30EB2D0811612DBB6A50EF32 /* FileService.swift in Sources */,
@@ -345,6 +352,7 @@
 				D9127E282A5767DAA1C48C5D /* MessageFramer.swift in Sources */,
 				AE7A3B63E56420BC88227115 /* ScreenshotService.swift in Sources */,
 				0E751393E09E0A8E2C5E8AAA /* ToolModels.swift in Sources */,
+				023CC86F2F632D9600B613D7 /* GifService.swift in Sources */,
 				2C8D97C719B2C8ABC14F61DA /* ToolRouter.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
