@@ -4,8 +4,23 @@ import Foundation
 /// Implements the MCP stdio transport protocol: initialize handshake, tools/list, and tools/call.
 class ToolRouter: MCPSocketServerDelegate {
     private weak var server: MCPSocketServer?
-    private let screenshotService = ScreenshotService()
+    private let screenshotService: ScreenshotService
     private let appleScriptBridge = AppleScriptBridge()
+    private let gifService: GifService
+
+    // Production init — all services created fresh
+    convenience init() {
+        self.init(
+            screenshotService: ScreenshotService(),
+            gifService: GifService()
+        )
+    }
+
+    // Testable init — inject mock services for unit tests
+    init(screenshotService: ScreenshotService, gifService: GifService) {
+        self.screenshotService = screenshotService
+        self.gifService = gifService
+    }
 
     /// Fallback guard for tools that are handled natively but whose handler branch
     /// has not yet been added to handleToolCall(). Any tool listed here that lacks
@@ -15,6 +30,9 @@ class ToolRouter: MCPSocketServerDelegate {
 
     /// Maps requestId → (clientId, jsonrpcId) for in-flight extension calls.
     private var pendingRequests = [String: (clientId: String, jsonrpcId: Any?)]()
+    /// Maps requestId → (toolName, arguments) for gif post-action hook context.
+    /// Protected by the same `pendingRequestsLock` as `pendingRequests`.
+    private var pendingToolContext = [String: (toolName: String, arguments: [String: Any])]()
     private let pendingRequestsLock = NSLock()
 
     func setServer(_ server: MCPSocketServer) {
@@ -56,7 +74,10 @@ class ToolRouter: MCPSocketServerDelegate {
         NSLog("MCP client disconnected: \(clientId)")
         pendingRequestsLock.lock()
         let toCancel = pendingRequests.filter { $0.value.clientId == clientId }.map { $0.key }
-        toCancel.forEach { pendingRequests.removeValue(forKey: $0) }
+        toCancel.forEach {
+            pendingRequests.removeValue(forKey: $0)
+            pendingToolContext.removeValue(forKey: $0)
+        }
         pendingRequestsLock.unlock()
     }
 
@@ -97,17 +118,21 @@ class ToolRouter: MCPSocketServerDelegate {
                 args: arguments.mapValues { AnyCodable($0) },
                 context: NativeMessageContext(clientId: clientId, tabGroupId: nil)
             )
-            forwardToExtension(queued, id: id, clientId: clientId)
+            forwardToExtension(queued, id: id, clientId: clientId, arguments: arguments)
         }
     }
 
     // MARK: - Native Screenshot / Zoom
 
     private func handleScreenshotAction(action: String, arguments: [String: Any], id: Any?, clientId: String) {
-        let tabId = arguments["tabId"] as? Int
+        let tabIdOpt = arguments["tabId"] as? Int
+        let tabId = tabIdOpt ?? -1
         if action == "screenshot" {
-            screenshotService.captureScreenshot(tabId: tabId) { [self] result in
+            screenshotService.captureScreenshot(tabId: tabIdOpt) { [self] result in
                 sendScreenshotResult(result, id: id, to: clientId)
+                if case .success(_) = result {
+                    maybeAddGifFrame(tabId: tabId, action: "screenshot", coordinate: nil)
+                }
             }
         } else {
             // zoom — parse region as [Int], tolerating JSON numbers arriving as Double or NSNumber
@@ -125,8 +150,11 @@ class ToolRouter: MCPSocketServerDelegate {
                 }
                 return nil
             }()
-            screenshotService.captureZoom(tabId: tabId, region: region) { [self] result in
+            screenshotService.captureZoom(tabId: tabIdOpt, region: region) { [self] result in
                 sendScreenshotResult(result, region: region, id: id, to: clientId)
+                if case .success(_) = result {
+                    maybeAddGifFrame(tabId: tabId, action: "zoom", coordinate: nil)
+                }
             }
         }
     }
@@ -199,9 +227,27 @@ class ToolRouter: MCPSocketServerDelegate {
         return (w, h)
     }
 
+    /// Parse a coordinate value from tool arguments, tolerating Int, Double, or NSNumber.
+    /// Returns [Int] if valid (≥2 elements), nil otherwise.
+    private func parseCoordinate(_ raw: Any?) -> [Int]? {
+        guard let raw = raw else { return nil }
+        if let ints = raw as? [Int] { return ints }
+        if let any = raw as? [Any] {
+            let converted = any.compactMap { v -> Int? in
+                if let i = v as? Int { return i }
+                if let d = v as? Double { return Int(d) }
+                if let n = v as? NSNumber { return n.intValue }
+                return nil
+            }
+            return converted.count >= 2 ? converted : nil
+        }
+        return nil
+    }
+
     // MARK: - Extension Forwarding
 
-    private func forwardToExtension(_ queued: QueuedToolRequest, id: Any?, clientId: String) {
+    private func forwardToExtension(_ queued: QueuedToolRequest, id: Any?, clientId: String,
+                                     arguments: [String: Any] = [:]) {
         guard enqueueToolRequest(queued) else {
             sendError(id: id, code: -32000, message: "Failed to enqueue tool request", to: clientId)
             return
@@ -209,6 +255,7 @@ class ToolRouter: MCPSocketServerDelegate {
 
         pendingRequestsLock.lock()
         pendingRequests[queued.requestId] = (clientId: clientId, jsonrpcId: id)
+        pendingToolContext[queued.requestId] = (toolName: queued.tool, arguments: arguments)
         pendingRequestsLock.unlock()
 
         pollForExtensionResponse(requestId: queued.requestId, deadline: Date().addingTimeInterval(30))
@@ -226,9 +273,14 @@ class ToolRouter: MCPSocketServerDelegate {
             try? FileManager.default.removeItem(at: fileURL)
             pendingRequestsLock.lock()
             let pending = pendingRequests.removeValue(forKey: requestId)
+            let toolCtx = pendingToolContext.removeValue(forKey: requestId)
             pendingRequestsLock.unlock()
             if let pending = pending {
-                deliverExtensionResponse(responseString, id: pending.jsonrpcId, to: pending.clientId)
+                deliverExtensionResponse(
+                    responseString, id: pending.jsonrpcId, to: pending.clientId,
+                    toolName: toolCtx?.toolName ?? "",
+                    arguments: toolCtx?.arguments ?? [:]
+                )
             }
             return
         }
@@ -251,6 +303,7 @@ class ToolRouter: MCPSocketServerDelegate {
     private func failPendingRequest(requestId: String, message: String) {
         pendingRequestsLock.lock()
         let pending = pendingRequests.removeValue(forKey: requestId)
+        pendingToolContext.removeValue(forKey: requestId)
         pendingRequestsLock.unlock()
         if let pending = pending {
             sendError(id: pending.jsonrpcId, code: -32000, message: message, to: pending.clientId)
@@ -340,7 +393,8 @@ class ToolRouter: MCPSocketServerDelegate {
         return .failure("Malformed extension response")
     }
 
-    private func deliverExtensionResponse(_ json: String, id: Any?, to clientId: String) {
+    private func deliverExtensionResponse(_ json: String, id: Any?, to clientId: String,
+                                          toolName: String = "", arguments: [String: Any] = [:]) {
         let decoded = decodeExtensionResponse(json)
         if let result = decoded.result {
             let contentDicts = result.content.map { block -> [String: Any] in
@@ -351,9 +405,15 @@ class ToolRouter: MCPSocketServerDelegate {
                 return out
             }
             sendResult(id: id, result: ["content": contentDicts], to: clientId)
+            // Post-action hook: fire-and-forget GIF frame capture on success only
+            let tabId = (arguments["tabId"] as? Int) ?? -1
+            let action = (arguments["action"] as? String) ?? toolName
+            let coordinate = parseCoordinate(arguments["coordinate"])
+            maybeAddGifFrame(tabId: tabId, action: action, coordinate: coordinate)
         } else {
             let message = decoded.error?.content.first?.text ?? "Malformed extension response"
             sendError(id: id, code: -32000, message: message, to: clientId)
+            // Error branch: hook does NOT fire
         }
     }
 
