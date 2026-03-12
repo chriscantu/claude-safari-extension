@@ -14,6 +14,7 @@ A macOS Safari Web Extension that replicates the "Claude in Chrome" browser auto
 - Feature workflow: Spec → Test → Implement → Verify structure
 - Run `xcodebuild test` after every change to verify tests pass
 - **One thing at a time**: always work on a single feature or fix per session; create a dedicated feature branch (`git checkout -b fix/...` or `feature/...`) before touching any code
+- **Implementation plans** live in `docs/plans/` — one file per feature, named `YYYY-MM-DD-<feature>.md`
 
 ## Key Technical Decisions
 - **MV2 manifest** with `"persistent": false` + alarms keepalive — MV2 avoids MV3's service-worker lifecycle unpredictability on macOS Safari; `persistent: false` allows Safari to suspend the page when idle, with `browser.alarms` (every 24 s) preventing suspension during active polling

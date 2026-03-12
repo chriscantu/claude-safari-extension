@@ -218,7 +218,10 @@ class ToolRouter: MCPSocketServerDelegate {
 
     private func handleGifExport(tabId: Int, arguments: [String: Any], id: Any?, clientId: String) {
         let timestamp = Int(Date().timeIntervalSince1970)
-        let filename = (arguments["filename"] as? String) ?? "recording-\(timestamp).gif"
+        // Strip any path separators from caller-supplied filename so it cannot escape ~/Desktop.
+        // URL(fileURLWithPath:).lastPathComponent reduces "../../evil.plist" to "evil.plist".
+        let rawFilename = (arguments["filename"] as? String) ?? "recording-\(timestamp).gif"
+        let filename = URL(fileURLWithPath: rawFilename).lastPathComponent
 
         let optsDict = arguments["options"] as? [String: Any] ?? [:]
         let options = GifService.GifOptions(
