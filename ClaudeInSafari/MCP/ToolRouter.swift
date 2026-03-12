@@ -270,6 +270,9 @@ class ToolRouter: MCPSocketServerDelegate {
         guard action != "wait" else { return }
         guard gifService.isRecording(tabId: tabId) else { return }
         let seq = gifService.nextSequenceNumber()
+        // Capture timestamp before the async screenshot call so inter-frame delays
+        // reflect when the action occurred, not ScreenCaptureKit's capture latency.
+        let capturedAt = Date()
         screenshotService.captureScreenshot(tabId: tabId) { [weak self] result in
             guard let self, case .success(let img) = result else { return }
             self.gifService.addFrame(GifService.GifFrame(
@@ -277,7 +280,7 @@ class ToolRouter: MCPSocketServerDelegate {
                 imageData: img.data,
                 actionType: action,
                 coordinate: coordinate,
-                timestamp: Date(),
+                timestamp: capturedAt,
                 viewportWidth: img.viewportWidth,
                 viewportHeight: img.viewportHeight
             ), tabId: tabId)
@@ -617,8 +620,8 @@ class ToolRouter: MCPSocketServerDelegate {
         tool("gif_creator", "Manage GIF recording and export for browser automation sessions.", [
             "action": prop("string", "start_recording, stop_recording, export, or clear"),
             "tabId": prop("number", "Tab ID"),
-            "filename": prop("string", "Optional filename for exported GIF"),
-            "download": prop("boolean", "Set to true to download the GIF")
+            "filename": prop("string", "Optional filename for exported GIF (export action only)"),
+            "options": prop("object", "Export overlay options: {showClicks, showActions, showProgress, showWatermark} (all boolean, export action only)")
         ])
     ]
 
