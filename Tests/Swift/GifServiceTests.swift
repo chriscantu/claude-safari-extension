@@ -293,6 +293,7 @@ final class GifServiceTests: XCTestCase {
               let gifProps = props[kCGImagePropertyGIFDictionary as String] as? [String: Any] else {
             return nil
         }
-        return gifProps[kCGImagePropertyGIFDelayTime as String] as? Double
+        return gifProps[kCGImagePropertyGIFUnclampedDelayTime as String] as? Double
+            ?? gifProps[kCGImagePropertyGIFDelayTime as String] as? Double
     }
 }
