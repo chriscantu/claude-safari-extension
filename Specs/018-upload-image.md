@@ -10,7 +10,8 @@ on the page. It supports two targeting approaches: `ref` for element-based targe
 ## Scope
 
 - Background: `ClaudeInSafari Extension/Resources/tools/upload-image.js`
-- Native: `ScreenshotService.swift` (stores captured images referenced by `imageId`)
+- Native: `ToolRouter.swift` (intercepts `upload_image`, retrieves image, injects `imageData`)
+          `ScreenshotService.swift` (in-memory image store, accessed by ToolRouter)
 - Content: Injected into active tab via `browser.tabs.executeScript`
 - Tool name: `"upload_image"`
 
@@ -45,7 +46,7 @@ Exactly one of `ref` or `coordinate` must be provided.
 
 1. Validates `imageId` is present; returns error immediately if missing.
 2. Calls `screenshotService.retrieveImage(imageId:)` — O(1) in-memory lookup under `NSLock`.
-3. If not found (evicted by LRU or never captured), returns error immediately — no queue write.
+3. If not found (evicted by FIFO (oldest-first, 50-image cap) or never captured), returns error immediately — no queue write.
 4. Base64-encodes the PNG data and injects it as `imageData` into the forwarded args dict.
 5. Forwards the enriched args to the extension via `forwardToExtension` (standard file queue).
 
@@ -126,7 +127,6 @@ Flow:
 | `ref` element is not a file input | `isError: true`, "Element is not a file input" |
 | Drag-drop target not found at coordinates | `isError: true`, "No element at (`<x>`, `<y>`)" |
 | Tab not accessible | `isError: true`, "Cannot access tab `<tabId>`" |
-| Native app image retrieval fails | `isError: true`, "Failed to retrieve image from native app" |
 
 ## Safari Considerations
 
