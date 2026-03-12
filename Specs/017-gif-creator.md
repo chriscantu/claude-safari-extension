@@ -1,13 +1,276 @@
 # Spec 017 — gif_creator
 
-## Overview
+## Revised Architecture (v3) — Supersedes Original Spec
+
+> **This section is the authoritative implementation guide.** The original spec sections
+> below (Overview through Test Cases) are retained for historical context. Where they
+> conflict with this section, this section takes precedence.
+>
+> **Reviewed and approved:** 2026-03-12. Three architecture review passes completed.
+
+### Key Design Decisions
+
+**gif_creator is a native tool.** Handled entirely by `ToolRouter`, like `screenshot` and
+`resize_window`. Not forwarded to the extension. No `gif-creator.js` needed.
+
+**Scope key: tabId (not tabGroupId).** GifService uses `tabId` as the frame buffer scope
+key. Avoids cross-process tabGroupId resolution. `resolveTabGroup` is not needed.
+
+**GIF delivery: Desktop file + MCP image response.**
+1. Write GIF to `~/Desktop/<filename>.gif`
+2. Return `{ type: "image", data: base64, mimeType: "image/gif" }` + path text in MCP response
+
+In-browser drag-drop delivery deferred until `upload_image` (Spec 018) validates the
+DataTransfer injection pattern in Safari. See Future Items below.
+
+### What Changed from Original Spec
+
+| Original Assumption | Revised Decision |
+|---------------------|-----------------|
+| `gif-creator.js` extension tool handler | Removed — gif_creator is native |
+| `globalThis.gifRecorder` JS contract | Removed — ToolRouter post-action hook replaces this |
+| `computer.js` checks `gifRecorder.isRecording()` | Removed — ToolRouter handles it |
+| Frames persisted to App Group container files | In-memory GifService (native app doesn't suspend) |
+| gif.js Web Worker library | Removed — native ImageIO is more reliable |
+| `browser.storage.session` for recording state | Removed — state in GifService in-memory |
+| `globalThis.resolveTabGroup` export | Removed — tabId used as scope key |
+| Export via `<a download>` in extension | Removed — Desktop file write, no frontmost req. |
+| Export via drag-drop DataTransfer | Deferred to ROADMAP (after Spec 018) |
+| Scope by tab group | Scope by tabId |
+| `kUTTypeGIF` UTI constant | `"com.compuserve.gif"` string literal (kUTTypeGIF deprecated macOS 12+) |
+
+### GifService.swift (new)
+
+Owns all GIF state and encoding. Instantiated inline in `ToolRouter` (same pattern as
+`ScreenshotService`). Thread-safe via NSLock.
+
+```swift
+class GifService {
+
+    struct GifFrame {
+        let sequenceNumber: Int       // monotonic; assigned at dispatch time for ordering
+        let imageData: Data           // PNG-encoded, from ScreenshotService
+        let actionType: String        // e.g. "left_click", "scroll", "type", "screenshot"
+        let coordinate: [Int]?        // parsed via compactMap/NSNumber (same as zoom region)
+        let timestamp: Date
+        let viewportWidth: Int
+        let viewportHeight: Int
+    }
+
+    struct GifOptions {
+        var showClicks: Bool    = true
+        var showActions: Bool   = true
+        var showProgress: Bool  = true
+        var showWatermark: Bool = true
+    }
+
+    func startRecording(tabId: Int) -> String
+    func stopRecording(tabId: Int) -> String
+    func isRecording(tabId: Int) -> Bool
+    func frameCount(tabId: Int) -> Int
+
+    // Atomically increments and returns the global sequence counter.
+    // MUST be called before the async screenshot callback to preserve dispatch-time ordering.
+    func nextSequenceNumber() -> Int
+
+    // Enforces 50-frame ring buffer.
+    func addFrame(_ frame: GifFrame, tabId: Int)
+
+    // Snapshot semantics: copies frame array under NSLock, releases lock, encodes from snapshot.
+    // Concurrent addFrame calls during encoding are safe.
+    func exportGIF(tabId: Int, options: GifOptions, filename: String) -> Result<Data, Error>
+
+    func clearFrames(tabId: Int) -> String
+}
+```
+
+**GIF encoding** uses ImageIO:
+- `CGImageDestinationCreateWithData(mutableData, "com.compuserve.gif" as CFString, frameCount, nil)`
+- Per-frame: decode PNG → CGImage, apply overlays via CGContext, `CGImageDestinationAddImage` with delay
+- `CGImageDestinationFinalize` → Data
+
+**Frame delay** (values in seconds as passed to `kCGImagePropertyGIFDelayTime`; ImageIO accepts
+seconds as CFNumber, unlike the raw GIF89a format which uses centiseconds):
+
+| Action type | Delay (s) |
+|-------------|-----------|
+| `screenshot`, `zoom` | 0.3 |
+| `scroll`, `scroll_to`, `navigate`, `type`, `key`, `hover` | 0.8 |
+| `left_click`, `right_click`, `double_click`, `triple_click`, `left_click_drag` | 1.5 |
+| (default) | 0.8 |
+
+**Visual overlays** (CGContext drawing):
+- `showClicks`: red filled circle r=12pt + outer ring r=20pt 2pt stroke at coordinate
+- `showActions`: filled rounded-rect label at bottom with action text
+- `showProgress`: 3pt-tall rect at top, width = (frameIndex/totalFrames) × imageWidth
+- `showWatermark`: "Recorded with Claude" bottom-right, 11pt system font, 60% white
+
+**Thread safety:** All mutable state under a single NSLock. `exportGIF` copies frame array
+under lock, releases immediately, encodes from snapshot. `exportGIF` sorts frames by
+`sequenceNumber` before encoding to handle out-of-order async captures.
+
+### ToolRouter.swift changes
+
+New branch in `handleToolCall`:
+```swift
+} else if toolName == "gif_creator" {
+    handleGifCreator(arguments: arguments, id: id, clientId: clientId)
+}
+```
+
+`handleGifCreator` dispatches `start_recording`/`stop_recording`/`clear` synchronously.
+`export` dispatches to `DispatchQueue.global(qos: .userInitiated)` (encoding is 100ms–2s).
+
+`tabId` sentinel: `(arguments["tabId"] as? Int) ?? -1` — `-1` for missing tabId
+(no valid Safari tab ID is negative).
+
+**Post-action frame capture hook** — called **only from the `.result` (success) branch**
+of `deliverExtensionResponse`, never from `.error`. Also called from `handleScreenshotAction`
+after a successful native capture. Fire-and-forget; does not block MCP response:
+
+```swift
+private func maybeAddGifFrame(tabId: Int, action: String, coordinate: [Int]?) {
+    guard gifService.isRecording(tabId: tabId) else { return }
+    let seq = gifService.nextSequenceNumber()   // assigned before async capture
+    screenshotService.captureScreenshot(tabId: tabId) { [weak self] result in
+        guard let self, case .success(let img) = result else { return }
+        self.gifService.addFrame(GifService.GifFrame(
+            sequenceNumber: seq, imageData: img.data, actionType: action,
+            coordinate: coordinate, timestamp: Date(),
+            viewportWidth: img.viewportWidth, viewportHeight: img.viewportHeight
+        ), tabId: tabId)
+    }
+}
+```
+
+Coordinates parsed with NSNumber-tolerant compactMap (same pattern as zoom region in ToolRouter).
+
+### Data Flow
+
+```mermaid
+sequenceDiagram
+    participant C as MCP Client
+    participant TR as ToolRouter.swift
+    participant GS as GifService.swift
+    participant SS as ScreenshotService.swift
+    participant Ext as Extension (computer.js)
+
+    Note over C,Ext: Recording lifecycle
+    C->>TR: gif_creator {action:"start_recording", tabId:5}
+    TR->>GS: startRecording(5)
+    GS-->>TR: "Started recording..."
+    TR-->>C: ✅ text response
+
+    C->>TR: computer {action:"left_click", coordinate:[200,300], tabId:5}
+    TR->>Ext: forwardToExtension (poll/response IPC)
+    Ext-->>TR: "Clicked at (200, 300)" [.result branch]
+    TR-->>C: ✅ text response
+    TR->>GS: nextSequenceNumber() → seq=1
+    TR->>SS: captureScreenshot(5) [fire-and-forget]
+    SS-->>GS: addFrame({seq:1, actionType:"left_click", ...}, 5)
+
+    C->>TR: computer {action:"screenshot", tabId:5}
+    TR->>SS: captureScreenshot(5) [native path]
+    SS-->>TR: CapturedImage
+    TR-->>C: ✅ image response
+    TR->>GS: nextSequenceNumber() → seq=2
+    TR->>SS: captureScreenshot(5) [fire-and-forget]
+    SS-->>GS: addFrame({seq:2, actionType:"screenshot", ...}, 5)
+
+    C->>TR: gif_creator {action:"stop_recording", tabId:5}
+    TR->>GS: stopRecording(5)
+    GS-->>TR: "Stopped. Captured 2 frame(s)."
+    TR-->>C: ✅ text response
+
+    Note over C,Ext: Export
+    C->>TR: gif_creator {action:"export", tabId:5, filename:"demo.gif"}
+    TR->>GS: exportGIF(5, options, "demo.gif") [DispatchQueue.global]
+    Note over GS: 1. Snapshot frames under NSLock<br/>2. Sort by sequenceNumber<br/>3. Apply overlays via CGContext<br/>4. Encode via ImageIO
+    GS-->>TR: Data (GIF bytes)
+    TR->>TR: Write ~/Desktop/demo.gif
+    TR-->>C: ✅ [image/gif base64] + "GIF saved to ~/Desktop/demo.gif (2 frames)"
+```
+
+### Error Handling
+
+| Condition | Behavior |
+|-----------|----------|
+| `action` missing | `isError: true`, "action parameter is required" |
+| `action` invalid | `isError: true`, "Invalid action: \"<x>\"…" |
+| Export with no frames | `isError: true`, "No frames recorded for tab `<tabId>`" |
+| GIF encoding fails | `isError: true`, "GIF encoding failed: `<error>`" |
+| Desktop write fails | Success with warning in path text; base64 still returned |
+| `start_recording` when already recording | "Recording is already active…" (not error) |
+| `stop_recording` when not recording | "Recording is not active…" (not error) |
+| `export` while recording | Valid — exports current frames, recording continues |
+| `tabId` missing | Uses -1 sentinel (single-tab fallback) |
+
+### Files to Create / Modify
+
+| File | Change |
+|------|--------|
+| `ClaudeInSafari/Services/GifService.swift` | **Create** |
+| `ClaudeInSafari/MCP/ToolRouter.swift` | **Modify** — native dispatch + post-action hook |
+| `Tests/Swift/GifServiceTests.swift` | **Create** |
+| `Tests/Swift/ToolRouterGifHookTests.swift` | **Create** |
+| `ROADMAP.md` | **Modify** — mark 017 ✅; add in-browser delivery as future item |
+
+No changes to: `AppDelegate.swift`, `SafariWebExtensionHandler.swift`, `manifest.json`,
+`background.js`, `tabs-manager.js`, any extension JS, or `ClaudeInSafari.entitlements`
+(app is not sandboxed; Desktop writes work. If App Store sandboxing added in Phase 7,
+change target to App Group container or add `com.apple.security.files.downloads.read-write`).
+
+### Future ROADMAP Item: In-Browser GIF Delivery
+
+After `upload_image` (Spec 018) validates DataTransfer injection in Safari:
+- Add `coordinate: [x, y]` export mode → inject GIF as File + dragenter/dragover/drop
+- **Validation checkpoint:** verify `new DataTransfer()` is constructible in Safari 16.4+
+  content scripts before implementing (known Chrome/Safari divergence)
+
+### Test Coverage
+
+**GifServiceTests.swift:**
+
+| ID | Test |
+|----|------|
+| T1 | startRecording → isRecording true → stopRecording → isRecording false |
+| T2 | startRecording twice → "already active", state unchanged |
+| T3 | stopRecording when not recording → "not active" |
+| T4 | addFrame ×50 → frameCount==50; 51st evicts oldest |
+| T5 | exportGIF with zero frames → `.failure` |
+| T6 | exportGIF produces Data with GIF magic bytes ("GIF8") |
+| T7 | exportGIF frame delay matches timing table per action type |
+| T8 | clearFrames → frameCount==0, isRecording false |
+| T9 | Concurrent addFrame → no crash, correct count |
+| T10 | exportGIF concurrent with addFrame → no data race |
+| T11 | Out-of-order sequenceNumbers → sorted correctly in export |
+| T12 | exportGIF with showClicks:false → no crash |
+
+**ToolRouterGifHookTests.swift:**
+
+| ID | Test |
+|----|------|
+| T1 | gif_creator start_recording → success text, isRecording true |
+| T2 | gif_creator stop_recording → "Stopped. Captured N frames." |
+| T3 | Hook does NOT fire for `wait` action |
+| T4 | Hook does NOT fire when isRecording false |
+| T5 | Hook fires for `left_click` when recording — addFrame called |
+| T6 | handleScreenshotAction calls maybeAddGifFrame when recording |
+| T7 | gif_creator export → image/gif content block + text with file path |
+| T8 | gif_creator export with no frames → isError: true |
+| T9 | gif_creator invalid action → isError: true |
+| T10 | Hook does NOT fire when extension returns error response |
+
+---
+
+## Overview (Original Spec — for historical context)
 
 `gif_creator` manages animated GIF recording for browser automation sessions. It controls
 when to start/stop capturing screenshot frames during automation actions, then exports
 the captured frames as an animated GIF with optional visual overlays (click indicators,
 action labels, progress bar, watermark).
 
-## Scope
+## Scope (Original)
 
 - Background: `ClaudeInSafari Extension/Resources/tools/gif-creator.js`
 - Library: `ClaudeInSafari Extension/Resources/lib/gif.js` (GIF encoder)
@@ -289,7 +552,7 @@ implemented. Until then, only non-screenshot `computer` actions can contribute f
 | Frames survive page suspension | N/A (persistent) | ✅ | App Group persistence |
 | GIF encoding | gif.js Web Workers | Native (ImageIO) | More reliable |
 
-## Test Cases
+## Test Cases (Original)
 
 | ID | Input | Expected Output |
 |----|-------|-----------------|
