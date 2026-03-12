@@ -114,6 +114,7 @@ class GifService {
     func addFrame(_ frame: GifFrame, tabId: Int) {
         lock.lock()
         defer { lock.unlock() }
+        guard recordingTabs.contains(tabId) else { return }
         var frames = frameBuffers[tabId] ?? []
         frames.append(frame)
         if frames.count > GifService.maxFrames {
