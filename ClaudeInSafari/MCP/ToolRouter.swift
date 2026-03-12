@@ -7,8 +7,11 @@ class ToolRouter: MCPSocketServerDelegate {
     private let screenshotService = ScreenshotService()
     private let appleScriptBridge = AppleScriptBridge()
 
-    /// Tools handled natively by the Swift app (not forwarded to the extension).
-    private let nativeTools: Set<String> = ["resize_window"]
+    /// Fallback guard for tools that are handled natively but whose handler branch
+    /// has not yet been added to handleToolCall(). Any tool listed here that lacks
+    /// an explicit dispatch branch will return "not yet implemented" rather than being
+    /// silently forwarded to the extension.
+    private let nativeTools: Set<String> = []
 
     /// Maps requestId → (clientId, jsonrpcId) for in-flight extension calls.
     private var pendingRequests = [String: (clientId: String, jsonrpcId: Any?)]()
@@ -151,11 +154,32 @@ class ToolRouter: MCPSocketServerDelegate {
     // MARK: - Native Window Resize
 
     private func handleResizeWindow(arguments: [String: Any], id: Any?, clientId: String) {
-        guard arguments["width"] != nil, arguments["height"] != nil else {
-            sendError(id: id, code: -32000, message: "Both width and height parameters are required", to: clientId)
+        guard let (w, h) = parseResizeDimensions(arguments) else {
+            if arguments["width"] == nil || arguments["height"] == nil {
+                sendError(id: id, code: -32000, message: "Both width and height parameters are required", to: clientId)
+            } else {
+                sendError(id: id, code: -32000, message: "Width and height must be numbers", to: clientId)
+            }
             return
         }
 
+        // Truncate to integers per spec (e.g. 1024.7 → 1024).
+        // Note: values near the 200-pixel minimum truncate down — 199.9 becomes 199 and will fail validation.
+        do {
+            let message = try appleScriptBridge.resizeWindow(width: Int(w), height: Int(h))
+            sendResult(id: id, result: ["content": [["type": "text", "text": message]]], to: clientId)
+        } catch let error as AppleScriptBridge.ResizeError {
+            sendError(id: id, code: -32000, message: error.userMessage, to: clientId)
+        } catch {
+            NSLog("ToolRouter: unexpected error in handleResizeWindow — %@", error.localizedDescription)
+            sendError(id: id, code: -32000, message: "Failed to resize window: \(error.localizedDescription)", to: clientId)
+        }
+    }
+
+    /// Parse width and height from tool arguments, tolerating Int, Double, or NSNumber.
+    /// Returns nil if either argument is missing or cannot be converted to a Double.
+    /// Separated from handleResizeWindow for testability.
+    func parseResizeDimensions(_ arguments: [String: Any]) -> (width: Double, height: Double)? {
         // Tolerate Int, Double, or NSNumber — same pattern used for zoom region parsing.
         func asDouble(_ val: Any) -> Double? {
             if let i = val as? Int { return Double(i) }
@@ -163,21 +187,11 @@ class ToolRouter: MCPSocketServerDelegate {
             if let n = val as? NSNumber { return n.doubleValue }
             return nil
         }
-
-        guard let w = asDouble(arguments["width"]!), let h = asDouble(arguments["height"]!) else {
-            sendError(id: id, code: -32000, message: "Width and height must be numbers", to: clientId)
-            return
+        guard let wRaw = arguments["width"], let hRaw = arguments["height"],
+              let w = asDouble(wRaw), let h = asDouble(hRaw) else {
+            return nil
         }
-
-        // Truncate to integers per spec (e.g. 1024.7 → 1024).
-        do {
-            let message = try appleScriptBridge.resizeWindow(width: Int(w), height: Int(h))
-            sendResult(id: id, result: ["content": [["type": "text", "text": message]]], to: clientId)
-        } catch let error as AppleScriptBridge.ResizeError {
-            sendError(id: id, code: -32000, message: error.userMessage, to: clientId)
-        } catch {
-            sendError(id: id, code: -32000, message: "Failed to resize window: \(error.localizedDescription)", to: clientId)
-        }
+        return (w, h)
     }
 
     // MARK: - Extension Forwarding

@@ -3,15 +3,19 @@ import Foundation
 /// Manages Safari window operations via AppleScript.
 /// See Spec 016 for full specification.
 ///
+/// Apple Events are sent via an `osascript` subprocess rather than `NSAppleScript`.
+/// See `runAppleScript()` for the rationale — the entitlement applies to `osascript`'s
+/// TCC entry, not the app bundle.
+///
 /// Requires:
-/// - com.apple.security.temporary-exception.apple-events entitlement targeting com.apple.Safari
 /// - Accessibility permission (System Settings > Privacy & Security > Accessibility)
+///   for the System Events fullscreen check.
 class AppleScriptBridge {
 
     enum ResizeError: Error {
         case notPositive
-        case belowMinimum(String) // axis name: "Width" or "Height"
-        case exceedsMaximum
+        case belowMinimum(String)  // axis name: "Width" or "Height"
+        case exceedsMaximum(String) // axis name: "Width" or "Height"
         case noWindowFound
         case fullscreen
         case accessibilityDenied
@@ -23,8 +27,8 @@ class AppleScriptBridge {
                 return "Width and height must be positive numbers"
             case .belowMinimum(let axis):
                 return "\(axis) must be at least \(AppleScriptBridge.minDimension) pixels"
-            case .exceedsMaximum:
-                return "Dimensions exceed 8K resolution limit"
+            case .exceedsMaximum(let axis):
+                return "\(axis) exceeds 8K resolution limit"
             case .noWindowFound:
                 return "No Safari window found"
             case .fullscreen:
@@ -46,8 +50,9 @@ class AppleScriptBridge {
     /// Resize the frontmost Safari window to the given dimensions.
     /// The window's top-left corner is preserved; only width and height change.
     ///
-    /// If tabId was provided by the caller it is ignored — resize always targets
-    /// the frontmost Safari window. See Spec 016 for the rationale.
+    /// tabId resolution (tab ID → window index via the extension) is not yet
+    /// implemented; this method always resizes the frontmost Safari window (window 1).
+    /// See Spec 016 §Window Resolution for the intended full implementation.
     ///
     /// - Parameters:
     ///   - width: Target window width in pixels (200–7680)
@@ -72,8 +77,11 @@ class AppleScriptBridge {
         guard height >= Self.minDimension else {
             throw ResizeError.belowMinimum("Height")
         }
-        guard width <= Self.maxWidth, height <= Self.maxHeight else {
-            throw ResizeError.exceedsMaximum
+        guard width <= Self.maxWidth else {
+            throw ResizeError.exceedsMaximum("Width")
+        }
+        guard height <= Self.maxHeight else {
+            throw ResizeError.exceedsMaximum("Height")
         }
     }
 
@@ -83,18 +91,21 @@ class AppleScriptBridge {
         // Note: width/height are validated integers — no injection risk.
         // Two-step approach:
         //   1. Check window count and fullscreen state via System Events (requires Accessibility permission).
-        //   2. Resize via Safari's Apple Events API (requires apple-events entitlement).
-        // Race condition: window state may change between the check and the resize — documented in Spec 016.
+        //   2. Resize via Safari's Apple Events API (requires osascript TCC permission for Safari).
+        // Sentinel error numbers (9001, 9002) are matched in runAppleScript for reliable classification,
+        // avoiding fragile substring matches on human-readable error text.
+        // Race condition: the frontmost window (window 1) may change between the fullscreen check and
+        // the resize if the user interacts with another window during execution. Documented in Spec 016.
         return """
         tell application "Safari"
             if (count of windows) is 0 then
-                error "no_window"
+                error "RESIZE_NO_WINDOW" number 9001
             end if
         end tell
         tell application "System Events"
             tell process "Safari"
                 if value of attribute "AXFullScreen" of window 1 is true then
-                    error "fullscreen"
+                    error "RESIZE_FULLSCREEN" number 9002
                 end if
             end tell
         end tell
@@ -118,25 +129,48 @@ class AppleScriptBridge {
 
         do {
             try process.run()
-            process.waitUntilExit()
         } catch {
+            NSLog("AppleScriptBridge: process.run() threw — %@", error.localizedDescription)
             throw ResizeError.executionFailed("Failed to launch osascript: \(error.localizedDescription)")
         }
 
+        // Read stderr on a background thread concurrently with waitUntilExit() to avoid
+        // a pipe buffer deadlock: if osascript writes >64 KB to stderr before exiting,
+        // it blocks on write() while the parent is blocked on waitUntilExit().
+        let stderrHandle = stderr.fileHandleForReading
+        var stderrData = Data()
+        let group = DispatchGroup()
+        group.enter()
+        DispatchQueue.global(qos: .utility).async {
+            stderrData = stderrHandle.readDataToEndOfFile()
+            group.leave()
+        }
+        process.waitUntilExit()
+        group.wait()
+
+        // A signal-killed process has a different termination reason from a normal exit.
+        if process.terminationReason == .uncaughtSignal {
+            NSLog("AppleScriptBridge: osascript killed by signal %d", process.terminationStatus)
+            throw ResizeError.executionFailed("osascript was killed by signal \(process.terminationStatus)")
+        }
+
         guard process.terminationStatus == 0 else {
-            let data = stderr.fileHandleForReading.readDataToEndOfFile()
-            let message = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            if message.lowercased().contains("not allowed") ||
-               message.lowercased().contains("assistive") {
+            let message = String(data: stderrData, encoding: .utf8)?
+                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+
+            // Match on numeric sentinel codes injected by the AppleScript for reliable
+            // classification — avoids fragile substring matching on localised error text.
+            if message.contains("(9001)") { throw ResizeError.noWindowFound }
+            if message.contains("(9002)") { throw ResizeError.fullscreen }
+
+            // -1743 (errAEEventNotPermitted) is the canonical TCC Apple Events denial code.
+            if message.contains("-1743") || message.lowercased().contains("not authorized") {
                 throw ResizeError.accessibilityDenied
             }
-            if message.contains("no_window") {
-                throw ResizeError.noWindowFound
-            }
-            if message.contains("fullscreen") {
-                throw ResizeError.fullscreen
-            }
-            throw ResizeError.executionFailed(message.isEmpty ? "osascript exited with status \(process.terminationStatus)" : message)
+
+            throw ResizeError.executionFailed(
+                message.isEmpty ? "osascript exited with status \(process.terminationStatus)" : message
+            )
         }
     }
 }
