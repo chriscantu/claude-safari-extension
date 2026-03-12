@@ -185,6 +185,7 @@ class ToolRouter: MCPSocketServerDelegate {
 
     // MARK: - Native GIF Creator
 
+    /// Internal (not private) for unit testing via ToolRouterTests.
     func handleGifCreator(arguments: [String: Any], id: Any?, clientId: String) {
         guard let action = arguments["action"] as? String else {
             sendError(id: id, code: -32000, message: "action parameter is required", to: clientId)
@@ -228,6 +229,7 @@ class ToolRouter: MCPSocketServerDelegate {
 
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             guard let self else { return }
+            let frameCount = self.gifService.frameCount(tabId: tabId)
             switch self.gifService.exportGIF(tabId: tabId, options: options, filename: filename) {
             case .failure(let error):
                 let msg: String
@@ -238,7 +240,6 @@ class ToolRouter: MCPSocketServerDelegate {
                 }
                 self.sendError(id: id, code: -32000, message: msg, to: clientId)
             case .success(let data):
-                let frameCount = self.gifService.frameCount(tabId: tabId)
                 let base64 = data.base64EncodedString()
                 let desktopURL = FileManager.default.homeDirectoryForCurrentUser
                     .appendingPathComponent("Desktop")
@@ -264,7 +265,7 @@ class ToolRouter: MCPSocketServerDelegate {
     /// Capture a screenshot and add it as a GIF frame if recording is active for this tabId.
     /// Fire-and-forget: does not block the MCP response. Only fires on success responses.
     /// Skips "wait" action (no meaningful state change to capture).
-    /// Internal (not private) for unit testing via ToolRouterGifHookTests.
+    /// Internal (not private) for unit testing via ToolRouterTests.
     func maybeAddGifFrame(tabId: Int, action: String, coordinate: [Int]?) {
         guard action != "wait" else { return }
         guard gifService.isRecording(tabId: tabId) else { return }

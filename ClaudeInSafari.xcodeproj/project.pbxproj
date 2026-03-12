@@ -10,7 +10,6 @@
 		020608970AC171717C3AD738 /* MessageFramerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 48CBDB59857AA797155E19CC /* MessageFramerTests.swift */; };
 		023CC86F2F632D9600B613D7 /* GifService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 023CC86E2F632D9600B613D7 /* GifService.swift */; };
 		023CC8712F632DBF00B613D7 /* GifServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 023CC8702F632DBF00B613D7 /* GifServiceTests.swift */; };
-		023CC8732F632F0000B613D7 /* ToolRouterGifHookTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 023CC8722F632F0000B613D7 /* ToolRouterGifHookTests.swift */; };
 		0E751393E09E0A8E2C5E8AAA /* ToolModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = DCF900FB4B4265BA727FFA21 /* ToolModels.swift */; };
 		2C8D97C719B2C8ABC14F61DA /* ToolRouter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4B4D8BEC346192E189913F39 /* ToolRouter.swift */; };
 		30EB2D0811612DBB6A50EF32 /* FileService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 658074861C8C0C7933646343 /* FileService.swift */; };
@@ -66,7 +65,6 @@
 /* Begin PBXFileReference section */
 		023CC86E2F632D9600B613D7 /* GifService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GifService.swift; sourceTree = "<group>"; };
 		023CC8702F632DBF00B613D7 /* GifServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GifServiceTests.swift; sourceTree = "<group>"; };
-		023CC8722F632F0000B613D7 /* ToolRouterGifHookTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolRouterGifHookTests.swift; sourceTree = "<group>"; };
 		02B361326E8F2C467CF43011 /* AppleScriptBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppleScriptBridge.swift; sourceTree = "<group>"; };
 		14596A1FC6A28D35A07C800E /* ClaudeInSafari.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = ClaudeInSafari.entitlements; sourceTree = "<group>"; };
 		48CBDB59857AA797155E19CC /* MessageFramerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessageFramerTests.swift; sourceTree = "<group>"; };
@@ -169,7 +167,6 @@
 		A80FB5CDD3FAA1D105EE532E /* Swift */ = {
 			isa = PBXGroup;
 			children = (
-				023CC8722F632F0000B613D7 /* ToolRouterGifHookTests.swift */,
 				023CC8702F632DBF00B613D7 /* GifServiceTests.swift */,
 				48CBDB59857AA797155E19CC /* MessageFramerTests.swift */,
 				A1B2C3D4E5F60002A1B2C3D4 /* MCPMessageTests.swift */,
@@ -331,7 +328,6 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				023CC8732F632F0000B613D7 /* ToolRouterGifHookTests.swift in Sources */,
 				3E3A0B200C0A287DA885E7A5 /* Constants.swift in Sources */,
 				023CC8712F632DBF00B613D7 /* GifServiceTests.swift in Sources */,
 				020608970AC171717C3AD738 /* MessageFramerTests.swift in Sources */,
