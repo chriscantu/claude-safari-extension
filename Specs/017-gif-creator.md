@@ -92,12 +92,26 @@ class GifService {
 **Frame delay** (values in seconds as passed to `kCGImagePropertyGIFDelayTime`; ImageIO accepts
 seconds as CFNumber, unlike the raw GIF89a format which uses centiseconds):
 
-| Action type | Delay (s) |
+Delay is computed from **actual elapsed time** between consecutive frames using the
+`timestamp` field already captured in `GifFrame`:
+
+```swift
+let elapsed = nextFrame.timestamp.timeIntervalSince(currentFrame.timestamp)
+let delay = min(max(elapsed, 0.3), 3.0)
+```
+
+The table below is a **fallback only** — used for the last frame (which has no successor
+timestamp) and for any single-frame export:
+
+| Action type | Fallback delay (s) |
 |-------------|-----------|
 | `screenshot`, `zoom` | 0.3 |
 | `scroll`, `scroll_to`, `navigate`, `type`, `key`, `hover` | 0.8 |
 | `left_click`, `right_click`, `double_click`, `triple_click`, `left_click_drag` | 1.5 |
 | (default) | 0.8 |
+
+**Last frame hold:** the final frame always uses a 3.0s delay (regardless of elapsed time
+or action type) so the viewer can see the end state before the GIF loops.
 
 **Visual overlays** (CGContext drawing):
 - `showClicks`: red filled circle r=12pt + outer ring r=20pt 2pt stroke at coordinate
@@ -220,12 +234,23 @@ No changes to: `AppDelegate.swift`, `SafariWebExtensionHandler.swift`, `manifest
 (app is not sandboxed; Desktop writes work. If App Store sandboxing added in Phase 7,
 change target to App Group container or add `com.apple.security.files.downloads.read-write`).
 
-### Future ROADMAP Item: In-Browser GIF Delivery
+### Future ROADMAP Items
 
-After `upload_image` (Spec 018) validates DataTransfer injection in Safari:
+**In-browser GIF delivery** — after `upload_image` (Spec 018) validates DataTransfer
+injection in Safari:
 - Add `coordinate: [x, y]` export mode → inject GIF as File + dragenter/dragover/drop
 - **Validation checkpoint:** verify `new DataTransfer()` is constructible in Safari 16.4+
   content scripts before implementing (known Chrome/Safari divergence)
+
+**Per-frame local color palette** — replace global 256-color palette with per-frame
+palette quantization (set `kCGImagePropertyGIFHasGlobalColorMap: false` per frame).
+Dramatically improves color rendering for web screenshot content. Export-time only;
+no capture overhead.
+
+**Frame deduplication** — during export, skip consecutive frames where a pixel-sample
+diff (e.g., 1000 random pixels) falls below a threshold. Reduces GIF file size and
+eliminates stutter from near-identical frames captured during rapid actions. Export-time
+only; no capture overhead.
 
 ### Test Coverage
 
@@ -239,7 +264,9 @@ After `upload_image` (Spec 018) validates DataTransfer injection in Safari:
 | T4 | addFrame ×50 → frameCount==50; 51st evicts oldest |
 | T5 | exportGIF with zero frames → `.failure` |
 | T6 | exportGIF produces Data with GIF magic bytes ("GIF8") |
-| T7 | exportGIF frame delay matches timing table per action type |
+| T7 | exportGIF mid-sequence delay = elapsed time clamped to [0.3, 3.0]s |
+| T7b | exportGIF last frame always uses 3.0s delay |
+| T7c | exportGIF single-frame export uses fallback timing table |
 | T8 | clearFrames → frameCount==0, isRecording false |
 | T9 | Concurrent addFrame → no crash, correct count |
 | T10 | exportGIF concurrent with addFrame → no data race |
