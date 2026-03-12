@@ -4,6 +4,23 @@ import CoreGraphics
 import ImageIO
 @testable import ClaudeInSafari
 
+// MARK: - Shared PNG test helper (module-level, available to all test classes)
+
+func makePNGData(width: Int = 10, height: Int = 10) -> Data {
+    let ctx = CGContext(
+        data: nil, width: width, height: height,
+        bitsPerComponent: 8, bytesPerRow: 0,
+        space: CGColorSpaceCreateDeviceRGB(),
+        bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+    )!
+    let image = ctx.makeImage()!
+    let data = NSMutableData()
+    let dest = CGImageDestinationCreateWithData(data, "public.png" as CFString, 1, nil)!
+    CGImageDestinationAddImage(dest, image, nil)
+    CGImageDestinationFinalize(dest)
+    return data as Data
+}
+
 final class GifServiceTests: XCTestCase {
 
     private var service: GifService!
@@ -11,23 +28,6 @@ final class GifServiceTests: XCTestCase {
     override func setUp() {
         super.setUp()
         service = GifService()
-    }
-
-    // MARK: - Helpers
-
-    private func makePNGData(width: Int = 10, height: Int = 10) -> Data {
-        let ctx = CGContext(
-            data: nil, width: width, height: height,
-            bitsPerComponent: 8, bytesPerRow: 0,
-            space: CGColorSpaceCreateDeviceRGB(),
-            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
-        )!
-        let image = ctx.makeImage()!
-        let data = NSMutableData()
-        let dest = CGImageDestinationCreateWithData(data, "public.png" as CFString, 1, nil)!
-        CGImageDestinationAddImage(dest, image, nil)
-        CGImageDestinationFinalize(dest)
-        return data as Data
     }
 
     private func makeFrame(seq: Int, action: String = "left_click",
@@ -91,6 +91,15 @@ final class GifServiceTests: XCTestCase {
         XCTAssertEqual(service.frameCount(tabId: 4), 50, "Ring buffer should hold exactly 50 frames")
     }
 
+    // MARK: - T4b: addFrame when not recording → silent drop
+
+    func testAddFrame_whenNotRecording_dropsFrameSilently() {
+        // No startRecording — tabId not in recordingTabs
+        service.addFrame(makeFrame(seq: 1), tabId: 99)
+        XCTAssertEqual(service.frameCount(tabId: 99), 0,
+                       "addFrame must silently drop when tab is not recording")
+    }
+
     // MARK: - T8: clearFrames stops recording and empties buffer
 
     func testClearFrames_stopsRecordingAndClearsBuffer() {
@@ -101,6 +110,26 @@ final class GifServiceTests: XCTestCase {
         XCTAssertEqual(service.frameCount(tabId: 8), 0)
         XCTAssertFalse(service.isRecording(tabId: 8))
         XCTAssertTrue(msg.lowercased().contains("clear"), "Got: \(msg)")
+    }
+
+    // MARK: - T5b: export while still recording — state preserved
+
+    func testExportGIF_whileStillRecording_recordingContinues() {
+        service.startRecording(tabId: 50)
+        service.addFrame(makeFrame(seq: 1), tabId: 50)
+        service.addFrame(makeFrame(seq: 2), tabId: 50)
+
+        guard case .success(let (data, encodedCount)) = service.exportGIF(tabId: 50, options: .init()) else {
+            XCTFail("Export should succeed while recording active"); return
+        }
+        let header = String(bytes: data.prefix(4), encoding: .ascii)
+        XCTAssertEqual(header, "GIF8", "Exported data must be valid GIF")
+        XCTAssertEqual(encodedCount, 2, "Encoded count must match added frames")
+        // Recording must still be active after export (export is read-only)
+        XCTAssertTrue(service.isRecording(tabId: 50), "Recording must continue after export")
+        // New frames can still be added
+        service.addFrame(makeFrame(seq: 3), tabId: 50)
+        XCTAssertEqual(service.frameCount(tabId: 50), 3)
     }
 
     // MARK: - T9: concurrent addFrame → no crash
@@ -122,7 +151,7 @@ final class GifServiceTests: XCTestCase {
     // MARK: - T5: exportGIF with zero frames → .failure
 
     func testExportGIF_noFrames_returnsFailure() {
-        let result = service.exportGIF(tabId: 5, options: .init(), filename: "test.gif")
+        let result = service.exportGIF(tabId: 5, options: .init())
         if case .failure(let err) = result {
             XCTAssertTrue(err.localizedDescription.lowercased().contains("no frames"), "Got: \(err.localizedDescription)")
         } else {
@@ -135,8 +164,8 @@ final class GifServiceTests: XCTestCase {
     func testExportGIF_producesGIFMagicBytes() {
         service.startRecording(tabId: 6)
         service.addFrame(makeFrame(seq: 1), tabId: 6)
-        let result = service.exportGIF(tabId: 6, options: .init(), filename: "test.gif")
-        guard case .success(let data) = result else {
+        let result = service.exportGIF(tabId: 6, options: .init())
+        guard case .success(let (data, _)) = result else {
             XCTFail("Expected success, got \(result)"); return
         }
         XCTAssertGreaterThan(data.count, 6, "GIF should have more than 6 bytes")
@@ -153,7 +182,7 @@ final class GifServiceTests: XCTestCase {
         service.addFrame(makeFrame(seq: 2, timestamp: now.addingTimeInterval(1.0)), tabId: 71)
         service.addFrame(makeFrame(seq: 3, timestamp: now.addingTimeInterval(1.5)), tabId: 71)
 
-        guard case .success(let data) = service.exportGIF(tabId: 71, options: .init(), filename: "t.gif"),
+        guard case .success(let (data, _)) = service.exportGIF(tabId: 71, options: .init()),
               let source = CGImageSourceCreateWithData(data as CFData, nil) else {
             XCTFail("Export failed"); return
         }
@@ -177,12 +206,33 @@ final class GifServiceTests: XCTestCase {
         service.addFrame(makeFrame(seq: 2, timestamp: now.addingTimeInterval(0.05)), tabId: 72)
         service.addFrame(makeFrame(seq: 3, timestamp: now.addingTimeInterval(1.0)), tabId: 72)
 
-        guard case .success(let data) = service.exportGIF(tabId: 72, options: .init(), filename: "t.gif"),
+        guard case .success(let (data, _)) = service.exportGIF(tabId: 72, options: .init()),
               let source = CGImageSourceCreateWithData(data as CFData, nil) else {
             XCTFail("Export failed"); return
         }
         if let delay = gifDelay(source: source, index: 0) {
             XCTAssertEqual(delay, 0.3, accuracy: 0.05, "Should clamp 0.05s to 0.3s minimum")
+        }
+    }
+
+    // MARK: - T7d: mid-sequence delay clamped to maximum 3.0s
+
+    func testExportGIF_midSequenceDelay_clampedToMaximum() {
+        let now = Date()
+        service.startRecording(tabId: 74)
+        service.addFrame(makeFrame(seq: 1, timestamp: now), tabId: 74)
+        // 10s elapsed > 3.0s maximum → clamp to 3.0s
+        service.addFrame(makeFrame(seq: 2, timestamp: now.addingTimeInterval(10.0)), tabId: 74)
+        service.addFrame(makeFrame(seq: 3, timestamp: now.addingTimeInterval(11.0)), tabId: 74)
+
+        guard case .success(let (data, _)) = service.exportGIF(tabId: 74, options: .init()),
+              let source = CGImageSourceCreateWithData(data as CFData, nil) else {
+            XCTFail("Export failed"); return
+        }
+        if let delay = gifDelay(source: source, index: 0) {
+            XCTAssertEqual(delay, 3.0, accuracy: 0.05, "Should clamp 10s elapsed to 3.0s maximum")
+        } else {
+            XCTFail("Could not read frame 0 delay")
         }
     }
 
@@ -194,7 +244,7 @@ final class GifServiceTests: XCTestCase {
         service.addFrame(makeFrame(seq: 1, timestamp: now), tabId: 7)
         service.addFrame(makeFrame(seq: 2, timestamp: now.addingTimeInterval(0.5)), tabId: 7)
 
-        guard case .success(let data) = service.exportGIF(tabId: 7, options: .init(), filename: "t.gif"),
+        guard case .success(let (data, _)) = service.exportGIF(tabId: 7, options: .init()),
               let source = CGImageSourceCreateWithData(data as CFData, nil) else {
             XCTFail("Export failed"); return
         }
@@ -212,7 +262,7 @@ final class GifServiceTests: XCTestCase {
         service.startRecording(tabId: 73)
         service.addFrame(makeFrame(seq: 1, action: "screenshot"), tabId: 73)
 
-        guard case .success(let data) = service.exportGIF(tabId: 73, options: .init(), filename: "t.gif"),
+        guard case .success(let (data, _)) = service.exportGIF(tabId: 73, options: .init()),
               let source = CGImageSourceCreateWithData(data as CFData, nil) else {
             XCTFail("Export failed"); return
         }
@@ -230,11 +280,11 @@ final class GifServiceTests: XCTestCase {
             service.addFrame(makeFrame(seq: i), tabId: 10)
         }
         let group = DispatchGroup()
-        var exportResult: Result<Data, Error>?
+        var exportResult: Result<(Data, Int), Error>?
 
         group.enter()
         DispatchQueue.global().async {
-            exportResult = self.service.exportGIF(tabId: 10, options: .init(), filename: "t.gif")
+            exportResult = self.service.exportGIF(tabId: 10, options: .init())
             group.leave()
         }
         for i in 11...20 {
@@ -245,7 +295,7 @@ final class GifServiceTests: XCTestCase {
             }
         }
         group.wait()
-        if case .success(let data) = exportResult {
+        if case .success(let (data, _)) = exportResult {
             let header = String(bytes: data.prefix(4), encoding: .ascii)
             XCTAssertEqual(header, "GIF8")
         } else {
@@ -262,7 +312,7 @@ final class GifServiceTests: XCTestCase {
         service.addFrame(makeFrame(seq: 1, action: "left_click"), tabId: 11)
         service.addFrame(makeFrame(seq: 2, action: "scroll"), tabId: 11)
 
-        guard case .success(let data) = service.exportGIF(tabId: 11, options: .init(), filename: "t.gif") else {
+        guard case .success(let (data, _)) = service.exportGIF(tabId: 11, options: .init()) else {
             XCTFail("Expected success"); return
         }
         let header = String(bytes: data.prefix(4), encoding: .ascii)
@@ -276,10 +326,9 @@ final class GifServiceTests: XCTestCase {
     func testExportGIF_showClicksFalse_noCrash() {
         service.startRecording(tabId: 12)
         service.addFrame(makeFrame(seq: 1, coord: [500, 300]), tabId: 12)
-        var opts = GifService.GifOptions()
-        opts.showClicks = false
-        let result = service.exportGIF(tabId: 12, options: opts, filename: "t.gif")
-        guard case .success(let data) = result else {
+        let opts = GifService.GifOptions(showClicks: false)
+        let result = service.exportGIF(tabId: 12, options: opts)
+        guard case .success(let (data, _)) = result else {
             XCTFail("Expected success"); return
         }
         let header = String(bytes: data.prefix(4), encoding: .ascii)

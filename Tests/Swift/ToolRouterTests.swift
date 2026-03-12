@@ -282,27 +282,26 @@ final class ToolRouterGifHookTests: XCTestCase {
 
     func testStartRecording_setsIsRecordingTrue() {
         XCTAssertFalse(gifService.isRecording(tabId: 5))
-        let msg = gifService.startRecording(tabId: 5)
-        XCTAssertTrue(gifService.isRecording(tabId: 5))
-        XCTAssertTrue(msg.lowercased().contains("started"), "Got: \(msg)")
+        router.handleGifCreator(arguments: ["action": "start_recording", "tabId": 5],
+                                id: nil, clientId: "test")
+        XCTAssertTrue(gifService.isRecording(tabId: 5),
+                      "start_recording via router must set isRecording true")
     }
 
-    // MARK: - T2: gif_creator stop_recording → "Stopped. Captured N frames."
+    // MARK: - T2: gif_creator stop_recording → isRecording false
 
-    func testStopRecording_returnsFrameCount() {
-        gifService.startRecording(tabId: 5)
+    func testStopRecording_setsIsRecordingFalse() {
+        router.handleGifCreator(arguments: ["action": "start_recording", "tabId": 5],
+                                id: nil, clientId: "test")
         let pngData = makePNGData()
         gifService.addFrame(GifService.GifFrame(
             sequenceNumber: 1, imageData: pngData, actionType: "left_click",
             coordinate: nil, timestamp: Date(), viewportWidth: 100, viewportHeight: 100
         ), tabId: 5)
-        gifService.addFrame(GifService.GifFrame(
-            sequenceNumber: 2, imageData: pngData, actionType: "scroll",
-            coordinate: nil, timestamp: Date(), viewportWidth: 100, viewportHeight: 100
-        ), tabId: 5)
-        let msg = gifService.stopRecording(tabId: 5)
-        XCTAssertTrue(msg.contains("2 frame"), "Got: \(msg)")
-        XCTAssertFalse(gifService.isRecording(tabId: 5))
+        router.handleGifCreator(arguments: ["action": "stop_recording", "tabId": 5],
+                                id: nil, clientId: "test")
+        XCTAssertFalse(gifService.isRecording(tabId: 5),
+                       "stop_recording via router must set isRecording false")
     }
 
     // MARK: - T3: Hook does NOT fire for `wait` action
@@ -349,31 +348,34 @@ final class ToolRouterGifHookTests: XCTestCase {
         XCTAssertEqual(gifService.frameCount(tabId: 5), 1)
     }
 
-    // MARK: - T7: gif_creator export → produces image/gif data
+    // MARK: - T7: handleGifCreator clear action → clears frames and stops recording
 
-    func testExportGIF_withFrames_producesGIFData() {
-        gifService.startRecording(tabId: 5)
+    func testHandleGifCreator_clearAction_clearsFramesAndStopsRecording() {
+        router.handleGifCreator(arguments: ["action": "start_recording", "tabId": 5],
+                                id: nil, clientId: "test")
         gifService.addFrame(GifService.GifFrame(
-            sequenceNumber: 1, imageData: makePNGData(), actionType: "left_click",
-            coordinate: [100, 100], timestamp: Date(), viewportWidth: 100, viewportHeight: 100
+            sequenceNumber: 1, imageData: makePNGData(), actionType: "screenshot",
+            coordinate: nil, timestamp: Date(), viewportWidth: 100, viewportHeight: 100
         ), tabId: 5)
-        let result = gifService.exportGIF(tabId: 5, options: .init(), filename: "test.gif")
-        guard case .success(let data) = result else {
-            XCTFail("Export should succeed with frames"); return
-        }
-        let header = String(bytes: data.prefix(4), encoding: .ascii)
-        XCTAssertEqual(header, "GIF8")
+        XCTAssertEqual(gifService.frameCount(tabId: 5), 1)
+        router.handleGifCreator(arguments: ["action": "clear", "tabId": 5],
+                                id: nil, clientId: "test")
+        XCTAssertEqual(gifService.frameCount(tabId: 5), 0,
+                       "clear action must empty the frame buffer")
+        XCTAssertFalse(gifService.isRecording(tabId: 5),
+                       "clear action must stop recording")
     }
 
-    // MARK: - T8: gif_creator export with no frames → isError: true
+    // MARK: - T8: handleGifCreator with missing action parameter → no crash, no state change
 
-    func testExportGIF_noFrames_returnsFailure() {
-        let result = gifService.exportGIF(tabId: 5, options: .init(), filename: "test.gif")
-        if case .failure(let err) = result {
-            XCTAssertTrue(err.localizedDescription.lowercased().contains("no frames"))
-        } else {
-            XCTFail("Expected failure")
-        }
+    func testHandleGifCreator_missingAction_doesNotCrashOrChangeState() {
+        XCTAssertFalse(gifService.isRecording(tabId: 5))
+        router.handleGifCreator(arguments: ["tabId": 5], id: nil, clientId: "test")
+        // sendError is called (no-op since server is nil) — state must be unchanged
+        XCTAssertFalse(gifService.isRecording(tabId: 5),
+                       "Missing action must not start recording")
+        XCTAssertEqual(gifService.frameCount(tabId: 5), 0,
+                       "Missing action must not add frames")
     }
 
     // MARK: - T9: gif_creator invalid action → does not crash, does not change state
@@ -388,33 +390,25 @@ final class ToolRouterGifHookTests: XCTestCase {
         XCTAssertEqual(gifService.frameCount(tabId: 99), 0, "Invalid action must not add frames")
     }
 
-    // MARK: - T10: Hook does NOT fire when isRecording false (mirrors error-response path)
+    // MARK: - T10: handleGifCreator invalid action → sendError path, no state change
 
-    func testHook_isRecordingFalse_doesNotCapture() {
-        XCTAssertFalse(gifService.isRecording(tabId: 5))
-        router.maybeAddGifFrame(tabId: 5, action: "left_click", coordinate: nil)
-        let exp = expectation(description: "no capture")
-        DispatchQueue.global().asyncAfter(deadline: .now() + 0.3) { exp.fulfill() }
-        waitForExpectations(timeout: 1)
-        XCTAssertEqual(gifService.frameCount(tabId: 5), 0)
+    /// deliverExtensionResponse is private; the error-branch-does-not-fire contract is
+    /// verified here indirectly: maybeAddGifFrame guards on isRecording (tested in T4) and
+    /// deliverExtensionResponse only calls maybeAddGifFrame in its success branch (code inspection).
+    /// This test verifies the invalid-action sendError path leaves state clean.
+    func testHandleGifCreator_invalidAction_sendsErrorAndPreservesState() {
+        router.handleGifCreator(arguments: ["action": "start_recording", "tabId": 5],
+                                id: nil, clientId: "test")
+        XCTAssertTrue(gifService.isRecording(tabId: 5))
+        // Invalid action on a recording tab — must not stop recording or add frames
+        router.handleGifCreator(arguments: ["action": "unsupported_action", "tabId": 5],
+                                id: nil, clientId: "test")
+        XCTAssertTrue(gifService.isRecording(tabId: 5),
+                      "Invalid action must not stop an active recording")
+        XCTAssertEqual(gifService.frameCount(tabId: 5), 0,
+                       "Invalid action must not add frames")
     }
 
-    // MARK: - PNG helper
-
-    private func makePNGData() -> Data {
-        let ctx = CGContext(
-            data: nil, width: 10, height: 10,
-            bitsPerComponent: 8, bytesPerRow: 0,
-            space: CGColorSpaceCreateDeviceRGB(),
-            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
-        )!
-        let image = ctx.makeImage()!
-        let data = NSMutableData()
-        let dest = CGImageDestinationCreateWithData(data, "public.png" as CFString, 1, nil)!
-        CGImageDestinationAddImage(dest, image, nil)
-        CGImageDestinationFinalize(dest)
-        return data as Data
-    }
 }
 
 // MARK: - Mock capture provider
