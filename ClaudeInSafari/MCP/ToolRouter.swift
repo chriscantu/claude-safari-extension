@@ -130,7 +130,8 @@ class ToolRouter: MCPSocketServerDelegate {
         let tabIdOpt = arguments["tabId"] as? Int
         let tabId = tabIdOpt ?? -1
         if action == "screenshot" {
-            screenshotService.captureScreenshot(tabId: tabIdOpt) { [self] result in
+            screenshotService.captureScreenshot(tabId: tabIdOpt) { [weak self] result in
+                guard let self else { return }
                 sendScreenshotResult(result, id: id, to: clientId)
                 if case .success(_) = result {
                     maybeAddGifFrame(tabId: tabId, action: "screenshot", coordinate: nil)
@@ -152,7 +153,8 @@ class ToolRouter: MCPSocketServerDelegate {
                 }
                 return nil
             }()
-            screenshotService.captureZoom(tabId: tabIdOpt, region: region) { [self] result in
+            screenshotService.captureZoom(tabId: tabIdOpt, region: region) { [weak self] result in
+                guard let self else { return }
                 sendScreenshotResult(result, region: region, id: id, to: clientId)
                 if case .success(_) = result {
                     maybeAddGifFrame(tabId: tabId, action: "zoom", coordinate: nil)
