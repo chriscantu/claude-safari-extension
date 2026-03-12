@@ -118,15 +118,20 @@ height change. This prevents the window from jumping to a new position during au
 
 ### ⚠ Two TCC Permissions Required
 
-This tool requires **two separate** macOS permissions:
+This tool requires **two separate** macOS permissions, both granted to the `osascript`
+subprocess (not the native app — they have independent TCC entries):
 
-1. **Automation** (System Settings > Privacy & Security > Automation): `osascript` must
-   be authorised to send Apple Events to Safari. This is checked at runtime — if denied,
-   osascript exits with `-1743` (`errAEEventNotPermitted`).
+1. **Automation** (System Settings > Privacy & Security > Automation > osascript → Safari):
+   Required to send Apple Events to Safari. Denied → osascript exits with `-1743`
+   (`errAEEventNotPermitted`).
 
-2. **Accessibility** (System Settings > Privacy & Security > Accessibility): Required for
-   the `System Events` AXFullScreen check. Detected via `AXIsProcessTrusted()` before
-   spawning osascript — locale-independent and synchronous.
+2. **Accessibility** (System Settings > Privacy & Security > Accessibility > osascript):
+   Required for the `System Events` AXFullScreen check. Denied → osascript exits with
+   `-25212` (`errAXError`).
+
+Both are detected by matching numeric error codes in osascript's stderr output —
+locale-independent and unambiguous. `AXIsProcessTrusted()` is **not** used because it
+checks the native app's TCC entry, not osascript's.
 
 **Impact:** First-time users must grant two additional system permissions (beyond Screen
 Recording for screenshots). This is a macOS sandboxing requirement that Chrome doesn't
