@@ -109,6 +109,8 @@ class ToolRouter: MCPSocketServerDelegate {
             handleScreenshotAction(action: action, arguments: arguments, id: id, clientId: clientId)
         } else if toolName == "resize_window" {
             handleResizeWindow(arguments: arguments, id: id, clientId: clientId)
+        } else if toolName == "gif_creator" {
+            handleGifCreator(arguments: arguments, id: id, clientId: clientId)
         } else if nativeTools.contains(toolName) {
             sendError(id: id, code: -32000, message: "Native tool '\(toolName)' not yet implemented", to: clientId)
         } else {
@@ -176,6 +178,106 @@ class ToolRouter: MCPSocketServerDelegate {
                 ["type": "text", "text": label]
             ]
             sendResult(id: id, result: ["content": content], to: clientId)
+        }
+    }
+
+    // MARK: - Native GIF Creator
+
+    func handleGifCreator(arguments: [String: Any], id: Any?, clientId: String) {
+        guard let action = arguments["action"] as? String else {
+            sendError(id: id, code: -32000, message: "action parameter is required", to: clientId)
+            return
+        }
+        let tabId = (arguments["tabId"] as? Int) ?? -1
+
+        switch action {
+        case "start_recording":
+            let msg = gifService.startRecording(tabId: tabId)
+            sendResult(id: id, result: ["content": [["type": "text", "text": msg]]], to: clientId)
+
+        case "stop_recording":
+            let msg = gifService.stopRecording(tabId: tabId)
+            sendResult(id: id, result: ["content": [["type": "text", "text": msg]]], to: clientId)
+
+        case "clear":
+            let msg = gifService.clearFrames(tabId: tabId)
+            sendResult(id: id, result: ["content": [["type": "text", "text": msg]]], to: clientId)
+
+        case "export":
+            handleGifExport(tabId: tabId, arguments: arguments, id: id, clientId: clientId)
+
+        default:
+            sendError(id: id, code: -32000,
+                      message: "Invalid action: \"\(action)\". Must be start_recording, stop_recording, export, or clear.",
+                      to: clientId)
+        }
+    }
+
+    private func handleGifExport(tabId: Int, arguments: [String: Any], id: Any?, clientId: String) {
+        let timestamp = Int(Date().timeIntervalSince1970)
+        let filename = (arguments["filename"] as? String) ?? "recording-\(timestamp).gif"
+
+        let optsDict = arguments["options"] as? [String: Any] ?? [:]
+        var options = GifService.GifOptions()
+        if let v = optsDict["showClicks"]    as? Bool { options.showClicks    = v }
+        if let v = optsDict["showActions"]   as? Bool { options.showActions   = v }
+        if let v = optsDict["showProgress"]  as? Bool { options.showProgress  = v }
+        if let v = optsDict["showWatermark"] as? Bool { options.showWatermark = v }
+
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            guard let self else { return }
+            switch self.gifService.exportGIF(tabId: tabId, options: options, filename: filename) {
+            case .failure(let error):
+                let msg: String
+                if let gifErr = error as? GifError, case .noFrames = gifErr {
+                    msg = gifErr.errorDescription ?? error.localizedDescription
+                } else {
+                    msg = "GIF encoding failed: \(error.localizedDescription)"
+                }
+                self.sendError(id: id, code: -32000, message: msg, to: clientId)
+            case .success(let data):
+                let frameCount = self.gifService.frameCount(tabId: tabId)
+                let base64 = data.base64EncodedString()
+                let desktopURL = FileManager.default.homeDirectoryForCurrentUser
+                    .appendingPathComponent("Desktop")
+                    .appendingPathComponent(filename)
+                var pathText: String
+                do {
+                    try data.write(to: desktopURL)
+                    pathText = "GIF saved to ~/Desktop/\(filename) (\(frameCount) frames)"
+                } catch {
+                    pathText = "GIF generated (\(frameCount) frames) — Desktop write failed: \(error.localizedDescription)"
+                }
+                let content: [[String: Any]] = [
+                    ["type": "image", "data": base64, "mimeType": "image/gif"],
+                    ["type": "text", "text": pathText]
+                ]
+                self.sendResult(id: id, result: ["content": content], to: clientId)
+            }
+        }
+    }
+
+    // MARK: - GIF Post-Action Hook
+
+    /// Capture a screenshot and add it as a GIF frame if recording is active for this tabId.
+    /// Fire-and-forget: does not block the MCP response. Only fires on success responses.
+    /// Skips "wait" action (no meaningful state change to capture).
+    /// Internal (not private) for unit testing via ToolRouterGifHookTests.
+    func maybeAddGifFrame(tabId: Int, action: String, coordinate: [Int]?) {
+        guard action != "wait" else { return }
+        guard gifService.isRecording(tabId: tabId) else { return }
+        let seq = gifService.nextSequenceNumber()
+        screenshotService.captureScreenshot(tabId: tabId) { [weak self] result in
+            guard let self, case .success(let img) = result else { return }
+            self.gifService.addFrame(GifService.GifFrame(
+                sequenceNumber: seq,
+                imageData: img.data,
+                actionType: action,
+                coordinate: coordinate,
+                timestamp: Date(),
+                viewportWidth: img.viewportWidth,
+                viewportHeight: img.viewportHeight
+            ), tabId: tabId)
         }
     }
 
