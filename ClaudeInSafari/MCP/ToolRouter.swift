@@ -22,16 +22,16 @@ class ToolRouter: MCPSocketServerDelegate {
         self.gifService = gifService
     }
 
-    /// Fallback guard for tools that are handled natively but whose handler branch
-    /// has not yet been added to handleToolCall(). Any tool listed here that lacks
-    /// an explicit dispatch branch will return "not yet implemented" rather than being
-    /// silently forwarded to the extension.
+    /// Staging set for native tools whose handler branch is not yet wired up in handleToolCall().
+    /// Empty by default. Add a tool name here to have it return "not yet implemented" instead of
+    /// being silently forwarded to the extension (useful while developing a new native handler).
     private let nativeTools: Set<String> = []
 
     /// Maps requestId → (clientId, jsonrpcId) for in-flight extension calls.
     private var pendingRequests = [String: (clientId: String, jsonrpcId: Any?)]()
     /// Maps requestId → (toolName, arguments) for gif post-action hook context.
     /// Protected by the same `pendingRequestsLock` as `pendingRequests`.
+    /// All reads and writes must be performed under pendingRequestsLock.
     private var pendingToolContext = [String: (toolName: String, arguments: [String: Any])]()
     private let pendingRequestsLock = NSLock()
 
@@ -221,16 +221,19 @@ class ToolRouter: MCPSocketServerDelegate {
         let filename = (arguments["filename"] as? String) ?? "recording-\(timestamp).gif"
 
         let optsDict = arguments["options"] as? [String: Any] ?? [:]
-        var options = GifService.GifOptions()
-        if let v = optsDict["showClicks"]    as? Bool { options.showClicks    = v }
-        if let v = optsDict["showActions"]   as? Bool { options.showActions   = v }
-        if let v = optsDict["showProgress"]  as? Bool { options.showProgress  = v }
-        if let v = optsDict["showWatermark"] as? Bool { options.showWatermark = v }
+        let options = GifService.GifOptions(
+            showClicks:    (optsDict["showClicks"]    as? Bool) ?? true,
+            showActions:   (optsDict["showActions"]   as? Bool) ?? true,
+            showProgress:  (optsDict["showProgress"]  as? Bool) ?? true,
+            showWatermark: (optsDict["showWatermark"] as? Bool) ?? true
+        )
 
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            guard let self else { return }
-            let frameCount = self.gifService.frameCount(tabId: tabId)
-            switch self.gifService.exportGIF(tabId: tabId, options: options, filename: filename) {
+            guard let self else {
+                NSLog("handleGifExport: ToolRouter deallocated before export completed — client will receive no response")
+                return
+            }
+            switch self.gifService.exportGIF(tabId: tabId, options: options) {
             case .failure(let error):
                 let msg: String
                 if let gifErr = error as? GifError, case .noFrames = gifErr {
@@ -239,7 +242,7 @@ class ToolRouter: MCPSocketServerDelegate {
                     msg = "GIF encoding failed: \(error.localizedDescription)"
                 }
                 self.sendError(id: id, code: -32000, message: msg, to: clientId)
-            case .success(let data):
+            case .success(let (data, encodedCount)):
                 let base64 = data.base64EncodedString()
                 let desktopURL = FileManager.default.homeDirectoryForCurrentUser
                     .appendingPathComponent("Desktop")
@@ -247,9 +250,12 @@ class ToolRouter: MCPSocketServerDelegate {
                 var pathText: String
                 do {
                     try data.write(to: desktopURL)
-                    pathText = "GIF saved to ~/Desktop/\(filename) (\(frameCount) frames)"
+                    pathText = "GIF saved to ~/Desktop/\(filename) (\(encodedCount) frames)"
                 } catch {
-                    pathText = "GIF generated (\(frameCount) frames) — Desktop write failed: \(error.localizedDescription)"
+                    let ns = error as NSError
+                    NSLog("handleGifExport: Desktop write failed for '%@': domain=%@ code=%d — %@",
+                          filename, ns.domain, ns.code, ns.localizedDescription)
+                    pathText = "GIF generated (\(encodedCount) frames) — Desktop write failed: \(error.localizedDescription)"
                 }
                 let content: [[String: Any]] = [
                     ["type": "image", "data": base64, "mimeType": "image/gif"],
@@ -264,7 +270,8 @@ class ToolRouter: MCPSocketServerDelegate {
 
     /// Capture a screenshot and add it as a GIF frame if recording is active for this tabId.
     /// Fire-and-forget: does not block the MCP response. Only fires on success responses.
-    /// Skips "wait" action (no meaningful state change to capture).
+    /// Short-circuits without capturing if: (a) action is "wait" (no meaningful state change),
+    /// or (b) recording is not active for the tabId.
     /// Internal (not private) for unit testing via ToolRouterTests.
     func maybeAddGifFrame(tabId: Int, action: String, coordinate: [Int]?) {
         guard action != "wait" else { return }
@@ -274,16 +281,22 @@ class ToolRouter: MCPSocketServerDelegate {
         // reflect when the action occurred, not ScreenCaptureKit's capture latency.
         let capturedAt = Date()
         screenshotService.captureScreenshot(tabId: tabId) { [weak self] result in
-            guard let self, case .success(let img) = result else { return }
-            self.gifService.addFrame(GifService.GifFrame(
-                sequenceNumber: seq,
-                imageData: img.data,
-                actionType: action,
-                coordinate: coordinate,
-                timestamp: capturedAt,
-                viewportWidth: img.viewportWidth,
-                viewportHeight: img.viewportHeight
-            ), tabId: tabId)
+            guard let self else { return }
+            switch result {
+            case .failure(let error):
+                NSLog("GifService frame capture failed for tabId=%d action=%@ seq=%d: %@",
+                      tabId, action, seq, error.userMessage)
+            case .success(let img):
+                self.gifService.addFrame(GifService.GifFrame(
+                    sequenceNumber: seq,
+                    imageData: img.data,
+                    actionType: action,
+                    coordinate: coordinate,
+                    timestamp: capturedAt,
+                    viewportWidth: img.viewportWidth,
+                    viewportHeight: img.viewportHeight
+                ), tabId: tabId)
+            }
         }
     }
 
@@ -304,7 +317,8 @@ class ToolRouter: MCPSocketServerDelegate {
         let tabIdSupplied = arguments["tabId"] != nil
         // Warn callers that tabId is accepted but ignored — tabId→window resolution
         // requires extension routing which is not yet implemented (Spec 016 §Window Resolution).
-        appleScriptBridge.resizeWindow(width: Int(w), height: Int(h)) { [self] result in
+        appleScriptBridge.resizeWindow(width: Int(w), height: Int(h)) { [weak self] result in
+            guard let self else { return }
             switch result {
             case .success(var message):
                 if tabIdSupplied {
