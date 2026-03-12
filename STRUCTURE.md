@@ -21,7 +21,8 @@ claude-safari-extension/
 │   │   ├── Services/
 │   │   │   ├── ScreenshotService.swift      # ScreenCaptureKit-based screenshot capture
 │   │   │   ├── AppleScriptBridge.swift      # Safari window resize/management via AppleScript
-│   │   │   └── FileService.swift            # Read local files for file_upload tool
+│   │   │   ├── FileService.swift            # Read local files for file_upload tool
+│   │   │   └── GifService.swift             # GIF recording, capped frame buffer, and CGImageDestination encoding
 │   │   ├── Models/
 │   │   │   ├── MCPMessage.swift             # MCP JSON-RPC message types (Codable structs)
 │   │   │   └── ToolModels.swift             # Tool request/response models
