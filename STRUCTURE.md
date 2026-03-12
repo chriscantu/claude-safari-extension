@@ -103,6 +103,9 @@ claude-safari-extension/
 │   ├── mcp-test.py                          # MCP socket test client (handshake + tool calls)
 │   └── validate-injected-scripts.js         # CI: syntax-check IIFE code strings in tool files
 │
+├── docs/
+│   └── plans/                               # Implementation plans (one per feature, YYYY-MM-DD-<feature>.md)
+│
 └── Specs/                                   # Feature specifications (one per feature)
     ├── 001-mcp-socket-server.md             # Unix domain socket server
     ├── 002-message-framing.md               # 4-byte BE length-prefix protocol
@@ -132,6 +135,7 @@ claude-safari-extension/
 - **JavaScript files**: kebab-case (e.g., `tool-registry.js`)
 - **Test files**: Match source file name + `Tests` suffix (Swift) or `.test.js` suffix (JS)
 - **Spec files**: 3-digit number prefix + kebab-case description (e.g., `001-mcp-socket-server.md`)
+- **Plan files**: ISO date prefix + kebab-case feature name (e.g., `2026-03-12-gif-creator.md`)
 
 ## Target Requirements
 
