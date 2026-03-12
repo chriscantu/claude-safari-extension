@@ -39,12 +39,26 @@ Exactly one of `ref` or `coordinate` must be provided.
 
 ## Implementation
 
-### Image Retrieval
+### Image Retrieval (Option B - ToolRouter injection)
 
-1. The native app's `ScreenshotService` stores captured images by `imageId` (Spec 011).
-2. The tool handler requests the image data from the native app via native messaging.
-3. The native app responds with the base64-encoded PNG data.
-4. The extension converts it to a `Blob` → `File` object for injection.
+`ToolRouter` intercepts `upload_image` calls before they reach the extension:
+
+1. Validates `imageId` is present; returns error immediately if missing.
+2. Calls `screenshotService.retrieveImage(imageId:)` — O(1) in-memory lookup under `NSLock`.
+3. If not found (evicted by LRU or never captured), returns error immediately — no queue write.
+4. Base64-encodes the PNG data and injects it as `imageData` into the forwarded args dict.
+5. Forwards the enriched args to the extension via `forwardToExtension` (standard file queue).
+
+The extension handler reads `imageData` from args directly — no sub-request IPC.
+
+Flow:
+  CLI -> socket -> ToolRouter.handleUploadImage
+      -> screenshotService.retrieveImage(imageId)   (~0ms in-memory)
+      -> inject imageData into args
+      -> forwardToExtension (file queue)
+      -> extension upload-image.js
+      -> browser.tabs.executeScript (injected IIFE)
+      -> response file -> ToolRouter -> CLI
 
 ### ref Approach (File Input)
 
@@ -69,11 +83,16 @@ Exactly one of `ref` or `coordinate` must be provided.
 
 1. Find the element at the target coordinates via `document.elementFromPoint(x, y)`.
 2. Create a `File` object from the image data (same as above).
-3. Create a `DataTransfer` with the file and dispatch the drag-drop event sequence:
+3. Create a `DataTransfer` with the file and dispatch the full drag-drop sequence:
+   - `dragstart` on the target element (source context, required by some implementations)
    - `dragenter` on the target element
    - `dragover` on the target element
    - `drop` on the target element with `dataTransfer.files` set
-4. The target element's drop handler receives the file.
+   - `dragend` on the target element
+
+   Safari note: Programmatic dragstart/dragend may be ignored by sites that validate
+   isTrusted. The drop event with dataTransfer.files set is the critical one; others
+   are best-effort. Sites that check isTrusted will require real user interaction.
 
 ## Return Value
 
