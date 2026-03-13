@@ -14,13 +14,13 @@
  * T8  — imageId missing — isError
  * T9  — custom filename — File has correct name
  * T10 — ref upload triggers change event handler
- * T11 — tab not accessible (executeScript throws) — isError
+ * T11 — tab not accessible (executeScript throws) — rejects with classified error
  * T12 — large image base64 (~5MB) — uploads without error
  *
  * DOM injection tests (T1, T2, T9, T10, T12) evaluate injected code via
  * vm.runInNewContext so that the real injected IIFE runs and return values /
  * event dispatch can be verified.
- * Validation/error tests (T3-T8, T11) mock executeScript entirely.
+ * Validation/error tests (T3-T8) mock executeScript entirely; T11 expects a throw.
  *
  * KNOWN GAP — DataTransfer.files assignment:
  *   jsdom does not propagate el.files = dt.files back to the input's FileList.
@@ -121,6 +121,10 @@ function makeDomBrowserMock() {
         };
         return [vm.runInNewContext(code, sandbox)];
       }),
+      onRemoved: {
+        addListener: jest.fn(),
+        removeListener: jest.fn(),
+      },
     },
     alarms: {
       create: jest.fn(), clear: jest.fn(),
@@ -145,6 +149,10 @@ function makeMockBrowser(opts = {}) {
         if (scriptError) throw scriptError;
         return scriptResult;
       }),
+      onRemoved: {
+        addListener: jest.fn(),
+        removeListener: jest.fn(),
+      },
     },
   };
 }
@@ -157,6 +165,8 @@ function loadUploadImage({ browser, resolveTab = jest.fn(async (id) => id ?? 1) 
   globalThis.browser = browser;
   globalThis.resolveTab = resolveTab;
 
+  // Load tool-registry.js first — it sets globalThis.classifyExecuteScriptError
+  // and globalThis.executeScriptWithTabGuard (used by the tool handler).
   jest.isolateModules(() => {
     require('../../ClaudeInSafari Extension/Resources/tools/tool-registry.js');
   });
@@ -182,6 +192,7 @@ describe('upload_image tool', () => {
     delete globalThis.resolveTab;
     delete globalThis.registerTool;
     delete globalThis.classifyExecuteScriptError;
+    delete globalThis.executeScriptWithTabGuard;
     delete globalThis.executeTool;
     // Clear DOM nodes added during test
     while (document.body.firstChild) {
@@ -299,12 +310,13 @@ describe('upload_image tool', () => {
   });
 
   // T11 — tab not accessible
-  test('T11: executeScript throwing returns isError', async () => {
+  test('T11: executeScript throwing rejects with classified error', async () => {
     const handler = loadUploadImage({
       browser: makeMockBrowser({ scriptError: new Error('Cannot access tab') }),
     });
-    const result = await handler({ imageId: 'id1', imageData: TINY_PNG_B64, ref: 'r' });
-    expect(result.isError).toBe(true);
+    await expect(
+      handler({ imageId: 'id1', imageData: TINY_PNG_B64, ref: 'r' })
+    ).rejects.toThrow(/Cannot access tab/i);
   });
 
   // T12 — large image

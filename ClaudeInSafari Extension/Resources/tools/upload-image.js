@@ -87,17 +87,25 @@
       return { isError: true, content: [{ type: 'text', text: 'Cannot access tab ' + tabId }] };
     }
 
-    let result;
+    // If the tab is removed mid-execution Safari may never settle the executeScript
+    // promise, blocking the tool. executeScriptWithTabGuard provides an onRemoved
+    // guard, settled-flag race prevention, and a 30s timeout per CLAUDE.md lifecycle rules.
+    let results;
     try {
-      const results = await browser.tabs.executeScript(resolvedTabId, {
-        code: '(' + injectedUpload.toString() + ')(' + JSON.stringify({ imageData, ref, coordinate, filename }) + ')'
-      });
-      result = results && results[0];
-    } catch (e) {
-      const classified = globalThis.classifyExecuteScriptError('upload_image', resolvedTabId, e);
-      return { isError: true, content: [{ type: 'text', text: classified.message }] };
+      results = await globalThis.executeScriptWithTabGuard(
+        resolvedTabId,
+        '(' + injectedUpload.toString() + ')(' + JSON.stringify({ imageData, ref, coordinate, filename }) + ')',
+        'upload_image'
+      );
+    } catch (err) {
+      if (err && /was closed during/.test(err.message)) throw err;
+      if (typeof globalThis.classifyExecuteScriptError === 'function') {
+        throw globalThis.classifyExecuteScriptError('upload_image', resolvedTabId, err);
+      }
+      throw err;
     }
 
+    const result = results && results[0];
     if (!result) {
       return { isError: true, content: [{ type: 'text', text: 'No result from injected script' }] };
     }
