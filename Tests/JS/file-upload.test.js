@@ -49,14 +49,29 @@ const TINY_PDF_B64 = btoa('%PDF-1.0'); // base64 of a fake PDF header
 /**
  * Wraps an element in a Proxy so that `el.files = value` is silently swallowed
  * (jsdom throws TypeError when assigning a non-FileList to el.files).
+ * The getter for `files` returns a fake FileList whose length matches the
+ * last assigned value, so Fix 3's `el.files.length !== fileObjects.length`
+ * check does not trigger under normal operation.
  * All other property accesses and dispatchEvent calls pass through to the real element.
  */
 function makeElementProxy(el) {
+  let assignedFilesLength = null;
   return new Proxy(el, {
     set(target, prop, value) {
-      if (prop === 'files') return true; // silent no-op
+      if (prop === 'files') {
+        // Record the length of the assigned FileList-like object
+        assignedFilesLength = (value && typeof value.length === 'number') ? value.length : 0;
+        return true; // silent no-op for actual DOM assignment
+      }
       target[prop] = value;
       return true;
+    },
+    get(target, prop) {
+      if (prop === 'files' && assignedFilesLength !== null) {
+        return { length: assignedFilesLength };
+      }
+      const val = target[prop];
+      return typeof val === 'function' ? val.bind(target) : val;
     },
   });
 }
@@ -122,6 +137,59 @@ function makeDomBrowserMock() {
       },
     },
   };
+}
+
+/**
+ * Returns { src, sandbox, document } for testing the injectedFileUpload IIFE
+ * directly via vm.runInNewContext, without going through the handler layer.
+ * `src` is the injectedFileUpload function source string.
+ * `sandbox` is a minimal context with DataTransfer, document, etc.
+ */
+function makeIIFESandbox() {
+  const fileContent = fs.readFileSync(
+    path.join(__dirname, '../../ClaudeInSafari Extension/Resources/tools/file-upload.js'),
+    'utf8'
+  );
+  // Extract the injectedFileUpload function body from the source file
+  const fnMatch = fileContent.match(/function injectedFileUpload[\s\S]*?(?=\n\s{2}globalThis\.registerTool)/);
+  if (!fnMatch) throw new Error('Could not extract injectedFileUpload from source');
+  const src = fnMatch[0].trimEnd();
+
+  const DataTransferPolyfill = globalThis.DataTransfer || class DataTransfer {
+    constructor() {
+      this._files = [];
+      this.items = { add: (file) => { this._files.push(file); } };
+      this.files = this._files;
+    }
+  };
+
+  const docRef = globalThis.document;
+  const docProxy = new Proxy(docRef, {
+    get(target, prop) {
+      if (prop === 'querySelector') {
+        return (selector) => {
+          const el = target.querySelector(selector);
+          return el ? makeElementProxy(el) : null;
+        };
+      }
+      const val = target[prop];
+      return typeof val === 'function' ? val.bind(target) : val;
+    },
+  });
+
+  const sandbox = {
+    document:     docProxy,
+    Uint8Array:   globalThis.Uint8Array,
+    Blob:         globalThis.Blob,
+    File:         globalThis.File,
+    DataTransfer: DataTransferPolyfill,
+    Event:        globalThis.Event,
+    atob:         globalThis.atob,
+    Date:         globalThis.Date,
+    CSS:          globalThis.CSS || { escape: (s) => String(s).replace(/[!"#$%&'()*+,./:;<=>?@[\\\]^`{|}~]/g, '\\$&').replace(/^\d/, '\\3$& ') },
+  };
+
+  return { src, sandbox, document: docRef };
 }
 
 function makeMockBrowser(opts = {}) {
@@ -248,6 +316,7 @@ describe('file_upload tool', () => {
 
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toContain('not found');
+    expect(result.content[0].text).toContain('no-such-ref');
   });
 
   // T8 — ref points to div → isError: not a file input
@@ -409,7 +478,71 @@ describe('file_upload tool', () => {
     const result = await handler({ files, ref: 'bad-ref' });
 
     expect(result.isError).toBe(true);
-    expect(result.content[0].text).toContain('Failed to decode file data');
+    expect(result.content[0].text).toMatch(/Failed to decode file data: bad\.bin/);
     expect(result.content[0].text).toContain('bad.bin');
+  });
+
+  // T_filesAssignment — FileList assignment rejected → isError
+  it('T_filesAssignment — FileList assignment rejected returns error', () => {
+    const { src, sandbox, document: doc } = makeIIFESandbox();
+    // Override querySelector to return an input whose files.length stays 0
+    // even after assignment (simulates a framework-controlled input rejecting FileList).
+    const realQuerySelector = doc.querySelector.bind(doc);
+    sandbox.document = new Proxy(doc, {
+      get(target, prop) {
+        if (prop === 'querySelector') {
+          return (sel) => {
+            const el = realQuerySelector(sel);
+            if (!el) return null;
+            // Swallow files setter and always return length 0 from getter
+            return new Proxy(el, {
+              set(t, p, v) {
+                if (p === 'files') return true; // swallow — no assignment
+                t[p] = v;
+                return true;
+              },
+              get(t, p) {
+                if (p === 'files') return { length: 0 };
+                return typeof t[p] === 'function' ? t[p].bind(t) : t[p];
+              },
+            });
+          };
+        }
+        return typeof target[prop] === 'function' ? target[prop].bind(target) : target[prop];
+      },
+    });
+
+    const input = doc.createElement('input');
+    input.type = 'file';
+    input.setAttribute('data-claude-ref', 'upload-ref');
+    doc.body.appendChild(input);
+
+    const files = [{ base64: TINY_TXT_B64, filename: 'x.txt', mimeType: 'text/plain', size: 5 }];
+    const result = vm.runInNewContext(
+      '(' + src + ')(' + JSON.stringify({ files, ref: 'upload-ref' }) + ')',
+      sandbox
+    );
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('File assignment failed');
+  });
+
+  // T_dataTransferUnavailable — DataTransfer constructor throws → isError
+  it('T_dataTransferUnavailable — DataTransfer constructor throws returns error', () => {
+    const { src, sandbox } = makeIIFESandbox();
+    // Override DataTransfer to throw
+    sandbox.DataTransfer = function() { throw new TypeError('DataTransfer is not defined'); };
+
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.setAttribute('data-claude-ref', 'upload-ref');
+    document.body.appendChild(input);
+
+    const files = [{ base64: TINY_TXT_B64, filename: 'x.txt', mimeType: 'text/plain', size: 5 }];
+    const result = vm.runInNewContext(
+      '(' + src + ')(' + JSON.stringify({ files, ref: 'upload-ref' }) + ')',
+      sandbox
+    );
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('DataTransfer');
   });
 });

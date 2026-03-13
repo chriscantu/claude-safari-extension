@@ -25,13 +25,19 @@
       return bytes + ' B';
     }
 
+    /**
+     * @param {string} base64
+     * @param {string} filename
+     * @param {string} mimeType
+     * @returns {File|{_err: string}}
+     */
     function makeFile(base64, filename, mimeType) {
       try {
         const bytes = Uint8Array.from(atob(base64), c => c.charCodeAt(0));
         const blob = new Blob([bytes], { type: mimeType });
         return new File([blob], filename, { type: mimeType, lastModified: Date.now() });
       } catch (e) {
-        return null;
+        return { _err: e && e.message ? e.message : String(e) };
       }
     }
 
@@ -49,14 +55,26 @@
     const fileObjects = [];
     for (const descriptor of files) {
       const f = makeFile(descriptor.base64, descriptor.filename, descriptor.mimeType);
-      if (!f) return err('Failed to decode file data: ' + descriptor.filename);
+      if (!f || f._err) return err('Failed to decode file data: ' + descriptor.filename + (f && f._err ? ' (' + f._err + ')' : ''));
       fileObjects.push(f);
     }
 
     // Inject into input
-    const dt = new DataTransfer();
-    for (const f of fileObjects) dt.items.add(f);
+    let dt;
+    try {
+      dt = new DataTransfer();
+      for (const f of fileObjects) dt.items.add(f);
+    } catch (e) {
+      return err('DataTransfer API unavailable in this page context: ' + (e && e.message ? e.message : String(e)));
+    }
     el.files = dt.files;
+    if (el.files.length !== fileObjects.length) {
+      return err(
+        'File assignment failed: the page rejected the FileList ' +
+        '(this input may be framework-controlled). ' +
+        'Try clicking the file input instead.'
+      );
+    }
     el.dispatchEvent(new Event('input', { bubbles: true }));
     el.dispatchEvent(new Event('change', { bubbles: true }));
 
@@ -101,10 +119,6 @@
       return { isError: true, content: [{ type: 'text', text: 'Cannot access tab ' + (tabId !== undefined ? tabId : '(default)') }] };
     }
 
-    // If the tab is removed mid-execution Safari may never settle the executeScript
-    // promise, blocking the tool. executeScriptWithTabGuard provides an onRemoved
-    // guard, settled-flag race prevention, and a 30s timeout (defined in
-    // tool-registry.js executeScriptWithTabGuard).
     // @note MV2 non-persistent risk: see executeScriptWithTabGuard JSDoc in tool-registry.js
     // for background-page suspension caveats.
     let results;
