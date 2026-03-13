@@ -17,26 +17,20 @@
  * T11 — tab not accessible (executeScript throws) — isError
  * T12 — large image base64 (~5MB) — uploads without error
  *
- * DOM injection tests (T1, T2, T9, T10, T12) evaluate injected code via indirect
- * eval in the jest-jsdom global context so that all native jsdom APIs (DataTransfer,
- * FileList, elementFromPoint) are available without polyfilling.
+ * DOM injection tests (T1, T2, T9, T10, T12) evaluate injected code via
+ * vm.runInNewContext so that the real injected IIFE runs and return values /
+ * event dispatch can be verified.
  * Validation/error tests (T3-T8, T11) mock executeScript entirely.
  *
- * KNOWN GAP — DataTransfer constructor:
- *   jsdom does not implement DataTransfer. The dom mock uses indirect eval so the
- *   injected code runs in the jest-jsdom window context where DataTransfer would be
- *   available in a real browser. In jsdom it is still absent — el.files assignment
- *   will throw. T1/T9/T10/T12 therefore use a pre-canned success result via
- *   makeMockBrowserWithSuccess and assert no isError; they do NOT re-run injected code.
+ * KNOWN GAP — DataTransfer.files assignment:
+ *   jsdom does not propagate el.files = dt.files back to the input's FileList.
+ *   T9 verifies no isError rather than asserting File.name directly.
+ *   All other tests (T1, T2, T10, T12) use vm.runInNewContext and exercise
+ *   the real injected IIFE, including event dispatch.
  *
  * KNOWN GAP — document.elementFromPoint:
  *   jsdom does not implement layout-based hit-testing. T2 uses makeDomBrowserMock
  *   with an elementFromPoint polyfill via document Proxy.
- *
- * KNOWN GAP — cross-context event listeners (T10):
- *   T10 verifies the handler returns success (no isError) rather than asserting a
- *   listener callback count, since jsdom's DataTransfer gap prevents the real
- *   injected code from running in tests.
  */
 
 'use strict';
@@ -52,48 +46,60 @@ const TINY_PNG_B64 =
 // ---------------------------------------------------------------------------
 
 /**
- * Returns a browser mock that returns a pre-canned success result for executeScript.
- * Used for T1/T9/T10/T12 where the real injected code cannot run in jsdom due to
- * missing DataTransfer support (KNOWN GAP). The handler-layer logic (arg validation,
- * tab resolution, error classification) is still exercised.
+ * Wraps an element in a Proxy so that `el.files = value` is silently swallowed
+ * (jsdom throws TypeError when assigning a non-FileList to el.files).
+ * All other property accesses and dispatchEvent calls pass through to the real element.
  */
-function makeMockBrowserWithSuccess(text = 'Image uploaded to file input ref-1') {
-  return {
-    tabs: {
-      executeScript: jest.fn(async () => [{ content: [{ type: 'text', text }] }]),
+function makeElementProxy(el) {
+  return new Proxy(el, {
+    set(target, prop, value) {
+      if (prop === 'files') return true; // silent no-op
+      target[prop] = value;
+      return true;
     },
-  };
+  });
 }
 
 /**
  * Returns a browser mock that evaluates injected code using vm.runInNewContext
- * with a polyfilled document.elementFromPoint. Used for T2 (coordinate path)
- * where DataTransfer is only used for DragEvent construction (not el.files
- * assignment) and a minimal polyfill suffices.
+ * with a DataTransfer polyfill and an elementFromPoint polyfill.
+ * Used for T1, T2, T9, T10, T12 (DOM injection path) and T4, T5 (error path).
  *
- * KNOWN GAP — DataTransfer constructor:
- *   jsdom does not implement DataTransfer. A minimal polyfill is provided that
- *   supports items.add() and returns a plain object for files (sufficient for
- *   drag-drop event dispatch, which does not require a real FileList).
+ * DataTransfer polyfill note:
+ *   jsdom does not implement DataTransfer. The polyfill supports items.add() so
+ *   the injected IIFE does not throw. el.files = dt.files is intercepted by
+ *   makeElementProxy and silently swallowed — the IIFE continues to dispatchEvent,
+ *   which reaches outer jsdom listeners correctly.
  */
-class DataTransferPolyfill {
-  constructor() {
-    this._files = [];
-    this.items = {
-      add: (file) => { this._files.push(file); },
-    };
-  }
-  get files() {
-    return { _polyfill: true };
-  }
-}
-
 function makeDomBrowserMock() {
-  // Document proxy that polyfills elementFromPoint (no layout engine in jsdom)
+  // Minimal DataTransfer polyfill for jsdom — allows the injected IIFE to proceed
+  // without throwing. `el.files = dt.files` won't update the real FileList (jsdom
+  // limitation), but event dispatch and return values work correctly.
+  const DataTransferPolyfill = globalThis.DataTransfer || class DataTransfer {
+    constructor() {
+      this._files = [];
+      this.items = { add: (file) => { this._files.push(file); } };
+      this.files = this._files;
+    }
+  };
+
+  // Document proxy that:
+  //   - polyfills elementFromPoint (no layout engine in jsdom)
+  //   - wraps querySelector results with makeElementProxy so el.files assignment
+  //     is silently swallowed instead of throwing
   const docProxy = new Proxy(globalThis.document, {
     get(target, prop) {
       if (prop === 'elementFromPoint') {
-        return (_x, _y) => target.body || target.querySelector('div') || null;
+        return (_x, _y) => {
+          const found = target.body || target.querySelector('div') || null;
+          return found ? makeElementProxy(found) : null;
+        };
+      }
+      if (prop === 'querySelector') {
+        return (selector) => {
+          const el = target.querySelector(selector);
+          return el ? makeElementProxy(el) : null;
+        };
       }
       const val = target[prop];
       return typeof val === 'function' ? val.bind(target) : val;
@@ -183,13 +189,14 @@ describe('upload_image tool', () => {
     }
   });
 
-  // T1 — ref: file input — image injected
-  // Uses a pre-canned success result because jsdom lacks DataTransfer (KNOWN GAP).
-  // The handler-layer arg validation and tab resolution are still exercised.
+  // T1 — ref: file input — image injected, return value verified via vm.runInNewContext
   test('T1: ref targeting a file input injects the file and returns success', async () => {
-    const handler = loadUploadImage({
-      browser: makeMockBrowserWithSuccess('Image uploaded to file input ref-1'),
-    });
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.setAttribute('data-claude-ref', 'ref-1');
+    document.body.appendChild(input);
+
+    const handler = loadUploadImage({ browser: makeDomBrowserMock() });
     const result = await handler({ imageId: 'id1', imageData: TINY_PNG_B64, ref: 'ref-1', filename: 'shot.png' });
 
     expect(result.isError).toBeFalsy();
@@ -261,27 +268,34 @@ describe('upload_image tool', () => {
   });
 
   // T9 — custom filename (best-effort in jsdom)
-  // Uses a pre-canned success result because jsdom lacks DataTransfer (KNOWN GAP).
+  // Uses vm.runInNewContext. jsdom does not propagate el.files = dt.files back to the
+  // input's FileList (KNOWN GAP), so File.name cannot be asserted directly.
   // Verifies that a custom filename does not cause the handler to return isError.
   test('T9: custom filename does not cause an error', async () => {
-    const handler = loadUploadImage({
-      browser: makeMockBrowserWithSuccess('Image uploaded to file input ref-fn'),
-    });
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.setAttribute('data-claude-ref', 'ref-fn');
+    document.body.appendChild(input);
+
+    const handler = loadUploadImage({ browser: makeDomBrowserMock() });
     const result = await handler({ imageId: 'id1', imageData: TINY_PNG_B64, ref: 'ref-fn', filename: 'custom.png' });
     expect(result.isError).toBeFalsy();
   });
 
   // T10 — change event fires
-  // KNOWN GAP — jsdom DataTransfer: injected code cannot run in jsdom (no DataTransfer).
-  //   Uses pre-canned success result. Verifies handler reaches executeScript success path,
-  //   confirming dispatchEvent call is in the injected code path (not asserted directly).
-  test('T10: ref upload dispatches change event on the file input (no error path)', async () => {
-    const handler = loadUploadImage({
-      browser: makeMockBrowserWithSuccess('Image uploaded to file input ref-evt'),
-    });
-    const result = await handler({ imageId: 'id1', imageData: TINY_PNG_B64, ref: 'ref-evt' });
+  test('T10: ref upload dispatches change event on the file input', async () => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.setAttribute('data-claude-ref', 'ref-evt');
+    document.body.appendChild(input);
 
-    expect(result.isError).toBeFalsy();
+    let changeCount = 0;
+    input.addEventListener('change', () => { changeCount++; });
+
+    const handler = loadUploadImage({ browser: makeDomBrowserMock() });
+    await handler({ imageId: 'id1', imageData: TINY_PNG_B64, ref: 'ref-evt' });
+
+    expect(changeCount).toBe(1);
   });
 
   // T11 — tab not accessible
@@ -294,16 +308,18 @@ describe('upload_image tool', () => {
   });
 
   // T12 — large image
-  // KNOWN GAP — jsdom DataTransfer: injected code cannot run in jsdom.
-  //   Uses pre-canned success result. Verifies the handler does not fail at arg
-  //   validation or serialization level when imageData is ~5MB.
+  // Uses vm.runInNewContext. Verifies the injected IIFE handles a ~5MB base64 payload
+  // without throwing at the atob/Uint8Array/Blob/File construction level.
   test('T12: large image base64 uploads without error', async () => {
     // Generate a valid ~5MB base64 string (zero-filled buffer — atob-safe, no mid-string padding)
     const largePng = Buffer.alloc(5 * 1024 * 1024).toString('base64');
 
-    const handler = loadUploadImage({
-      browser: makeMockBrowserWithSuccess('Image uploaded to file input ref-large'),
-    });
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.setAttribute('data-claude-ref', 'ref-large');
+    document.body.appendChild(input);
+
+    const handler = loadUploadImage({ browser: makeDomBrowserMock() });
     const result = await handler({ imageId: 'id1', imageData: largePng, ref: 'ref-large' });
 
     expect(result.isError).toBeFalsy();
