@@ -5,7 +5,11 @@ import UniformTypeIdentifiers
 /// See Spec 019 for full specification.
 ///
 /// Requires `com.apple.security.temporary-exception.files.absolute-path.read-only`
-/// entitlement in ClaudeInSafari.entitlements for App Sandbox access.
+/// entitlement in ClaudeInSafari.entitlements for App Sandbox access. The entitlement
+/// grants read access to `/` (the entire filesystem) because the tool accepts arbitrary
+/// caller-supplied paths — restricting to a narrower prefix (e.g. `/Users/`) would break
+/// legitimate use cases like `/tmp/` or `/var/`. Note: this entitlement is not App Store
+/// compatible and must be revisited before Phase 7 distribution.
 class FileService {
 
     enum FileReadError: Error {
