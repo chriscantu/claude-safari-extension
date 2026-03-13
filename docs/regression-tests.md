@@ -505,6 +505,78 @@ wait
 
 ---
 
+## 15  File Upload
+
+### 15.1  Fast-fail: missing paths
+
+```fish
+make send TOOL=file_upload ARGS='{"ref":"upload-ref"}'
+```
+
+- [ ] Returns error "paths is required and must be a non-empty array"
+
+### 15.2  Fast-fail: missing ref
+
+```fish
+make send TOOL=file_upload ARGS='{"paths":["/tmp/test.txt"]}'
+```
+
+- [ ] Returns error "ref parameter is required"
+
+### 15.3  Fast-fail: non-existent path
+
+```fish
+make send TOOL=file_upload ARGS='{"paths":["/tmp/this-file-does-not-exist-99999.txt"],"ref":"upload-ref"}'
+```
+
+- [ ] Returns error "File not found"
+- [ ] Does **not** wait or timeout
+
+### 15.4  Fast-fail: relative path
+
+```fish
+make send TOOL=file_upload ARGS='{"paths":["relative/file.txt"],"ref":"upload-ref"}'
+```
+
+- [ ] Returns error "Path must be absolute"
+
+### 15.5  E2E — single file upload *(requires extension loaded)*
+
+Create a test page at `/tmp/upload-test.html`:
+
+```html
+<html><body>
+  <input type="file" data-claude-ref="upload-test" id="f">
+  <script>document.getElementById('f').addEventListener('change', function(){ document.title = 'changed:'+this.files[0].name; });</script>
+</body></html>
+```
+
+Open it in Safari, then:
+
+```fish
+echo "hello from file_upload" > /tmp/hello.txt
+make send TOOL=navigate ARGS='{"url":"file:///tmp/upload-test.html"}'
+make send TOOL=file_upload ARGS='{"paths":["/tmp/hello.txt"],"ref":"upload-test"}'
+```
+
+- [ ] Returns "Uploaded hello.txt (22 B) to file input upload-test"
+- [ ] Page title changes to "changed:hello.txt" (change event fired)
+
+### 15.6  E2E — multiple files to `multiple` input *(requires extension loaded)*
+
+Modify the test page to use `<input type="file" multiple data-claude-ref="multi-test">`, then:
+
+```fish
+echo "file one" > /tmp/f1.txt
+echo "file two" > /tmp/f2.txt
+make send TOOL=file_upload ARGS='{"paths":["/tmp/f1.txt","/tmp/f2.txt"],"ref":"multi-test"}'
+```
+
+- [ ] Returns "Uploaded 2 files to file input multi-test:"
+- [ ] Both filenames listed in response
+
+---
+
 ## Checklist Summary
 
 Copy this into a PR description when a full regression run is required:
@@ -526,4 +598,5 @@ Copy this into a PR description when a full regression run is required:
 - [ ] 12. Tabs manager
 - [ ] 13. Cross-tool E2E flows
 - [ ] 14. Error & edge cases
+- [ ] 15. File upload: fast-fail paths, E2E single file, E2E multiple files
 ```

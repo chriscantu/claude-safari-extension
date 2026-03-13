@@ -94,6 +94,7 @@ claude-safari-extension/
 │           ├── read-console.test.js
 │           ├── read-network.test.js
 │           ├── upload-image.test.js
+│           ├── file-upload.test.js
 │           ├── accessibility-tree.test.js
 │           ├── console-monitor.test.js
 │           └── network-monitor.test.js

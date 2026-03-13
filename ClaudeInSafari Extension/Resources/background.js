@@ -17,7 +17,8 @@
  *  11. tools/read-console.js   — registers read_console_messages
  *  12. tools/read-network.js   — registers read_network_requests
  *  13. tools/upload-image.js   — registers upload_image
- *  14. background.js           — this file; starts the poll loop
+ *  14. tools/file-upload.js    — registers file_upload
+ *  15. background.js           — this file; starts the poll loop
  */
 
 const POLL_INTERVAL_MS = 100;
