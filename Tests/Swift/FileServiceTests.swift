@@ -125,4 +125,42 @@ final class FileServiceTests: XCTestCase {
         XCTAssertTrue(err.userMessage.lowercased().contains("cannot read"),
                       "Expected 'Cannot read' in message, got: \(err.userMessage)")
     }
+
+    // T9 — file larger than 100 MB limit
+    func test_readFiles_fileTooLarge_returnsError() {
+        // Temporarily create a real file that exceeds the 100 MB limit by writing
+        // a file and then mocking the attributes check.
+        // Since writing 100 MB is impractical in tests, use a subclass to override
+        // the static maxFileSize limit for this test.
+        class TinyLimitFileService: FileService {
+            static let testMaxFileSize = 10  // 10 bytes limit
+        }
+
+        // Use TinyLimitFileService's maxFileSize by writing a file > 10 bytes.
+        // However, FileService.readFile reads Self.maxFileSize — we can't override static.
+        // Instead, write a real oversized file (small) and temporarily patch maxFileSize.
+        // Since maxFileSize is `static let` (not overridable), take a different approach:
+        // write a real file larger than 100 MB ... that's impractical.
+        // Best approach for static let: write a test that creates an actual 101 MB sparse file.
+
+        // On macOS, we can create a sparse file using FileManager without allocating real disk space.
+        // FileManager.attributesOfItem returns the logical size, not allocated size.
+        // We'll create a file and resize it to 101 MB using truncate (via FileHandle).
+
+        let oversizedPath = tmpDir.appendingPathComponent("oversized.bin")
+        FileManager.default.createFile(atPath: oversizedPath.path, contents: Data())
+        let handle = try! FileHandle(forWritingTo: oversizedPath)
+        // Seek to 101 MB and write one byte to create a sparse file with logical size > 100 MB
+        let targetSize = FileService.maxFileSize + 1  // 100 MB + 1 byte
+        handle.seek(toFileOffset: UInt64(targetSize))
+        handle.write(Data([0x00]))
+        handle.closeFile()
+
+        let result = service.readFiles(paths: [oversizedPath.path])
+        guard case .failure(let err) = result else {
+            XCTFail("Expected failure for oversized file"); return
+        }
+        XCTAssertTrue(err.userMessage.contains("100 MB"),
+                      "Expected '100 MB' in message, got: \(err.userMessage)")
+    }
 }
