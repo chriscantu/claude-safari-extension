@@ -319,6 +319,12 @@ describe('file_upload tool', () => {
     expect(result.content[0].text).toContain('photo.png may be rejected by the page');
   });
 
+  // Tool registration assertion
+  it('registers tool as file_upload', () => {
+    loadFileUpload({ browser: makeMockBrowser() });
+    expect(globalThis.registerTool).toHaveBeenCalledWith('file_upload', expect.any(Function));
+  });
+
   // T15 — handler: missing ref → isError
   test('T15: missing ref → isError: ref parameter is required', async () => {
     const handler = loadFileUpload({ browser: makeMockBrowser() });

@@ -76,7 +76,7 @@
       const mismatched = files.filter(d => {
         const ext = '.' + d.filename.split('.').pop().toLowerCase();
         const mime = d.mimeType.toLowerCase();
-        return !acceptList.some(a => a === ext || a === mime || a === mime.split('/')[0] + '/*');
+        return !acceptList.some(a => a === ext || a === mime || a === mime.split('/')[0] + '/*' || a === '*/*');
       });
       if (mismatched.length > 0) {
         text += '\nWarning: file input accepts "' + accept + '" — ' + mismatched[0].filename + ' may be rejected by the page';
