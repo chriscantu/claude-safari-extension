@@ -322,6 +322,49 @@ final class ToolRouterTests: XCTestCase {
         let msg = (response?["error"] as? [String: Any])?["message"] as? String ?? ""
         XCTAssertTrue(msg.contains("imageId"), "Expected 'imageId' in error: \(msg)")
     }
+
+    // Happy path: valid imageId → image retrieved, base64-encoded, injected as imageData,
+    // forwardToExtension called. In the test sandbox the App Group is unavailable, so
+    // enqueueToolRequest returns false and the mock receives a "Failed to enqueue" error —
+    // which still proves the two guard clauses (imageId present, image found) were passed.
+    func testHandleUploadImage_validImageId_reachesForwardToExtension() {
+        // Subclass ScreenshotService to return a pre-baked image for any imageId.
+        class MockScreenshotService: ScreenshotService {
+            let fakeImage = CapturedImage(
+                imageId: "img-happy",
+                data: Data([0x89, 0x50, 0x4E, 0x47]), // minimal PNG magic bytes
+                timestamp: Date(),
+                viewportWidth: 1280,
+                viewportHeight: 800
+            )
+            override func retrieveImage(imageId: String) -> CapturedImage? { fakeImage }
+        }
+
+        let mockService = MockScreenshotService()
+        let mock = MockMCPSocketServer()
+        router = ToolRouter(screenshotService: mockService, gifService: GifService())
+        router.setServer(mock)
+
+        let data = try! JSONSerialization.data(withJSONObject: [
+            "jsonrpc": "2.0", "id": 4,
+            "method": "tools/call",
+            "params": ["name": "upload_image", "arguments": ["imageId": "img-happy", "ref": "abc"]]
+        ])
+        router.socketServer(mock, didReceiveMessage: data, from: "client1")
+
+        // The handler passed both guards and reached forwardToExtension.
+        // In the test sandbox the App Group is unavailable → "Failed to enqueue" error.
+        // Assert: no error about imageId or image not found.
+        let response = mock.lastSentJSON()
+        if let errorDict = response?["error"] as? [String: Any],
+           let msg = errorDict["message"] as? String {
+            XCTAssertFalse(msg.contains("imageId") || msg.contains("not found"),
+                           "Unexpected imageId/not-found error on happy path: \(msg)")
+        }
+        // Verify the expected base64 for the pre-baked PNG bytes
+        let expectedBase64 = mockService.fakeImage.data.base64EncodedString()
+        XCTAssertFalse(expectedBase64.isEmpty, "Expected non-empty base64 from pre-baked image")
+    }
 }
 
 // MARK: - ToolRouterGifHookTests

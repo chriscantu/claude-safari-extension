@@ -112,10 +112,7 @@
       );
     } catch (err) {
       if (err && /was closed during/.test(err.message)) throw err;
-      if (typeof globalThis.classifyExecuteScriptError === 'function') {
-        throw globalThis.classifyExecuteScriptError('upload_image', resolvedTabId, err);
-      }
-      throw err;
+      throw globalThis.classifyExecuteScriptError('upload_image', resolvedTabId, err);
     }
 
     const result = results && results[0];
