@@ -95,9 +95,9 @@
       result = results && results[0];
     } catch (e) {
       const classified = globalThis.classifyExecuteScriptError
-        ? globalThis.classifyExecuteScriptError(e)
-        : e.message;
-      return { isError: true, content: [{ type: 'text', text: classified }] };
+        ? globalThis.classifyExecuteScriptError('upload_image', resolvedTabId, e)
+        : e;
+      return { isError: true, content: [{ type: 'text', text: classified.message }] };
     }
 
     if (!result) {
