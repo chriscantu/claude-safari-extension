@@ -93,6 +93,7 @@ claude-safari-extension/
 │           ├── tabs-manager.test.js
 │           ├── read-console.test.js
 │           ├── read-network.test.js
+│           ├── upload-image.test.js
 │           ├── accessibility-tree.test.js
 │           ├── console-monitor.test.js
 │           └── network-monitor.test.js
