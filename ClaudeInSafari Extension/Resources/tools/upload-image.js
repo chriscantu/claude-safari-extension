@@ -94,9 +94,7 @@
       });
       result = results && results[0];
     } catch (e) {
-      const classified = globalThis.classifyExecuteScriptError
-        ? globalThis.classifyExecuteScriptError('upload_image', resolvedTabId, e)
-        : e;
+      const classified = globalThis.classifyExecuteScriptError('upload_image', resolvedTabId, e);
       return { isError: true, content: [{ type: 'text', text: classified.message }] };
     }
 
