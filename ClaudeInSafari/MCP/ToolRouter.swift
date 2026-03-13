@@ -420,6 +420,7 @@ class ToolRouter: MCPSocketServerDelegate {
 
     /// Internal (not private) for unit testing via ToolRouterTests.
     func handleFileUpload(arguments: [String: Any], id: Any?, clientId: String) {
+        _testLastFileUploadEnrichedArgs = nil
         // Validate paths — must be a non-empty array of strings.
         // JSONSerialization.jsonObject returns [Any] for JSON arrays, never [String],
         // so we cast to [Any] first then compactMap to [String].

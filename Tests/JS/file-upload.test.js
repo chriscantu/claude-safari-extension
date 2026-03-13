@@ -42,6 +42,16 @@ if (!globalThis.CSS.escape) {
 const TINY_TXT_B64 = btoa('hello'); // aGVsbG8=
 const TINY_PDF_B64 = btoa('%PDF-1.0'); // base64 of a fake PDF header
 
+// Hoisted DataTransfer polyfill — shared by makeDomBrowserMock and makeIIFESandbox
+// to avoid duplication and ensure consistent behaviour across both helper types.
+const DataTransferPolyfill = globalThis.DataTransfer || class DataTransfer {
+  constructor() {
+    this._files = [];
+    this.items = { add: (file) => { this._files.push(file); } };
+    this.files = this._files;
+  }
+};
+
 // ---------------------------------------------------------------------------
 // Browser mock helpers
 // ---------------------------------------------------------------------------
@@ -82,14 +92,6 @@ function makeElementProxy(el) {
  * Used for DOM injection tests (T1, T2, T3, T7, T8, T10, T11, T13, T_multiSize, T_makeFileNull).
  */
 function makeDomBrowserMock() {
-  const DataTransferPolyfill = globalThis.DataTransfer || class DataTransfer {
-    constructor() {
-      this._files = [];
-      this.items = { add: (file) => { this._files.push(file); } };
-      this.files = this._files;
-    }
-  };
-
   const docProxy = new Proxy(globalThis.document, {
     get(target, prop) {
       if (prop === 'querySelector') {
@@ -154,14 +156,6 @@ function makeIIFESandbox() {
   const fnMatch = fileContent.match(/function injectedFileUpload[\s\S]*?(?=\n\s{2}globalThis\.registerTool)/);
   if (!fnMatch) throw new Error('Could not extract injectedFileUpload from source');
   const src = fnMatch[0].trimEnd();
-
-  const DataTransferPolyfill = globalThis.DataTransfer || class DataTransfer {
-    constructor() {
-      this._files = [];
-      this.items = { add: (file) => { this._files.push(file); } };
-      this.files = this._files;
-    }
-  };
 
   const docRef = globalThis.document;
   const docProxy = new Proxy(docRef, {

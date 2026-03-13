@@ -90,9 +90,13 @@ class FileService {
                   path, resolvedPath, error.localizedDescription)
             return .failure(.notReadable(path: path))
         }
-        // 4a. Reject directories — also reject if type attribute is unreadable (fail safe)
+        // 4a. Reject directories. Treat unreadable type attribute as notReadable (not isDirectory)
+        //     to avoid a misleading "Path is a directory" message for sockets or unusual fs nodes.
         let fileType = attrs[.type] as? FileAttributeType
-        if fileType == nil || fileType == .typeDirectory {
+        guard let fileType else {
+            return .failure(.notReadable(path: path))
+        }
+        if fileType == .typeDirectory {
             return .failure(.isDirectory(path: path))
         }
         // 5. Check readability
