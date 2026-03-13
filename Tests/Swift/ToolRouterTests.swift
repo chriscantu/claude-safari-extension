@@ -422,6 +422,25 @@ final class ToolRouterTests: XCTestCase {
         XCTAssertTrue(msg.contains("paths"), "Expected 'paths' in error: \(msg)")
     }
 
+    func testHandleFileUpload_nonStringPathElement_sendsError() {
+        let mock = MockMCPSocketServer()
+        router = ToolRouter(screenshotService: ScreenshotService(), gifService: GifService(), fileService: FileService())
+        router.setServer(mock)
+
+        // paths contains a number at index 1 — compactMap drops it, count mismatch triggers distinct error
+        let data = try! JSONSerialization.data(withJSONObject: [
+            "jsonrpc": "2.0", "id": 14,
+            "method": "tools/call",
+            "params": ["name": "file_upload", "arguments": ["paths": ["/tmp/a.txt", 42], "ref": "upload-ref"]]
+        ])
+        router.socketServer(mock, didReceiveMessage: data, from: "client1")
+
+        let response = mock.lastSentJSON()
+        XCTAssertNotNil(response?["error"], "Expected error for non-string path element")
+        let msg = (response?["error"] as? [String: Any])?["message"] as? String ?? ""
+        XCTAssertTrue(msg.contains("not a string"), "Expected 'not a string' in error: \(msg)")
+    }
+
     func testHandleFileUpload_validPathsAndRef_reachesForwardToExtension() {
         // MockFileService returns a descriptor without touching disk
         class MockFileService: FileService {
