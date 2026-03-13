@@ -32,13 +32,14 @@
      * @returns {File|{_err: string}}
      */
     function makeFile(base64, filename, mimeType) {
+      let bytes;
       try {
-        const bytes = Uint8Array.from(atob(base64), c => c.charCodeAt(0));
-        const blob = new Blob([bytes], { type: mimeType });
-        return new File([blob], filename, { type: mimeType, lastModified: Date.now() });
+        bytes = Uint8Array.from(atob(base64), c => c.charCodeAt(0));
       } catch (e) {
-        return { _err: e && e.message ? e.message : String(e) };
+        return { _err: 'Invalid base64 data: ' + (e && e.message ? e.message : String(e)) };
       }
+      const blob = new Blob([bytes], { type: mimeType });
+      return new File([blob], filename, { type: mimeType, lastModified: Date.now() });
     }
 
     // Resolve element
@@ -63,9 +64,13 @@
     let dt;
     try {
       dt = new DataTransfer();
-      for (const f of fileObjects) dt.items.add(f);
     } catch (e) {
       return err('DataTransfer API unavailable in this page context: ' + (e && e.message ? e.message : String(e)));
+    }
+    try {
+      for (const f of fileObjects) dt.items.add(f);
+    } catch (e) {
+      return err('Failed to add file to DataTransfer: ' + (e && e.message ? e.message : String(e)));
     }
     el.files = dt.files;
     if (el.files.length !== fileObjects.length) {
@@ -110,8 +115,11 @@
     if (!ref) {
       return { isError: true, content: [{ type: 'text', text: 'ref parameter is required' }] };
     }
-    if (!files || !Array.isArray(files) || files.length === 0) {
-      return { isError: true, content: [{ type: 'text', text: 'files not available — native injection failed' }] };
+    if (!files || !Array.isArray(files)) {
+      return { isError: true, content: [{ type: 'text', text: 'files argument was not populated by the native layer — possible routing bug' }] };
+    }
+    if (files.length === 0) {
+      return { isError: true, content: [{ type: 'text', text: 'files array was empty — no files to upload' }] };
     }
 
     const resolvedTabId = await globalThis.resolveTab(tabId);

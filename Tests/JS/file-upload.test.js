@@ -348,12 +348,10 @@ describe('file_upload tool', () => {
     const files = [{ base64: TINY_TXT_B64, filename: 'test.txt', mimeType: 'text/plain', size: 5 }];
     await handler({ files, ref: 'ref-evt' });
 
-    const inputEvent = firedBubbles.find(e => e.type === 'input');
-    const changeEvent = firedBubbles.find(e => e.type === 'change');
-    expect(inputEvent).toBeDefined();
-    expect(inputEvent.bubbles).toBe(true);
-    expect(changeEvent).toBeDefined();
-    expect(changeEvent.bubbles).toBe(true);
+    expect(firedBubbles[0].type).toBe('input');
+    expect(firedBubbles[0].bubbles).toBe(true);
+    expect(firedBubbles[1].type).toBe('change');
+    expect(firedBubbles[1].bubbles).toBe(true);
   });
 
   // T11 — application/octet-stream MIME (.wasm) → success
@@ -526,10 +524,10 @@ describe('file_upload tool', () => {
     expect(result.content[0].text).toContain('File assignment failed');
   });
 
-  // T_dataTransferUnavailable — DataTransfer constructor throws → isError
+  // T_dataTransferUnavailable — DataTransfer constructor throws → isError: "DataTransfer API unavailable"
   it('T_dataTransferUnavailable — DataTransfer constructor throws returns error', () => {
     const { src, sandbox } = makeIIFESandbox();
-    // Override DataTransfer to throw
+    // Override DataTransfer to throw on construction
     sandbox.DataTransfer = function() { throw new TypeError('DataTransfer is not defined'); };
 
     const input = document.createElement('input');
@@ -543,6 +541,32 @@ describe('file_upload tool', () => {
       sandbox
     );
     expect(result.isError).toBe(true);
-    expect(result.content[0].text).toContain('DataTransfer');
+    expect(result.content[0].text).toContain('DataTransfer API unavailable');
+  });
+
+  // T_dataTransferItemsAddFails — dt.items.add throws → isError: "Failed to add file to DataTransfer"
+  it('T_dataTransferItemsAddFails — items.add throws returns distinct error', () => {
+    const { src, sandbox } = makeIIFESandbox();
+    // Override DataTransfer so constructor succeeds but items.add throws
+    sandbox.DataTransfer = function() {
+      this.files = { length: 0 };
+      this.items = {
+        add: function() { throw new Error('quota exceeded'); },
+      };
+    };
+
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.setAttribute('data-claude-ref', 'upload-ref');
+    document.body.appendChild(input);
+
+    const files = [{ base64: TINY_TXT_B64, filename: 'x.txt', mimeType: 'text/plain', size: 5 }];
+    const result = vm.runInNewContext(
+      '(' + src + ')(' + JSON.stringify({ files, ref: 'upload-ref' }) + ')',
+      sandbox
+    );
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('Failed to add file to DataTransfer');
+    expect(result.content[0].text).toContain('quota exceeded');
   });
 });
