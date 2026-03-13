@@ -114,4 +114,15 @@ final class FileServiceTests: XCTestCase {
         XCTAssertEqual(descriptors[0].data, content)
         XCTAssertEqual(descriptors[0].filename, "real.txt")
     }
+
+    // Directory guard — directory path must return .notReadable
+    func test_readFiles_directory_returnsNotReadable() {
+        // tmpDir is a real directory
+        let result = service.readFiles(paths: [tmpDir.path])
+        guard case .failure(let err) = result else {
+            XCTFail("Expected failure for directory path"); return
+        }
+        XCTAssertTrue(err.userMessage.lowercased().contains("cannot read"),
+                      "Expected 'Cannot read' in message, got: \(err.userMessage)")
+    }
 }

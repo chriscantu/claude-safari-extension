@@ -7,19 +7,22 @@ class ToolRouter: MCPSocketServerDelegate {
     private let screenshotService: ScreenshotService
     private let appleScriptBridge = AppleScriptBridge()
     private let gifService: GifService
+    private let fileService: FileService
 
     // Production init — all services created fresh
     convenience init() {
         self.init(
             screenshotService: ScreenshotService(),
-            gifService: GifService()
+            gifService: GifService(),
+            fileService: FileService()
         )
     }
 
     // Testable init — inject mock services for unit tests
-    init(screenshotService: ScreenshotService, gifService: GifService) {
+    init(screenshotService: ScreenshotService, gifService: GifService, fileService: FileService) {
         self.screenshotService = screenshotService
         self.gifService = gifService
+        self.fileService = fileService
     }
 
     /// Staging set for native tools whose handler branch is not yet wired up in handleToolCall().
@@ -113,6 +116,8 @@ class ToolRouter: MCPSocketServerDelegate {
             handleGifCreator(arguments: arguments, id: id, clientId: clientId)
         } else if toolName == "upload_image" {
             handleUploadImage(arguments: arguments, id: id, clientId: clientId)
+        } else if toolName == "file_upload" {
+            handleFileUpload(arguments: arguments, id: id, clientId: clientId)
         } else if nativeTools.contains(toolName) {
             sendError(id: id, code: -32000, message: "Native tool '\(toolName)' not yet implemented", to: clientId)
         } else {
@@ -405,6 +410,47 @@ class ToolRouter: MCPSocketServerDelegate {
             context: NativeMessageContext(clientId: clientId, tabGroupId: nil)
         )
         forwardToExtension(queued, id: id, clientId: clientId, arguments: enrichedArgs)
+    }
+
+    // MARK: - Native File Upload
+
+    /// Internal (not private) for unit testing via ToolRouterTests.
+    func handleFileUpload(arguments: [String: Any], id: Any?, clientId: String) {
+        // Validate paths — must be a non-empty array of strings
+        guard let rawPaths = arguments["paths"],
+              let paths = rawPaths as? [String], !paths.isEmpty else {
+            sendError(id: id, code: -32000,
+                      message: "paths is required and must be a non-empty array",
+                      to: clientId)
+            return
+        }
+        // Validate ref — must be present and non-empty
+        guard let ref = arguments["ref"] as? String, !ref.isEmpty else {
+            sendError(id: id, code: -32000, message: "ref parameter is required", to: clientId)
+            return
+        }
+
+        switch fileService.readFiles(paths: paths) {
+        case .failure(let error):
+            sendError(id: id, code: -32000, message: error.userMessage, to: clientId)
+        case .success(let descriptors):
+            var enrichedArgs = arguments
+            enrichedArgs["files"] = descriptors.map { d in
+                [
+                    "base64": d.data.base64EncodedString(),
+                    "filename": d.filename,
+                    "mimeType": d.mimeType,
+                    "size": d.size
+                ] as [String: Any]
+            }
+            let queued = QueuedToolRequest(
+                requestId: UUID().uuidString,
+                tool: "file_upload",
+                args: enrichedArgs.mapValues { AnyCodable($0) },
+                context: NativeMessageContext(clientId: clientId, tabGroupId: nil)
+            )
+            forwardToExtension(queued, id: id, clientId: clientId, arguments: enrichedArgs)
+        }
     }
 
     // MARK: - Extension Forwarding
