@@ -173,7 +173,7 @@ class ToolRouter: MCPSocketServerDelegate {
             let base64 = captured.data.base64EncodedString()
             let label: String
             if let r = region {
-                label = "Zoomed region [\(r[0]),\(r[1]),\(r[2]),\(r[3])] (imageId: \(captured.imageId))."
+                label = "Zoomed region [\(r[0]),\(r[1]),\(r[2]),\(r[3])] (imageId: \(captured.imageId)). Use this imageId with upload_image."
             } else {
                 label = "Screenshot captured (imageId: \(captured.imageId)). Use this imageId with upload_image."
             }
@@ -390,6 +390,8 @@ class ToolRouter: MCPSocketServerDelegate {
             return
         }
         guard let captured = screenshotService.retrieveImage(imageId: imageId) else {
+            NSLog("handleUploadImage: imageId '%@' not found (store count: %d)",
+                  imageId, screenshotService.imageCount)
             sendError(id: id, code: -32000, message: "Image not found: \(imageId)", to: clientId)
             return
         }

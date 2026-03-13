@@ -10,14 +10,20 @@
 
   /**
    * Injected into the page via executeScript.
+   * Runs in the page's JavaScript context — no access to browser extension APIs or globalThis.
    * Receives a plain-object args payload — no closures, no external refs.
    * Returns a tool result object: { content } or { isError, content }.
    */
   function injectedUpload({ imageData, ref, coordinate, filename }) {
+    // Returns null on invalid base64 or unsupported file construction — caller checks.
     function makeFile(base64, name) {
-      const bytes = Uint8Array.from(atob(base64), c => c.charCodeAt(0));
-      const blob = new Blob([bytes], { type: 'image/png' });
-      return new File([blob], name, { type: 'image/png' });
+      try {
+        const bytes = Uint8Array.from(atob(base64), c => c.charCodeAt(0));
+        const blob = new Blob([bytes], { type: 'image/png' });
+        return new File([blob], name, { type: 'image/png' });
+      } catch (e) {
+        return null;
+      }
     }
 
     function err(text) {
@@ -25,11 +31,12 @@
     }
 
     if (ref) {
-      const el = document.querySelector('[data-claude-ref="' + ref + '"]');
+      const el = document.querySelector('[data-claude-ref="' + CSS.escape(ref) + '"]');
       if (!el) return err("Element '" + ref + "' not found");
       if (el.tagName !== 'INPUT' || el.type !== 'file') return err('Element is not a file input');
 
       const file = makeFile(imageData, filename);
+      if (!file) return err('Failed to decode image data');
       const dt = new DataTransfer();
       dt.items.add(file);
       el.files = dt.files;
@@ -38,12 +45,13 @@
       return { content: [{ type: 'text', text: 'Image uploaded to file input ' + ref }] };
     }
 
-    // coordinate path
+    // coordinate path — caller validates coordinate is a 2-element numeric array
     const [x, y] = coordinate;
     const target = document.elementFromPoint(x, y);
     if (!target) return err('No element at (' + x + ', ' + y + ')');
 
     const file = makeFile(imageData, filename);
+    if (!file) return err('Failed to decode image data');
     const dt = new DataTransfer();
     dt.items.add(file);
 
@@ -73,13 +81,17 @@
       return { isError: true, content: [{ type: 'text', text: 'imageId parameter is required' }] };
     }
     if (!imageData) {
-      return { isError: true, content: [{ type: 'text', text: 'Failed to retrieve image from native app' }] };
+      return { isError: true, content: [{ type: 'text', text: 'imageData not available for imageId: ' + imageId }] };
     }
     if (ref && coordinate) {
       return { isError: true, content: [{ type: 'text', text: 'Provide either ref or coordinate, not both' }] };
     }
     if (!ref && !coordinate) {
       return { isError: true, content: [{ type: 'text', text: 'Provide ref or coordinate' }] };
+    }
+    if (coordinate && (!Array.isArray(coordinate) || coordinate.length < 2 ||
+        typeof coordinate[0] !== 'number' || typeof coordinate[1] !== 'number')) {
+      return { isError: true, content: [{ type: 'text', text: 'coordinate must be an array of two numbers [x, y]' }] };
     }
 
     const resolvedTabId = await globalThis.resolveTab(tabId);
@@ -89,7 +101,8 @@
 
     // If the tab is removed mid-execution Safari may never settle the executeScript
     // promise, blocking the tool. executeScriptWithTabGuard provides an onRemoved
-    // guard, settled-flag race prevention, and a 30s timeout per CLAUDE.md lifecycle rules.
+    // guard, settled-flag race prevention, and a 30s timeout (defined in
+    // tool-registry.js executeScriptWithTabGuard).
     let results;
     try {
       results = await globalThis.executeScriptWithTabGuard(

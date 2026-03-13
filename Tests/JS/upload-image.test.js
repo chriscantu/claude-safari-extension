@@ -13,14 +13,18 @@
  * T7  — neither ref nor coordinate — isError
  * T8  — imageId missing — isError
  * T9  — custom filename — File has correct name
- * T10 — ref upload triggers change event handler
+ * T10 — ref upload triggers both change and input event handlers
  * T11 — tab not accessible (executeScript throws) — rejects with classified error
  * T12 — large image base64 (~5MB) — uploads without error
+ * T13 — invalid base64 in imageData — isError from injected IIFE
+ * T14 — resolveTab returns null — isError
+ * T15 — tab closed mid-execution — re-throws without classification
  *
- * DOM injection tests (T1, T2, T9, T10, T12) evaluate injected code via
+ * DOM injection tests (T1, T2, T9, T10, T12, T13) evaluate injected code via
  * vm.runInNewContext so that the real injected IIFE runs and return values /
  * event dispatch can be verified.
- * Validation/error tests (T3-T8) mock executeScript entirely; T11 expects a throw.
+ * Validation/error tests (T3-T8, T14) mock executeScript entirely.
+ * T11 and T15 expect a throw.
  *
  * KNOWN GAP — DataTransfer.files assignment:
  *   jsdom does not propagate el.files = dt.files back to the input's FileList.
@@ -118,6 +122,7 @@ function makeDomBrowserMock() {
           Event:        globalThis.Event,
           DragEvent:    globalThis.DragEvent || globalThis.MouseEvent,
           atob:         globalThis.atob,
+          CSS:          globalThis.CSS || { escape: (s) => String(s).replace(/[!"#$%&'()*+,./:;<=>?@[\\\]^`{|}~]/g, '\\$&').replace(/^\d/, '\\3$& ') },
         };
         return [vm.runInNewContext(code, sandbox)];
       }),
@@ -226,12 +231,12 @@ describe('upload_image tool', () => {
     expect(result.content[0].text).toMatch(/drag-drop/);
   });
 
-  // T3 — imageData absent
-  test('T3: absent imageData returns isError', async () => {
+  // T3 — imageData absent (ToolRouter failed to inject it — defensive guard)
+  test('T3: absent imageData returns isError with imageId in message', async () => {
     const handler = loadUploadImage({ browser: makeMockBrowser() });
     const result = await handler({ imageId: 'id1', ref: 'r' });
     expect(result.isError).toBe(true);
-    expect(result.content[0].text).toMatch(/retrieve/i);
+    expect(result.content[0].text).toMatch(/imageData.*id1|id1.*imageData/i);
   });
 
   // T4 — ref not found
@@ -293,20 +298,23 @@ describe('upload_image tool', () => {
     expect(result.isError).toBeFalsy();
   });
 
-  // T10 — change event fires
-  test('T10: ref upload dispatches change event on the file input', async () => {
+  // T10 — change and input events fire
+  test('T10: ref upload dispatches both change and input events on the file input', async () => {
     const input = document.createElement('input');
     input.type = 'file';
     input.setAttribute('data-claude-ref', 'ref-evt');
     document.body.appendChild(input);
 
     let changeCount = 0;
+    let inputCount = 0;
     input.addEventListener('change', () => { changeCount++; });
+    input.addEventListener('input', () => { inputCount++; });
 
     const handler = loadUploadImage({ browser: makeDomBrowserMock() });
     await handler({ imageId: 'id1', imageData: TINY_PNG_B64, ref: 'ref-evt' });
 
     expect(changeCount).toBe(1);
+    expect(inputCount).toBe(1);
   });
 
   // T11 — tab not accessible
@@ -335,5 +343,45 @@ describe('upload_image tool', () => {
     const result = await handler({ imageId: 'id1', imageData: largePng, ref: 'ref-large' });
 
     expect(result.isError).toBeFalsy();
+  });
+
+  // T13 — invalid base64 causes makeFile to return null inside the injected IIFE
+  // Uses vm.runInNewContext so atob actually throws (jsdom sandbox provides real atob).
+  test('T13: invalid base64 in imageData returns isError from injected IIFE', async () => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.setAttribute('data-claude-ref', 'ref-bad64');
+    document.body.appendChild(input);
+
+    const handler = loadUploadImage({ browser: makeDomBrowserMock() });
+    const result = await handler({ imageId: 'id1', imageData: 'not!!valid$$base64', ref: 'ref-bad64' });
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toMatch(/decode|image/i);
+  });
+
+  // T14 — resolveTab returns null → isError before executeScript is called
+  test('T14: resolveTab returning null returns isError', async () => {
+    const handler = loadUploadImage({
+      browser: makeMockBrowser(),
+      resolveTab: jest.fn(async () => null),
+    });
+    const result = await handler({ imageId: 'id1', imageData: TINY_PNG_B64, ref: 'r' });
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toMatch(/cannot access tab/i);
+  });
+
+  // T15 — tab closed mid-execution re-throws without classifyExecuteScriptError
+  // The "was closed during" branch in the catch block must pass the error through
+  // unchanged so the caller gets a clear tab-lifecycle error.
+  test('T15: tab-closed error re-throws without classification', async () => {
+    const handler = loadUploadImage({ browser: makeMockBrowser() });
+    // Override after load so the handler uses our mock at call time.
+    globalThis.executeScriptWithTabGuard = jest.fn(async () => {
+      throw new Error('Tab was closed during executeScript');
+    });
+    await expect(
+      handler({ imageId: 'id1', imageData: TINY_PNG_B64, ref: 'r' })
+    ).rejects.toThrow(/was closed during/i);
   });
 });
