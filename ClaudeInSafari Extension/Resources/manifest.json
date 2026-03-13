@@ -27,6 +27,7 @@
             "tools/javascript-tool.js",
             "tools/read-console.js",
             "tools/read-network.js",
+            "tools/upload-image.js",
             "background.js"
         ],
         "persistent": false
