@@ -49,7 +49,7 @@ class FileService {
 
     private func readFile(path: String) -> Result<FileDescriptor, FileReadError> {
         // 1. Reject .. components
-        if path.contains("..") {
+        if URL(fileURLWithPath: path).pathComponents.contains("..") {
             return .failure(.dotDotComponent(path: path))
         }
         // 2. Must be absolute
@@ -65,12 +65,17 @@ class FileService {
         guard fm.fileExists(atPath: resolvedPath) else {
             return .failure(.notFound(path: path))
         }
+        // Fetch attributes once for both directory check and size check
+        let attrs = try? fm.attributesOfItem(atPath: resolvedPath)
+        // 4a. Reject directories
+        if let type = attrs?[.type] as? FileAttributeType, type == .typeDirectory {
+            return .failure(.notReadable(path: path))
+        }
         // 5. Check readability
         guard fm.isReadableFile(atPath: resolvedPath) else {
             return .failure(.notReadable(path: path))
         }
         // 6. Check size
-        let attrs = try? fm.attributesOfItem(atPath: resolvedPath)
         let fileSize = (attrs?[.size] as? Int) ?? 0
         guard fileSize <= Self.maxFileSize else {
             return .failure(.tooLarge(path: path, size: fileSize))
@@ -88,6 +93,7 @@ class FileService {
         ))
     }
 
+    /// Internal (not private) to allow direct testing in FileServiceTests.
     func mimeType(for path: String) -> String {
         let ext = (path as NSString).pathExtension
         if !ext.isEmpty, let utType = UTType(filenameExtension: ext) {
