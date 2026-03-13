@@ -448,6 +448,29 @@ describe('file_upload tool', () => {
     expect(result.content[0].text).toMatch(/files array was empty/i);
   });
 
+  // T_executeScriptError — executeScript throws a generic error → classified and rethrown
+  test('T_executeScriptError: executeScript throwing non-tab-closed error → rejects with classified error', async () => {
+    const handler = loadFileUpload({
+      browser: makeMockBrowser({ scriptError: new Error('Cannot access tab') }),
+    });
+    const files = [{ base64: TINY_TXT_B64, filename: 'x.txt', mimeType: 'text/plain', size: 5 }];
+    await expect(
+      handler({ files, ref: 'r' })
+    ).rejects.toThrow(/Cannot access tab/i);
+  });
+
+  // T_tabClosedRethrow — "was closed during" error is re-thrown unchanged, not classified
+  test('T_tabClosedRethrow: tab-closed error re-throws without classification', async () => {
+    const handler = loadFileUpload({ browser: makeMockBrowser() });
+    globalThis.executeScriptWithTabGuard = jest.fn(async () => {
+      throw new Error('Tab was closed during executeScript');
+    });
+    const files = [{ base64: TINY_TXT_B64, filename: 'x.txt', mimeType: 'text/plain', size: 5 }];
+    await expect(
+      handler({ files, ref: 'r' })
+    ).rejects.toThrow(/was closed during/i);
+  });
+
   // T12 — resolveTab returns null → isError: Cannot access tab
   test('T12: resolveTab returning null → isError: Cannot access tab', async () => {
     const handler = loadFileUpload({
