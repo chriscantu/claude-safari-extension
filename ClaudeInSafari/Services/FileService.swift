@@ -11,6 +11,7 @@ class FileService {
     enum FileReadError: Error {
         case dotDotComponent(path: String)
         case notAbsolute(path: String)
+        case isDirectory(path: String)
         case notFound(path: String)
         case notReadable(path: String)
         case tooLarge(path: String, size: Int)
@@ -19,6 +20,7 @@ class FileService {
             switch self {
             case .dotDotComponent(let p): return "Path must not contain '..' components: \(p)"
             case .notAbsolute(let p):     return "Path must be absolute: \(p)"
+            case .isDirectory(let p):     return "Path is a directory, not a file: \(p)"
             case .notFound(let p):        return "File not found: \(p)"
             case .notReadable(let p):     return "Cannot read file: \(p)"
             case .tooLarge(let p, _):     return "File exceeds 100 MB limit: \(p)"
@@ -33,9 +35,10 @@ class FileService {
         let size: Int
     }
 
-    static let maxFileSize = 100 * 1024 * 1024  // 100 MB
+    static let maxFileSizeBytes = 100 * 1024 * 1024  // 100 MB
 
-    /// Reads all paths fail-fast: stops at the first invalid or unreadable path.
+    /// Reads each path in order, fail-fast. Returns an ordered array of FileDescriptor
+    /// values — one per input path — or the first error encountered.
     func readFiles(paths: [String]) -> Result<[FileDescriptor], FileReadError> {
         var descriptors: [FileDescriptor] = []
         for path in paths {
@@ -48,13 +51,13 @@ class FileService {
     }
 
     private func readFile(path: String) -> Result<FileDescriptor, FileReadError> {
-        // 1. Reject .. components
-        if URL(fileURLWithPath: path).pathComponents.contains("..") {
-            return .failure(.dotDotComponent(path: path))
-        }
-        // 2. Must be absolute
+        // 1. Must be absolute
         guard path.hasPrefix("/") else {
             return .failure(.notAbsolute(path: path))
+        }
+        // 2. Reject .. components (path is absolute, so URL won't resolve against cwd)
+        if URL(fileURLWithPath: path).pathComponents.contains("..") {
+            return .failure(.dotDotComponent(path: path))
         }
         // 3. Resolve symlinks transparently
         let resolvedURL = URL(fileURLWithPath: path).resolvingSymlinksInPath()
@@ -66,23 +69,32 @@ class FileService {
             return .failure(.notFound(path: path))
         }
         // Fetch attributes once for both directory check and size check
-        let attrs = try? fm.attributesOfItem(atPath: resolvedPath)
-        // 4a. Reject directories
-        if let type = attrs?[.type] as? FileAttributeType, type == .typeDirectory {
+        let attrs: [FileAttributeKey: Any]
+        do {
+            attrs = try fm.attributesOfItem(atPath: resolvedPath)
+        } catch {
             return .failure(.notReadable(path: path))
+        }
+        // 4a. Reject directories
+        if let type = attrs[.type] as? FileAttributeType, type == .typeDirectory {
+            return .failure(.isDirectory(path: path))
         }
         // 5. Check readability
         guard fm.isReadableFile(atPath: resolvedPath) else {
             return .failure(.notReadable(path: path))
         }
         // 6. Check size
-        let fileSize = (attrs?[.size] as? Int) ?? 0
-        guard fileSize <= Self.maxFileSize else {
+        let fileSize = (attrs[.size] as? Int) ?? 0
+        guard fileSize <= Self.maxFileSizeBytes else {
             return .failure(.tooLarge(path: path, size: fileSize))
         }
         // 7. Read contents
         guard let data = fm.contents(atPath: resolvedPath) else {
             return .failure(.notReadable(path: path))
+        }
+        // Post-read guard: re-validate size in case the file grew between attribute check and read
+        guard data.count <= Self.maxFileSizeBytes else {
+            return .failure(.tooLarge(path: path, size: data.count))
         }
 
         return .success(FileDescriptor(

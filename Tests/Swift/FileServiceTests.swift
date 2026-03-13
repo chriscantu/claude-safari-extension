@@ -115,15 +115,15 @@ final class FileServiceTests: XCTestCase {
         XCTAssertEqual(descriptors[0].filename, "real.txt")
     }
 
-    // Directory guard — directory path must return .notReadable
+    // Directory guard — directory path must return .isDirectory
     func test_readFiles_directory_returnsNotReadable() {
         // tmpDir is a real directory
         let result = service.readFiles(paths: [tmpDir.path])
         guard case .failure(let err) = result else {
             XCTFail("Expected failure for directory path"); return
         }
-        XCTAssertTrue(err.userMessage.lowercased().contains("cannot read"),
-                      "Expected 'Cannot read' in message, got: \(err.userMessage)")
+        XCTAssertTrue(err.userMessage.lowercased().contains("directory"),
+                      "Expected 'directory' in message, got: \(err.userMessage)")
     }
 
     // T9 — file larger than 100 MB limit
@@ -151,7 +151,7 @@ final class FileServiceTests: XCTestCase {
         FileManager.default.createFile(atPath: oversizedPath.path, contents: Data())
         let handle = try! FileHandle(forWritingTo: oversizedPath)
         // Seek to 101 MB and write one byte to create a sparse file with logical size > 100 MB
-        let targetSize = FileService.maxFileSize + 1  // 100 MB + 1 byte
+        let targetSize = FileService.maxFileSizeBytes + 1  // 100 MB + 1 byte
         handle.seek(toFileOffset: UInt64(targetSize))
         handle.write(Data([0x00]))
         handle.closeFile()

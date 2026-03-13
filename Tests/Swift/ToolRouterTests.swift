@@ -365,6 +365,7 @@ final class ToolRouterTests: XCTestCase {
         let expectedBase64 = mockService.fakeImage.data.base64EncodedString()
         XCTAssertFalse(expectedBase64.isEmpty, "Expected non-empty base64 from pre-baked image")
     }
+
     // MARK: - file_upload (ToolRouter native interception)
 
     func testHandleFileUpload_missingPaths_sendsError() {
@@ -401,6 +402,24 @@ final class ToolRouterTests: XCTestCase {
         XCTAssertNotNil(response?["error"], "Expected error response for missing ref")
         let msg = (response?["error"] as? [String: Any])?["message"] as? String ?? ""
         XCTAssertTrue(msg.contains("ref"), "Expected 'ref' in error: \(msg)")
+    }
+
+    func testHandleFileUpload_emptyPathsArray_sendsError() {
+        let mock = MockMCPSocketServer()
+        router = ToolRouter(screenshotService: ScreenshotService(), gifService: GifService(), fileService: FileService())
+        router.setServer(mock)
+
+        let data = try! JSONSerialization.data(withJSONObject: [
+            "jsonrpc": "2.0", "id": 13,
+            "method": "tools/call",
+            "params": ["name": "file_upload", "arguments": ["paths": [], "ref": "upload-ref"]]
+        ])
+        router.socketServer(mock, didReceiveMessage: data, from: "client1")
+
+        let response = mock.lastSentJSON()
+        XCTAssertNotNil(response?["error"], "Expected error for empty paths array")
+        let msg = (response?["error"] as? [String: Any])?["message"] as? String ?? ""
+        XCTAssertTrue(msg.contains("paths"), "Expected 'paths' in error: \(msg)")
     }
 
     func testHandleFileUpload_validPathsAndRef_reachesForwardToExtension() {
