@@ -432,6 +432,22 @@ describe('file_upload tool', () => {
     expect(result.isError).toBe(true);
   });
 
+  // T_emptyFileObjects — IIFE: empty files array after processing → isError
+  test('T_emptyFileObjects: empty files array in IIFE → isError with clear message', async () => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.setAttribute('data-claude-ref', 'empty-ref');
+    document.body.appendChild(input);
+
+    const handler = loadFileUpload({ browser: makeDomBrowserMock() });
+    // Pass an empty array — bypasses the handler-level guard (which checks !files)
+    // but the IIFE guard fires after the decode loop produces no fileObjects
+    const result = await handler({ files: [], ref: 'empty-ref' });
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toMatch(/files array was empty/i);
+  });
+
   // T12 — resolveTab returns null → isError: Cannot access tab
   test('T12: resolveTab returning null → isError: Cannot access tab', async () => {
     const handler = loadFileUpload({

@@ -59,6 +59,9 @@
       if (!f || f._err) return err('Failed to decode file data: ' + descriptor.filename + (f && f._err ? ' (' + f._err + ')' : ''));
       fileObjects.push(f);
     }
+    if (fileObjects.length === 0) {
+      return err('No files were decoded — files array was empty after processing');
+    }
 
     // Inject into input
     let dt;
