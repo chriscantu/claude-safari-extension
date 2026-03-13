@@ -1,6 +1,18 @@
 import XCTest
 @testable import ClaudeInSafari
 
+private class MockMCPSocketServer: MCPSocketServer {
+    // MCPSocketServer.init requires a MessageFramer (a zero-arg struct).
+    // `send` must use `override` — base class method is `internal`.
+    init() { super.init(framer: MessageFramer()) }
+    private(set) var sentData: [Data] = []
+    override func send(data: Data, to clientId: String) { sentData.append(data) }
+    func lastSentJSON() -> [String: Any]? {
+        guard let last = sentData.last else { return nil }
+        return try? JSONSerialization.jsonObject(with: last) as? [String: Any]
+    }
+}
+
 // MARK: - ToolRouterTests
 
 /// Unit tests for ToolRouter.decodeExtensionResponse and zoom region parsing.
@@ -253,6 +265,44 @@ final class ToolRouterTests: XCTestCase {
         }
         XCTAssertEqual(dims.width, 1920.0)
         XCTAssertEqual(dims.height, 1080.0)
+    }
+
+    // MARK: - Upload Image (ToolRouter native interception)
+
+    func testHandleUploadImage_missingImageId_sendsError() {
+        let mock = MockMCPSocketServer()
+        router = ToolRouter(screenshotService: ScreenshotService(), gifService: GifService())
+        router.setServer(mock)
+
+        let data = try! JSONSerialization.data(withJSONObject: [
+            "jsonrpc": "2.0", "id": 1,
+            "method": "tools/call",
+            "params": ["name": "upload_image", "arguments": ["ref": "abc"]]
+        ])
+        router.socketServer(mock, didReceiveMessage: data, from: "client1")
+
+        let response = mock.lastSentJSON()
+        XCTAssertNotNil(response?["error"], "Expected error response for missing imageId")
+        let msg = (response?["error"] as? [String: Any])?["message"] as? String ?? ""
+        XCTAssertTrue(msg.contains("imageId"), "Expected 'imageId' in error: \(msg)")
+    }
+
+    func testHandleUploadImage_unknownImageId_sendsError() {
+        let mock = MockMCPSocketServer()
+        router = ToolRouter(screenshotService: ScreenshotService(), gifService: GifService())
+        router.setServer(mock)
+
+        let data = try! JSONSerialization.data(withJSONObject: [
+            "jsonrpc": "2.0", "id": 2,
+            "method": "tools/call",
+            "params": ["name": "upload_image", "arguments": ["imageId": "no-such-id", "ref": "abc"]]
+        ])
+        router.socketServer(mock, didReceiveMessage: data, from: "client1")
+
+        let response = mock.lastSentJSON()
+        XCTAssertNotNil(response?["error"])
+        let msg = (response?["error"] as? [String: Any])?["message"] as? String ?? ""
+        XCTAssertTrue(msg.contains("no-such-id"), "Expected imageId in error: \(msg)")
     }
 }
 

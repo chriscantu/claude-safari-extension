@@ -111,6 +111,8 @@ class ToolRouter: MCPSocketServerDelegate {
             handleResizeWindow(arguments: arguments, id: id, clientId: clientId)
         } else if toolName == "gif_creator" {
             handleGifCreator(arguments: arguments, id: id, clientId: clientId)
+        } else if toolName == "upload_image" {
+            handleUploadImage(arguments: arguments, id: id, clientId: clientId)
         } else if nativeTools.contains(toolName) {
             sendError(id: id, code: -32000, message: "Native tool '\(toolName)' not yet implemented", to: clientId)
         } else {
@@ -380,6 +382,29 @@ class ToolRouter: MCPSocketServerDelegate {
         return nil
     }
 
+    // MARK: - Native Upload Image
+
+    private func handleUploadImage(arguments: [String: Any], id: Any?, clientId: String) {
+        guard let imageId = arguments["imageId"] as? String, !imageId.isEmpty else {
+            sendError(id: id, code: -32000, message: "imageId parameter is required", to: clientId)
+            return
+        }
+        guard let captured = screenshotService.retrieveImage(imageId: imageId) else {
+            sendError(id: id, code: -32000, message: "Image not found: \(imageId)", to: clientId)
+            return
+        }
+        let base64 = captured.data.base64EncodedString()
+        var enrichedArgs = arguments
+        enrichedArgs["imageData"] = base64
+        let queued = QueuedToolRequest(
+            requestId: UUID().uuidString,
+            tool: "upload_image",
+            args: enrichedArgs.mapValues { AnyCodable($0) },
+            context: NativeMessageContext(clientId: clientId, tabGroupId: nil)
+        )
+        forwardToExtension(queued, id: id, clientId: clientId, arguments: enrichedArgs)
+    }
+
     // MARK: - Extension Forwarding
 
     private func forwardToExtension(_ queued: QueuedToolRequest, id: Any?, clientId: String,
@@ -635,10 +660,11 @@ class ToolRouter: MCPSocketServerDelegate {
             "clear": prop("boolean", "If true, clear requests after reading")
         ]),
         tool("upload_image", "Upload a previously captured screenshot to a file input or drag & drop target.", [
-            "imageId": prop("string", "ID of a previously captured screenshot"),
-            "tabId": prop("number", "Tab ID"),
-            "ref": prop("string", "Element reference ID for file inputs"),
-            "filename": prop("string", "Optional filename for the uploaded file")
+            "imageId":    prop("string", "ID of a previously captured screenshot"),
+            "tabId":      prop("number", "Tab ID"),
+            "ref":        prop("string", "Element reference ID for file inputs"),
+            "coordinate": prop("array",  "Viewport [x, y] coordinates for drag-drop targets"),
+            "filename":   prop("string", "Optional filename for the uploaded file")
         ]),
         tool("file_upload", "Upload one or multiple files from the local filesystem to a file input element.", [
             "paths": prop("array", "Absolute paths to the files to upload"),
