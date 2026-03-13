@@ -89,7 +89,7 @@
     if (!ref && !coordinate) {
       return { isError: true, content: [{ type: 'text', text: 'Provide ref or coordinate' }] };
     }
-    if (coordinate && (!Array.isArray(coordinate) || coordinate.length < 2 ||
+    if (coordinate && (!Array.isArray(coordinate) || coordinate.length !== 2 ||
         typeof coordinate[0] !== 'number' || typeof coordinate[1] !== 'number')) {
       return { isError: true, content: [{ type: 'text', text: 'coordinate must be an array of two numbers [x, y]' }] };
     }
@@ -103,6 +103,8 @@
     // promise, blocking the tool. executeScriptWithTabGuard provides an onRemoved
     // guard, settled-flag race prevention, and a 30s timeout (defined in
     // tool-registry.js executeScriptWithTabGuard).
+    // @note MV2 non-persistent risk: see executeScriptWithTabGuard JSDoc in tool-registry.js
+    // for background-page suspension caveats.
     let results;
     try {
       results = await globalThis.executeScriptWithTabGuard(
