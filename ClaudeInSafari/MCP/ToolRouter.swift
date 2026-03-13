@@ -30,6 +30,10 @@ class ToolRouter: MCPSocketServerDelegate {
     /// being silently forwarded to the extension (useful while developing a new native handler).
     private let nativeTools: Set<String> = []
 
+    /// Last enrichedArgs assembled in handleFileUpload success path — exposed for unit testing only.
+    /// Set to nil between calls. Do not use in production logic.
+    var _testLastFileUploadEnrichedArgs: [String: Any]?
+
     /// Maps requestId → (clientId, jsonrpcId) for in-flight extension calls.
     private var pendingRequests = [String: (clientId: String, jsonrpcId: Any?)]()
     /// Maps requestId → (toolName, arguments) for gif post-action hook context.
@@ -423,8 +427,9 @@ class ToolRouter: MCPSocketServerDelegate {
         if let rawPaths = arguments["paths"] as? [Any], !rawPaths.isEmpty {
             let mapped = rawPaths.compactMap { $0 as? String }
             guard mapped.count == rawPaths.count else {
+                let badIndex = rawPaths.firstIndex(where: { !($0 is String) }) ?? -1
                 sendError(id: id, code: -32000,
-                          message: "paths is required and must be a non-empty array",
+                          message: "paths must be an array of strings; element at index \(badIndex) was not a string",
                           to: clientId)
                 return
             }
@@ -443,9 +448,11 @@ class ToolRouter: MCPSocketServerDelegate {
 
         switch fileService.readFiles(paths: paths) {
         case .failure(let error):
+            NSLog("handleFileUpload: readFiles failed for clientId=%@ — %@", clientId, error.userMessage)
             sendError(id: id, code: -32000, message: error.userMessage, to: clientId)
         case .success(let descriptors):
             var enrichedArgs = arguments
+            enrichedArgs.removeValue(forKey: "paths")
             enrichedArgs["files"] = descriptors.map { d in
                 [
                     "base64": d.data.base64EncodedString(),
@@ -454,6 +461,7 @@ class ToolRouter: MCPSocketServerDelegate {
                     "size": d.size
                 ] as [String: Any]
             }
+            _testLastFileUploadEnrichedArgs = enrichedArgs
             let queued = QueuedToolRequest(
                 requestId: UUID().uuidString,
                 tool: "file_upload",

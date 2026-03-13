@@ -429,15 +429,15 @@ final class ToolRouterTests: XCTestCase {
                 let descriptor = FileDescriptor(
                     filename: "test.txt",
                     mimeType: "text/plain",
-                    data: Data("hello".utf8),
-                    size: 5
+                    data: Data("hello".utf8)
                 )
                 return .success([descriptor])
             }
         }
 
+        let mockFileService = MockFileService()
         let mock = MockMCPSocketServer()
-        router = ToolRouter(screenshotService: ScreenshotService(), gifService: GifService(), fileService: MockFileService())
+        router = ToolRouter(screenshotService: ScreenshotService(), gifService: GifService(), fileService: mockFileService)
         router.setServer(mock)
 
         let data = try! JSONSerialization.data(withJSONObject: [
@@ -455,6 +455,51 @@ final class ToolRouterTests: XCTestCase {
             XCTAssertFalse(msg.contains("paths") || msg.contains("ref is required"),
                            "Unexpected paths/ref error on happy path: \(msg)")
         }
+
+        // Fix K: Verify the wire payload structure assembled in the success path.
+        // _testLastFileUploadEnrichedArgs is set before forwardToExtension is called,
+        // so it is available even when enqueueToolRequest fails in the test sandbox.
+        let enriched = router._testLastFileUploadEnrichedArgs
+        XCTAssertNotNil(enriched, "enrichedArgs must be captured on the success path")
+        let files = enriched?["files"] as? [[String: Any]]
+        XCTAssertNotNil(files, "'files' key must be present in enrichedArgs")
+        XCTAssertEqual(files?.count, 1, "Expected exactly one file descriptor in 'files'")
+        if let first = files?.first {
+            XCTAssertNotNil(first["base64"], "Wire payload must contain 'base64'")
+            XCTAssertEqual(first["filename"] as? String, "test.txt", "Wire payload 'filename' must match")
+            XCTAssertEqual(first["mimeType"] as? String, "text/plain", "Wire payload 'mimeType' must match")
+            XCTAssertEqual(first["size"] as? Int, 5, "Wire payload 'size' must equal data.count")
+            let expectedBase64 = Data("hello".utf8).base64EncodedString()
+            XCTAssertEqual(first["base64"] as? String, expectedBase64, "Wire payload 'base64' must match data")
+        }
+        // Verify 'paths' was stripped from enrichedArgs (Fix H)
+        XCTAssertNil(enriched?["paths"], "'paths' key must be removed from enrichedArgs before forwarding")
+    }
+
+    // Fix J: FileService error propagation → ToolRouter sends error to client
+    func testHandleFileUpload_fileServiceReturnsError_sendsError() {
+        class MockFileService: FileService {
+            override func readFiles(paths: [String]) -> Result<[FileDescriptor], FileReadError> {
+                return .failure(.notFound(path: "/tmp/x.txt"))
+            }
+        }
+
+        let mock = MockMCPSocketServer()
+        router = ToolRouter(screenshotService: ScreenshotService(), gifService: GifService(), fileService: MockFileService())
+        router.setServer(mock)
+
+        let data = try! JSONSerialization.data(withJSONObject: [
+            "jsonrpc": "2.0", "id": 14,
+            "method": "tools/call",
+            "params": ["name": "file_upload", "arguments": ["paths": ["/tmp/x.txt"], "ref": "some-ref"]]
+        ])
+        router.socketServer(mock, didReceiveMessage: data, from: "client1")
+
+        let response = mock.lastSentJSON()
+        XCTAssertNotNil(response?["error"], "Expected error response when FileService returns failure")
+        let msg = (response?["error"] as? [String: Any])?["message"] as? String ?? ""
+        XCTAssertTrue(msg.contains("not found") || msg.contains("File not found"),
+                      "Expected 'not found' in error message, got: \(msg)")
     }
 }
 

@@ -23,7 +23,7 @@ class FileService {
             case .isDirectory(let p):     return "Path is a directory, not a file: \(p)"
             case .notFound(let p):        return "File not found: \(p)"
             case .notReadable(let p):     return "Cannot read file: \(p)"
-            case .tooLarge(let p, _):     return "File exceeds 100 MB limit: \(p)"
+            case .tooLarge(let p, let s): return "File exceeds 100 MB limit (\(s / (1024 * 1024)) MB): \(p)"
             }
         }
     }
@@ -33,6 +33,13 @@ class FileService {
         let mimeType: String
         let data: Data
         let size: Int
+
+        init(filename: String, mimeType: String, data: Data) {
+            self.filename = filename
+            self.mimeType = mimeType
+            self.data = data
+            self.size = data.count
+        }
     }
 
     static let maxFileSizeBytes = 100 * 1024 * 1024  // 100 MB
@@ -55,7 +62,9 @@ class FileService {
         guard path.hasPrefix("/") else {
             return .failure(.notAbsolute(path: path))
         }
-        // 2. Reject .. components (path is absolute, so URL won't resolve against cwd)
+        // 2. Reject paths with '..' components — URL(fileURLWithPath:) does not normalize '..' at
+        //    construction time, so a path like /tmp/../etc/passwd would pass the hasPrefix check
+        //    above but could resolve to an unintended location after symlink resolution.
         if URL(fileURLWithPath: path).pathComponents.contains("..") {
             return .failure(.dotDotComponent(path: path))
         }
@@ -73,23 +82,31 @@ class FileService {
         do {
             attrs = try fm.attributesOfItem(atPath: resolvedPath)
         } catch {
+            NSLog("FileService: attributesOfItem failed for '%@' (resolved: '%@'): %@",
+                  path, resolvedPath, error.localizedDescription)
             return .failure(.notReadable(path: path))
         }
-        // 4a. Reject directories
-        if let type = attrs[.type] as? FileAttributeType, type == .typeDirectory {
+        // 4a. Reject directories — also reject if type attribute is unreadable (fail safe)
+        let fileType = attrs[.type] as? FileAttributeType
+        if fileType == nil || fileType == .typeDirectory {
             return .failure(.isDirectory(path: path))
         }
         // 5. Check readability
         guard fm.isReadableFile(atPath: resolvedPath) else {
+            NSLog("FileService: isReadableFile returned false for '%@' (resolved: '%@')", path, resolvedPath)
             return .failure(.notReadable(path: path))
         }
-        // 6. Check size
-        let fileSize = (attrs[.size] as? Int) ?? 0
+        // 6. Check size — NSFileSize is an NSNumber wrapping UInt64; cast via NSNumber
+        guard let fileSizeNumber = attrs[.size] as? NSNumber else {
+            return .failure(.notReadable(path: path))
+        }
+        let fileSize = fileSizeNumber.intValue
         guard fileSize <= Self.maxFileSizeBytes else {
             return .failure(.tooLarge(path: path, size: fileSize))
         }
         // 7. Read contents
         guard let data = fm.contents(atPath: resolvedPath) else {
+            NSLog("FileService: contents(atPath:) returned nil for '%@' (resolved: '%@')", path, resolvedPath)
             return .failure(.notReadable(path: path))
         }
         // Post-read guard: re-validate size in case the file grew between attribute check and read
@@ -100,8 +117,7 @@ class FileService {
         return .success(FileDescriptor(
             filename: resolvedURL.lastPathComponent,
             mimeType: mimeType(for: resolvedPath),
-            data: data,
-            size: data.count
+            data: data
         ))
     }
 
