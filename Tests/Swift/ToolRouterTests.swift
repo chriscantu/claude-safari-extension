@@ -304,6 +304,24 @@ final class ToolRouterTests: XCTestCase {
         let msg = (response?["error"] as? [String: Any])?["message"] as? String ?? ""
         XCTAssertTrue(msg.contains("no-such-id"), "Expected imageId in error: \(msg)")
     }
+
+    func testHandleUploadImage_emptyImageId_sendsError() {
+        let mock = MockMCPSocketServer()
+        router = ToolRouter(screenshotService: ScreenshotService(), gifService: GifService())
+        router.setServer(mock)
+
+        let data = try! JSONSerialization.data(withJSONObject: [
+            "jsonrpc": "2.0", "id": 3,
+            "method": "tools/call",
+            "params": ["name": "upload_image", "arguments": ["imageId": "", "ref": "abc"]]
+        ])
+        router.socketServer(mock, didReceiveMessage: data, from: "client1")
+
+        let response = mock.lastSentJSON()
+        XCTAssertNotNil(response?["error"], "Expected error response for empty imageId")
+        let msg = (response?["error"] as? [String: Any])?["message"] as? String ?? ""
+        XCTAssertTrue(msg.contains("imageId"), "Expected 'imageId' in error: \(msg)")
+    }
 }
 
 // MARK: - ToolRouterGifHookTests
