@@ -98,7 +98,7 @@
 
     const resolvedTabId = await globalThis.resolveTab(tabId);
     if (resolvedTabId === null || resolvedTabId === undefined) {
-      return { isError: true, content: [{ type: 'text', text: 'Cannot access tab ' + tabId }] };
+      return { isError: true, content: [{ type: 'text', text: 'Cannot access tab ' + (tabId !== undefined ? tabId : '(default)') }] };
     }
 
     // If the tab is removed mid-execution Safari may never settle the executeScript

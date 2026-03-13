@@ -271,17 +271,20 @@ describe('file_upload tool', () => {
     input.setAttribute('data-claude-ref', 'ref-evt');
     document.body.appendChild(input);
 
-    let changeCount = 0;
-    let inputCount = 0;
-    input.addEventListener('change', () => { changeCount++; });
-    input.addEventListener('input', () => { inputCount++; });
+    const firedBubbles = [];
+    input.addEventListener('input', (e) => firedBubbles.push({ type: 'input', bubbles: e.bubbles }));
+    input.addEventListener('change', (e) => firedBubbles.push({ type: 'change', bubbles: e.bubbles }));
 
     const handler = loadFileUpload({ browser: makeDomBrowserMock() });
     const files = [{ base64: TINY_TXT_B64, filename: 'test.txt', mimeType: 'text/plain', size: 5 }];
     await handler({ files, ref: 'ref-evt' });
 
-    expect(inputCount).toBe(1);
-    expect(changeCount).toBe(1);
+    const inputEvent = firedBubbles.find(e => e.type === 'input');
+    const changeEvent = firedBubbles.find(e => e.type === 'change');
+    expect(inputEvent).toBeDefined();
+    expect(inputEvent.bubbles).toBe(true);
+    expect(changeEvent).toBeDefined();
+    expect(changeEvent.bubbles).toBe(true);
   });
 
   // T11 — application/octet-stream MIME (.wasm) → success
@@ -312,8 +315,8 @@ describe('file_upload tool', () => {
     const result = await handler({ files, ref: 'pdf-only' });
 
     expect(result.isError).toBeFalsy();
-    expect(result.content[0].text).toContain('Warning');
-    expect(result.content[0].text).toContain('photo.png');
+    expect(result.content[0].text).toContain('Warning: file input accepts ".pdf"');
+    expect(result.content[0].text).toContain('photo.png may be rejected by the page');
   });
 
   // T15 — handler: missing ref → isError
