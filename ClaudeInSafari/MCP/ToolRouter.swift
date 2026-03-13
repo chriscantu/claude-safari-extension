@@ -416,9 +416,20 @@ class ToolRouter: MCPSocketServerDelegate {
 
     /// Internal (not private) for unit testing via ToolRouterTests.
     func handleFileUpload(arguments: [String: Any], id: Any?, clientId: String) {
-        // Validate paths — must be a non-empty array of strings
-        guard let rawPaths = arguments["paths"],
-              let paths = rawPaths as? [String], !paths.isEmpty else {
+        // Validate paths — must be a non-empty array of strings.
+        // JSONSerialization.jsonObject returns [Any] for JSON arrays, never [String],
+        // so we cast to [Any] first then compactMap to [String].
+        let paths: [String]
+        if let rawPaths = arguments["paths"] as? [Any], !rawPaths.isEmpty {
+            let mapped = rawPaths.compactMap { $0 as? String }
+            guard mapped.count == rawPaths.count else {
+                sendError(id: id, code: -32000,
+                          message: "paths is required and must be a non-empty array",
+                          to: clientId)
+                return
+            }
+            paths = mapped
+        } else {
             sendError(id: id, code: -32000,
                       message: "paths is required and must be a non-empty array",
                       to: clientId)
