@@ -386,6 +386,28 @@ describe('file_upload tool', () => {
     expect(result.content[0].text).toContain('photo.png may be rejected by the page');
   });
 
+  // T13b — multiple mismatched files all named in warning
+  test('T13b: multiple accept mismatches → all filenames in warning', async () => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.multiple = true;
+    input.accept = '.pdf';
+    input.setAttribute('data-claude-ref', 'pdf-multi');
+    document.body.appendChild(input);
+
+    const handler = loadFileUpload({ browser: makeDomBrowserMock() });
+    const files = [
+      { base64: TINY_TXT_B64, filename: 'photo.png', mimeType: 'image/png', size: 5 },
+      { base64: TINY_TXT_B64, filename: 'video.mp4', mimeType: 'video/mp4', size: 5 }
+    ];
+    const result = await handler({ files, ref: 'pdf-multi' });
+
+    expect(result.isError).toBeFalsy();
+    expect(result.content[0].text).toContain('photo.png');
+    expect(result.content[0].text).toContain('video.mp4');
+    expect(result.content[0].text).toContain('Warning: file input accepts ".pdf"');
+  });
+
   // Tool registration assertion
   it('registers tool as file_upload', () => {
     loadFileUpload({ browser: makeMockBrowser() });

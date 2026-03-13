@@ -102,7 +102,8 @@
         return !acceptList.some(a => a === ext || a === mime || a === mime.split('/')[0] + '/*' || a === '*/*');
       });
       if (mismatched.length > 0) {
-        text += '\nWarning: file input accepts "' + accept + '" — ' + mismatched[0].filename + ' may be rejected by the page';
+        const names = mismatched.map(d => d.filename).join(', ');
+        text += '\nWarning: file input accepts "' + accept + '" — ' + names + ' may be rejected by the page';
       }
     }
 
