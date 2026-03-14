@@ -224,9 +224,18 @@ will block the injected `<script>` element.
 
 **Affected pages:** GitHub, Gmail, and many SPAs with strict CSPs.
 
-**Behavior:** If CSP blocks execution, the bridge returns `{error: "Script injection
-failed: ..."}`. **Do NOT** silently fall back to the isolated world — this would
-produce confusing wrong results when user code references page variables.
+**Behavior when CSP blocks `appendChild`:** The bridge `try/catch` catches the synchronous
+exception and returns `{error: "Script injection failed: ..."}` immediately via the sync
+path — this surfaces quickly as an `isError: true` response.
+
+**Behavior when CSP silently blocks `<script>` execution** (allows `appendChild` but
+blocks the script from running): The main-world script never executes, the DOM attribute
+is never written, and the handler waits through the full 30-second timeout before
+reporting "Script execution timed out". There is no way to distinguish this from
+user code that genuinely hangs. This is a known limitation.
+
+**Do NOT** silently fall back to the isolated world — this would produce confusing wrong
+results when user code references page variables.
 
 ### ⚠ browser.tabs.query Restriction in Native Messaging Context
 

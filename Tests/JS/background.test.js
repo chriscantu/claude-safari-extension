@@ -273,12 +273,14 @@ describe("background.js poll loop", () => {
         jest.runAllTimers();     // fire setTimeout(0) → executeTool starts
         await Promise.resolve(); // executeTool resolves → outer Promise resolves
         await Promise.resolve(); // pollForRequests resumes → Phase 4 sendNativeMessage queued (throws)
-        await Promise.resolve(); // Phase 4 error → console.error logged
+        await Promise.resolve(); // Phase 4 error → console.error logged → finally schedules next poll
 
         expect(console.error).toHaveBeenCalledWith(
             expect.stringContaining("send tool response"),
             expect.anything()
         );
+        // Finally block must always schedule the next poll even after Phase 4 error
+        expect(jest.getTimerCount()).toBeGreaterThan(0);
     });
 
     test("T10 — active poll: next setTimeout uses POLL_INTERVAL_MS (100ms)", async () => {

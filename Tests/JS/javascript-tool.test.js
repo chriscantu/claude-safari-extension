@@ -321,6 +321,35 @@ describe("javascript_tool", () => {
             expect(browser.tabs.onRemoved.removeListener).toHaveBeenCalled();
         });
 
+        test("onMessage with corrId but no value or error returns 'undefined'", async () => {
+            const messageListeners = [];
+            const browser = {
+                tabs: {
+                    executeScript: jest.fn(async (_tabId, { code }) => {
+                        const match = code.match(/data-claude-js-result-(__claudejstoolresult_[a-z0-9]+)/);
+                        if (match) {
+                            const corrId = match[1];
+                            setTimeout(() => {
+                                // Relay sends corrId:true but omits both value and error
+                                messageListeners.forEach(cb => cb({ [corrId]: true }));
+                            }, 0);
+                        }
+                        return [null];
+                    }),
+                    onRemoved: { addListener: jest.fn(), removeListener: jest.fn() },
+                },
+                runtime: {
+                    onMessage: {
+                        addListener: jest.fn((cb) => messageListeners.push(cb)),
+                        removeListener: jest.fn(),
+                    },
+                },
+            };
+            const handler = loadJavaScriptTool({ browser, resolveTab: jest.fn(async () => 1) });
+            const result = await handler({ action: "javascript_exec", text: "undefined" });
+            expect(result).toBe("undefined");
+        });
+
         test("ignores onMessage from unrelated correlationIds", async () => {
             const messageListeners = [];
             const browser = {
@@ -452,6 +481,23 @@ describe("javascript_tool", () => {
 
             await expect(promise).rejects.toThrow("Script execution timed out after 30 seconds");
         });
+
+        test("timeout cleans up listeners", async () => {
+            jest.useFakeTimers();
+            const browser = makeBrowserMock({ syncResult: null, asyncResult: null });
+            const handler = loadJavaScriptTool({ browser, resolveTab: jest.fn(async () => 1) });
+
+            const promise = handler({ action: "javascript_exec", text: "new Promise(()=>{})" });
+            await Promise.resolve();
+            await Promise.resolve();
+            await Promise.resolve();
+            await Promise.resolve();
+            jest.advanceTimersByTime(30000);
+
+            await expect(promise).rejects.toThrow();
+            expect(browser.runtime.onMessage.removeListener).toHaveBeenCalled();
+            expect(browser.tabs.onRemoved.removeListener).toHaveBeenCalled();
+        });
     });
 
     describe("tab closure during async execution", () => {
@@ -511,6 +557,43 @@ describe("javascript_tool", () => {
                 .rejects.toThrow();
             expect(browser.runtime.onMessage.removeListener).toHaveBeenCalled();
             expect(browser.tabs.onRemoved.removeListener).toHaveBeenCalled();
+        });
+
+        test("double-settlement: simultaneous onMessage + onTabRemoved — only first wins", async () => {
+            // Race: relay delivers result at the same tick that the tab closes.
+            // The settled flag must prevent both resolve and reject from firing.
+            const removedListeners = [];
+            const messageListeners = [];
+            const browser = {
+                tabs: {
+                    executeScript: jest.fn(async (_tabId, { code }) => {
+                        const match = code.match(/data-claude-js-result-(__claudejstoolresult_[a-z0-9]+)/);
+                        if (match) {
+                            const corrId = match[1];
+                            setTimeout(() => {
+                                // Fire both in the same tick — resolve wins (fires first)
+                                messageListeners.forEach(cb => cb({ [corrId]: true, value: "race-result" }));
+                                removedListeners.forEach(cb => cb(7));
+                            }, 0);
+                        }
+                        return [null];
+                    }),
+                    onRemoved: {
+                        addListener: jest.fn((cb) => removedListeners.push(cb)),
+                        removeListener: jest.fn(),
+                    },
+                },
+                runtime: {
+                    onMessage: {
+                        addListener: jest.fn((cb) => messageListeners.push(cb)),
+                        removeListener: jest.fn(),
+                    },
+                },
+            };
+            const handler = loadJavaScriptTool({ browser, resolveTab: jest.fn(async () => 7) });
+            // Should resolve (not reject) — onMessage fired first
+            const result = await handler({ action: "javascript_exec", text: "async" });
+            expect(result).toBe("race-result");
         });
 
         test("onRemoved for unrelated tab is ignored", async () => {
