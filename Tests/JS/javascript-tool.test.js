@@ -4,24 +4,30 @@
  * Tests for tools/javascript-tool.js
  * See Spec 012 (javascript_tool).
  *
- * Handler-layer tests mock browser.runtime.onMessage to deliver results, because
- * Safari MV2's executeScript does not await Promise return values — results[0] is
- * always null when the injected script returns a Promise. The result is delivered
- * via browser.runtime.sendMessage (content script to background) instead.
+ * Architecture: DOM attribute polling (not browser.runtime.sendMessage).
+ *
+ * The handler makes two types of executeScript calls per invocation:
+ *   Call 1 (bridge injection): runs the bridge IIFE that injects user code
+ *     into the main world; always returns null (synchronous return, no result).
+ *   Call 2+ (polling): synchronously reads and clears the result DOM attribute;
+ *     returns JSON string when ready, null when not yet.
+ *
+ * Handler-layer tests mock executeScript to return null on bridge call, then
+ * return the JSON-serialized result on the first poll call. This mirrors the
+ * real flow: main-world script sets the attribute, poll reads it.
  *
  * KNOWN GAP — main-world execution (T4, T5, T17):
  *   Page-variable access and async code require a real browser. The bridge IIFE
- *   (CSP probe, postMessage channel, AsyncFunction semantics) cannot run in jsdom
- *   because jsdom does not execute script textContent. Handler-layer tests mock
- *   the onMessage delivery; the bridge itself is validated via code-string
- *   inspection in the "bridge code validation" describe block below.
+ *   (CSP probe, AsyncFunction semantics) cannot run in jsdom because jsdom does
+ *   not execute script textContent. Handler-layer tests mock poll delivery;
+ *   the bridge itself is validated via code-string inspection below.
  *
  * KNOWN GAP — CSP probe (T16):
- *   The synchronous DOM attribute check runs in the bridge script; tests mock the
- *   returned error value rather than driving CSP policy.
+ *   The synchronous DOM attribute check runs in the bridge script; tests mock
+ *   the returned error value rather than driving CSP policy.
  *
  * KNOWN GAP — timeout (T15):
- *   30-second wall-clock timeout is mocked via onMessage error delivery.
+ *   30-second wall-clock timeout is mocked via poll error delivery.
  */
 
 "use strict";
@@ -31,51 +37,40 @@
 // ---------------------------------------------------------------------------
 
 /**
- * Returns a browser mock that delivers results via runtime.onMessage.
+ * Returns a browser mock that delivers results via executeScript polling.
  *
- * When executeScript is called, the mock extracts the correlationId from the
- * generated bridge code and fires the registered onMessage listener with the
- * result. This mirrors the real flow: bridge calls browser.runtime.sendMessage
- * which triggers the background's onMessage listener.
+ * Call 1 (bridge injection): returns [null] — bridge always returns null.
+ * Call 2+ (polling): returns [JSON.stringify(scriptResult)] immediately,
+ *   simulating the main-world script having already written the attribute.
  *
- * @param {{ scriptResult?: object, scriptError?: Error }} opts
- *   scriptResult: the { value } or { error } payload to deliver (default: { value: "ok" })
- *   scriptError:  if set, executeScript rejects with this error instead
+ * @param {{ scriptResult?: object|null, scriptError?: Error }} opts
+ *   scriptResult: the { value } or { error } payload to deliver on first poll
+ *                 (default: { value: "ok" }); null keeps returning [null] (not ready)
+ *   scriptError:  if set, bridge executeScript (call 1) rejects with this error
  */
 function makeBrowserMock(opts = {}) {
     const { scriptResult = { value: "ok" }, scriptError = null } = opts;
 
-    const messageListeners = [];
+    let callCount = 0;
 
     return {
         tabs: {
-            executeScript: jest.fn(async (_tabId, { code }) => {
-                if (scriptError) throw scriptError;
-                // Extract correlationId from bridge code: it is the last argument to the
-                // IIFE call — )(JSON.stringify(text), JSON.stringify(correlationId))
-                const match = code.match(/,\s*("__claudeJsToolResult_[^"]*")\s*\)\s*$/);
-                if (match && scriptResult !== null) {
-                    const corrId = JSON.parse(match[1]);
-                    // Deliver result asynchronously (simulates bridge's sendMessage arriving
-                    // after executeScript resolves — which happens in the next microtask)
-                    Promise.resolve().then(() => {
-                        messageListeners.forEach(cb => cb({ [corrId]: true, ...scriptResult }));
-                    });
+            executeScript: jest.fn(async (_tabId, _execOpts) => {
+                callCount++;
+                if (callCount === 1) {
+                    // Bridge injection — always returns null in Safari MV2.
+                    if (scriptError) throw scriptError;
+                    return [null];
                 }
-                return null; // Safari MV2 always returns null for Promise-returning scripts
+                // Poll call — return result immediately (or null if scriptResult is null).
+                if (scriptResult !== null) {
+                    return [JSON.stringify(scriptResult)];
+                }
+                return [null];
             }),
             onRemoved: {
                 addListener: jest.fn(),
                 removeListener: jest.fn(),
-            },
-        },
-        runtime: {
-            onMessage: {
-                addListener: jest.fn((cb) => messageListeners.push(cb)),
-                removeListener: jest.fn((cb) => {
-                    const idx = messageListeners.indexOf(cb);
-                    if (idx !== -1) messageListeners.splice(idx, 1);
-                }),
             },
         },
     };
@@ -210,14 +205,14 @@ describe("javascript_tool", () => {
             expect(result).toContain("outerHTML");
         });
 
-        test("executeScript returning null is normal (Safari MV2 behavior) and does not reject", async () => {
-            // In real Safari, executeScript always returns null when the bridge returns a Promise.
-            // Result arrives via runtime.onMessage instead.
+        test("bridge executeScript returns null (Safari MV2 behavior) and result arrives via poll", async () => {
+            // Bridge call always returns null in real Safari; result comes from the poll call.
             const browser = makeBrowserMock({ scriptResult: { value: "42" } });
             const handler = loadJavaScriptTool({ browser, resolveTab: jest.fn(async () => 1) });
             const result = await handler({ action: "javascript_exec", text: "42" });
             expect(result).toBe("42");
-            expect(browser.tabs.executeScript).toHaveBeenCalledTimes(1);
+            // Two calls: bridge + at least one poll
+            expect(browser.tabs.executeScript).toHaveBeenCalledTimes(2);
         });
     });
 
@@ -299,6 +294,24 @@ describe("javascript_tool", () => {
                 .rejects.toThrow(/tabs_context_mcp/);
         });
 
+        test("poll executeScript error: classifyExecuteScriptError wraps with guidance", async () => {
+            // Bridge succeeds; poll fails (e.g. tab navigated away between calls).
+            let callCount = 0;
+            const browser = {
+                tabs: {
+                    executeScript: jest.fn(async () => {
+                        callCount++;
+                        if (callCount === 1) return [null]; // bridge succeeds
+                        throw new Error("No tab with id 1");  // poll fails
+                    }),
+                    onRemoved: { addListener: jest.fn(), removeListener: jest.fn() },
+                },
+            };
+            const handler = loadJavaScriptTool({ browser, resolveTab: jest.fn(async () => 1) });
+            await expect(handler({ action: "javascript_exec", text: "1+1" }))
+                .rejects.toThrow(/tabs_context_mcp/);
+        });
+
         test("tab closed during execution rejects with tab-closed error immediately", async () => {
             // executeScript hangs forever; onRemoved fires immediately to win the race.
             const browser = {
@@ -306,12 +319,6 @@ describe("javascript_tool", () => {
                     executeScript: jest.fn(() => new Promise(() => {})),
                     onRemoved: {
                         addListener: jest.fn((cb) => { cb(7); }),
-                        removeListener: jest.fn(),
-                    },
-                },
-                runtime: {
-                    onMessage: {
-                        addListener: jest.fn(),
                         removeListener: jest.fn(),
                     },
                 },
@@ -328,27 +335,12 @@ describe("javascript_tool", () => {
             expect(browser.tabs.onRemoved.removeListener).toHaveBeenCalled();
         });
 
-        test("onRemoved listener is removed when executeScript throws", async () => {
+        test("onRemoved listener is removed when bridge executeScript throws", async () => {
             const browser = makeBrowserMock({ scriptError: new Error("No tab with id 1") });
             const handler = loadJavaScriptTool({ browser, resolveTab: jest.fn(async () => 1) });
             await expect(handler({ action: "javascript_exec", text: "1" }))
                 .rejects.toThrow();
             expect(browser.tabs.onRemoved.removeListener).toHaveBeenCalled();
-        });
-
-        test("onMessage listener is removed on successful execution", async () => {
-            const browser = makeBrowserMock({ scriptResult: { value: "ok" } });
-            const handler = loadJavaScriptTool({ browser, resolveTab: jest.fn(async () => 1) });
-            await handler({ action: "javascript_exec", text: "1" });
-            expect(browser.runtime.onMessage.removeListener).toHaveBeenCalled();
-        });
-
-        test("onMessage listener is removed when executeScript throws", async () => {
-            const browser = makeBrowserMock({ scriptError: new Error("No tab with id 1") });
-            const handler = loadJavaScriptTool({ browser, resolveTab: jest.fn(async () => 1) });
-            await expect(handler({ action: "javascript_exec", text: "1" }))
-                .rejects.toThrow();
-            expect(browser.runtime.onMessage.removeListener).toHaveBeenCalled();
         });
     });
 
@@ -396,39 +388,38 @@ describe("javascript_tool", () => {
 
     describe("bridge code validation", () => {
         async function captureGeneratedCode(userCode) {
-            let capturedCode = null;
+            let capturedBridgeCode = null;
+            let capturedPollCode = null;
+            let callCount = 0;
             const browser = {
                 tabs: {
                     executeScript: jest.fn(async (_tabId, { code }) => {
-                        capturedCode = code;
-                        // Don't deliver a result — we just want the code string
-                        return null;
+                        callCount++;
+                        if (callCount === 1) {
+                            capturedBridgeCode = code;
+                        } else {
+                            capturedPollCode = code;
+                            // Return a result to settle the handler promise
+                            return [JSON.stringify({ value: "ok" })];
+                        }
+                        return [null];
                     }),
                     onRemoved: { addListener: jest.fn(), removeListener: jest.fn() },
                 },
-                runtime: {
-                    onMessage: {
-                        addListener: jest.fn(),
-                        removeListener: jest.fn(),
-                    },
-                },
             };
             const handler = loadJavaScriptTool({ browser, resolveTab: jest.fn(async () => 1) });
-            // Don't await — handler will hang waiting for onMessage; we only need the code
-            handler({ action: "javascript_exec", text: userCode }).catch(() => {});
-            // executeScript is synchronous in the mock, so capturedCode is set by the next tick
-            await Promise.resolve();
-            return capturedCode;
+            await handler({ action: "javascript_exec", text: userCode });
+            return { bridgeCode: capturedBridgeCode, pollCode: capturedPollCode };
         }
 
         test("generated bridge code embeds the correlationId as the last IIFE argument", async () => {
-            const code = await captureGeneratedCode("1+1");
-            expect(code).toMatch(/,\s*"__claudeJsToolResult_[^"]+"\s*\)\s*$/);
+            const { bridgeCode } = await captureGeneratedCode("1+1");
+            expect(bridgeCode).toMatch(/,\s*"__claudeJsToolResult_[^"]+"\s*\)\s*$/);
         });
 
         test("correlationId is unique per invocation (nonce-suffixed)", async () => {
-            const code1 = await captureGeneratedCode("1+1");
-            const code2 = await captureGeneratedCode("2+2");
+            const { bridgeCode: code1 } = await captureGeneratedCode("1+1");
+            const { bridgeCode: code2 } = await captureGeneratedCode("2+2");
             const id1 = code1.match(/,\s*("__claudeJsToolResult_[^"]+")\s*\)\s*$/)?.[1];
             const id2 = code2.match(/,\s*("__claudeJsToolResult_[^"]+")\s*\)\s*$/)?.[1];
             expect(id1).toBeTruthy();
@@ -437,32 +428,48 @@ describe("javascript_tool", () => {
         });
 
         test("generated code embeds MAX_OUTPUT numeric value", async () => {
-            const code = await captureGeneratedCode("1+1");
-            expect(code).toContain("100000");
+            const { bridgeCode } = await captureGeneratedCode("1+1");
+            expect(bridgeCode).toContain("100000");
         });
 
-        test("generated bridge code calls browser.runtime.sendMessage with corrId key", async () => {
-            const code = await captureGeneratedCode("1+1");
-            expect(code).toContain("browser.runtime.sendMessage");
-            expect(code).toContain("corrId");
+        test("generated bridge code writes result to data-claude-js-result- DOM attribute", async () => {
+            const { bridgeCode } = await captureGeneratedCode("1+1");
+            expect(bridgeCode).toContain("data-claude-js-result-");
+            expect(bridgeCode).toContain("setAttribute");
+        });
+
+        test("generated poll code reads and removes data-claude-js-result- DOM attribute", async () => {
+            const { pollCode } = await captureGeneratedCode("1+1");
+            expect(pollCode).toContain("data-claude-js-result-");
+            expect(pollCode).toContain("getAttribute");
+            expect(pollCode).toContain("removeAttribute");
+        });
+
+        test("bridge and poll code share the same correlationId", async () => {
+            const { bridgeCode, pollCode } = await captureGeneratedCode("1+1");
+            const corrId = bridgeCode.match(/,\s*("__claudeJsToolResult_[^"]+")\s*\)\s*$/)?.[1];
+            expect(corrId).toBeTruthy();
+            // Poll code must reference the same corrId (unquoted, as part of attr name)
+            const expectedAttr = "data-claude-js-result-" + JSON.parse(corrId);
+            expect(pollCode).toContain(expectedAttr);
         });
 
         test("generated code uses AsyncFunction for last-expression return semantics", async () => {
-            const code = await captureGeneratedCode("1+1");
-            expect(code).toContain("AsyncFunc");
-            expect(code).toContain("return eval(arguments[0])");
+            const { bridgeCode } = await captureGeneratedCode("1+1");
+            expect(bridgeCode).toContain("AsyncFunc");
+            expect(bridgeCode).toContain("return eval(arguments[0])");
         });
 
         test("user code with double-quotes is safely JSON-encoded in generated code", async () => {
             const userCode = 'document.querySelector("h1").textContent';
-            const code = await captureGeneratedCode(userCode);
-            expect(code).toContain(JSON.stringify(userCode));
+            const { bridgeCode } = await captureGeneratedCode(userCode);
+            expect(bridgeCode).toContain(JSON.stringify(userCode));
         });
 
         test("user code appears JSON-encoded (not raw-concatenated) in generated code", async () => {
             const userCode = "const x = '</script>'; x";
-            const code = await captureGeneratedCode(userCode);
-            expect(code).toContain(JSON.stringify(userCode));
+            const { bridgeCode } = await captureGeneratedCode(userCode);
+            expect(bridgeCode).toContain(JSON.stringify(userCode));
         });
     });
 });

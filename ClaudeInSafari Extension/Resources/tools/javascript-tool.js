@@ -4,28 +4,31 @@
  * Executes arbitrary JavaScript in the active tab's page main world.
  *
  * Safari MV2 has no browser.scripting.executeScript with world:"MAIN", so
- * execution uses a two-phase bridge:
- *   Phase 1 — content script (isolated world) injected via executeScript
- *   Phase 2 — content script injects a <script> element → runs in main world
- *   Result   — main world script sends result via window.postMessage; content
- *              script resolves its returned Promise with the result object.
+ * execution uses a two-phase approach:
  *
- * Result channel: browser.runtime.sendMessage (NOT executeScript return value).
- * Safari MV2's executeScript does not await Promise return values from injected
- * scripts — results[0] is always null. The bridge calls browser.runtime.sendMessage
- * with a per-call correlationId; handleJavaScriptTool waits on browser.runtime.onMessage
- * for the matching reply.
+ *   Phase 1 — bridge injection (single executeScript):
+ *     A content script (isolated world) is injected via executeScript. It runs
+ *     a synchronous CSP probe, then injects a <script> element that runs user
+ *     code in the main world. The main-world script writes its result or error
+ *     to a DOM attribute on document.documentElement, keyed on correlationId.
  *
- * The correlationId is generated in the background, passed to the bridge as its
- * second IIFE argument, and used as the key for both the window.postMessage channel
- * (main world to content script) and the sendMessage channel (content script to
- * background). One nonce covers both channels.
+ *   Phase 2 — result polling (repeated executeScript):
+ *     The background polls by calling executeScript with a synchronous read of
+ *     the DOM attribute. When the attribute is present, the poll script removes
+ *     it and returns the JSON-serialized result. The background parses it and
+ *     settles the promise.
+ *
+ * Why DOM-attribute polling instead of browser.runtime.sendMessage:
+ *   executeScript-injected scripts run in an ephemeral isolated-world context
+ *   that does not persist for async operations after the IIFE returns. Any
+ *   window.addEventListener or browser.runtime.sendMessage call scheduled
+ *   after the IIFE completes is silently dropped. Synchronous executeScript
+ *   return values, by contrast, work reliably in Safari MV2.
  *
  * CSP detection: before the main-world script is injected, a synchronous probe
  * <script> element mutates a DOM attribute. If the attribute is unchanged after
- * appendChild, CSP blocks inline scripts and we return an error immediately
- * without waiting for the 30-second timeout. The corrId is used as the probe
- * attribute suffix, preventing concurrent calls from sharing the same probe.
+ * appendChild, CSP blocks inline scripts and the bridge writes a CSP error to
+ * the result attribute immediately. The first poll picks it up.
  *
  * AsyncFunction semantics: the main-world script uses AsyncFunction constructor
  * with an inner function call to provide console-like last-expression return
@@ -47,9 +50,11 @@
 
 "use strict";
 
-const RESULT_FLAG  = "__claudeJsToolResult";
-const MAX_OUTPUT   = 100000;
-const TIMEOUT_MS   = 30000;
+const RESULT_FLAG        = "__claudeJsToolResult";
+const RESULT_ATTR_PREFIX = "data-claude-js-result-";
+const MAX_OUTPUT         = 100000;
+const TIMEOUT_MS         = 30000;
+const POLL_INTERVAL_MS   = 100;
 
 // ---------------------------------------------------------------------------
 // IIFE builder
@@ -59,50 +64,27 @@ const TIMEOUT_MS   = 30000;
  * Builds the bridge content script that runs in the isolated world.
  *
  * The bridge:
- *   1. Runs a synchronous CSP probe to detect blocked inline scripts early.
- *   2. Registers a window.postMessage listener keyed on corrId.
- *   3. Injects a <script> element (main world) that runs user code and posts
- *      the result back via window.postMessage({ [corrId]: true, value/error }).
- *   4. On receiving the postMessage, calls browser.runtime.sendMessage to deliver
- *      the result to the background handler waiting on browser.runtime.onMessage.
+ *   1. Runs a synchronous CSP probe. On failure, writes error to the result
+ *      attribute and returns immediately (poll will pick it up).
+ *   2. Builds a main-world script that runs user code and writes the result
+ *      (or error) to document.documentElement[RESULT_ATTR_PREFIX + corrId].
+ *   3. Injects the main-world script via a <script> element and returns.
  *
  * Security:
  *   - text is JSON-serialized at build time — never raw-concatenated.
  *   - correlationId is JSON-serialized at build time.
- *   - event.source === window guards against cross-origin iframe spoofing.
- *   - postMessage spoofing by same-page scripts is an accepted risk given the
- *     local-machine MCP trust boundary.
+ *   - The result attribute name includes the corrId, so concurrent calls
+ *     write to distinct attributes.
  *
  * @param {string} text          - The user-provided JavaScript code to execute.
- * @param {string} correlationId - Per-call nonce; key for postMessage and sendMessage channels.
+ * @param {string} correlationId - Per-call nonce; used as the DOM attribute suffix.
  * @returns {string} JS source for browser.tabs.executeScript code option.
  */
 function buildJavaScriptExecScript(text, correlationId) {
     return `(function(userCode, corrId) {
         "use strict";
         var MAX_OUT = ${MAX_OUTPUT};
-        var TIMEOUT = ${TIMEOUT_MS};
-
-        var settled = false;
-        var timer;
-
-        function settle(data) {
-            if (settled) return;
-            settled = true;
-            clearTimeout(timer);
-            window.removeEventListener("message", onMessage);
-            browser.runtime.sendMessage({ [corrId]: true, value: data.value, error: data.error });
-        }
-
-        // event.source === window rejects messages from cross-origin iframes.
-        // Same-page scripts could still forge the flag — accepted risk given
-        // the local-machine MCP trust boundary (see file-level JSDoc).
-        function onMessage(event) {
-            if (event.source !== window) return;
-            if (event.data && event.data[corrId]) {
-                settle(event.data);
-            }
-        }
+        var resultAttr = ${JSON.stringify(RESULT_ATTR_PREFIX)} + corrId;
 
         // --- Synchronous CSP probe ---
         // A <script> without async/defer executes synchronously on appendChild.
@@ -115,32 +97,27 @@ function buildJavaScriptExecScript(text, correlationId) {
         try {
             (document.head || document.documentElement).appendChild(probe);
         } catch (appendErr) {
-            settle({ error: "Cannot inject script: document has no injectable parent element (" + appendErr.message + ")" });
+            document.documentElement.setAttribute(resultAttr, JSON.stringify({ error: "Cannot inject script: document has no injectable parent element (" + appendErr.message + ")" }));
             return;
         }
         probe.remove();
 
         if (probe.getAttribute(probeAttr) !== "ok") {
-            settle({ error: "Page Content Security Policy blocks script execution. The page's CSP does not allow inline scripts." });
+            document.documentElement.setAttribute(resultAttr, JSON.stringify({ error: "Page Content Security Policy blocks script execution. The page's CSP does not allow inline scripts." }));
             return;
         }
 
-        // Register listener before starting the timer: canonical order per
-        // CLAUDE.md event listener lifecycle guidance — listener first, then timer, then inject.
-        window.addEventListener("message", onMessage);
-
-        timer = setTimeout(function() {
-            settle({ error: "Script execution timed out after 30 seconds" });
-        }, TIMEOUT);
-
         // Build and inject main-world script.
-        // userCode is embedded via JSON.stringify(userCode) at bridge-build time
-        // (in the IIFE, before injection) — not at background-page build time.
+        // userCode is embedded via JSON.stringify at bridge-build time — not raw-concatenated.
         //
         // AsyncFunction constructor with inner function call gives console-like semantics:
         //   last expression value is returned, await is valid inside.
+        //
+        // The result is written to a DOM attribute, which persists across JS worlds
+        // and is readable by subsequent isolated-world executeScript poll calls.
         var mainScript = [
             "(async function() {",
+            "  var rAttr = " + JSON.stringify(resultAttr) + ";",
             "  try {",
             "    var AsyncFunc = Object.getPrototypeOf(async function(){}).constructor;",
             "    var fn = new AsyncFunc('return eval(arguments[0])');",
@@ -153,13 +130,13 @@ function buildJavaScriptExecScript(text, correlationId) {
             "        output = Object.prototype.toString.call(result) + ' (DOM element \\u2014 use .outerHTML or .textContent to serialize)';",
             "      } else {",
             "        try { output = JSON.stringify(result, null, 2); }",
-            "        catch(circ) { window.postMessage({ [" + JSON.stringify(corrId) + "]: true, error: 'Result contains circular references' }, '*'); return; }",
+            "        catch(circ) { document.documentElement.setAttribute(rAttr, JSON.stringify({error: 'Result contains circular references'})); return; }",
             "      }",
             "    } else {",
             "      output = String(result);",
             "    }",
             "    if (output.length > " + MAX_OUT + ") output = output.slice(0, " + MAX_OUT + ") + '\\n[output truncated]';",
-            "    window.postMessage({ [" + JSON.stringify(corrId) + "]: true, value: output }, '*');",
+            "    document.documentElement.setAttribute(rAttr, JSON.stringify({value: output}));",
             "  } catch(e) {",
             "    var msg;",
             "    if (e instanceof Error) {",
@@ -167,7 +144,7 @@ function buildJavaScriptExecScript(text, correlationId) {
             "    } else {",
             "      try { msg = JSON.stringify(e, null, 2); } catch(_) { msg = String(e); }",
             "    }",
-            "    window.postMessage({ [" + JSON.stringify(corrId) + "]: true, error: msg }, '*');",
+            "    document.documentElement.setAttribute(rAttr, JSON.stringify({error: msg}));",
             "  }",
             "})();"
         ].join("\\n");
@@ -177,11 +154,37 @@ function buildJavaScriptExecScript(text, correlationId) {
         try {
             (document.head || document.documentElement).appendChild(script);
         } catch (injectErr) {
-            settle({ error: "Script injection failed: " + injectErr.message });
+            document.documentElement.setAttribute(resultAttr, JSON.stringify({ error: "Script injection failed: " + injectErr.message }));
             return;
         }
         script.remove();
+        // Bridge returns synchronously. The main-world script runs async;
+        // the background will poll the DOM attribute for the result.
     })(${JSON.stringify(text)}, ${JSON.stringify(correlationId)})`;
+}
+
+// ---------------------------------------------------------------------------
+// Poll script builder
+// ---------------------------------------------------------------------------
+
+/**
+ * Builds a synchronous poll script that reads and clears the result attribute.
+ *
+ * Returns the JSON-serialized result string if the attribute is present,
+ * or null if the main-world script has not written it yet.
+ *
+ * Safari MV2 executeScript reliably returns synchronous (non-Promise) values.
+ *
+ * @param {string} correlationId - Per-call nonce matching the bridge injection.
+ * @returns {string} JS source for browser.tabs.executeScript code option.
+ */
+function buildPollScript(correlationId) {
+    const attr = JSON.stringify(RESULT_ATTR_PREFIX + correlationId);
+    return `(function() {
+        var r = document.documentElement.getAttribute(${attr});
+        if (r !== null) { document.documentElement.removeAttribute(${attr}); return r; }
+        return null;
+    })()`;
 }
 
 // ---------------------------------------------------------------------------
@@ -208,27 +211,18 @@ async function handleJavaScriptTool(args) {
 
     return new Promise((resolve, reject) => {
         let settled = false;
-        let timer;
+        let pollTimer = null;
+        const deadline = Date.now() + TIMEOUT_MS;
 
         function settle(value, isError) {
             if (settled) return;
             settled = true;
-            clearTimeout(timer);
-            browser.runtime.onMessage.removeListener(onMessage);
+            clearTimeout(pollTimer);
             browser.tabs.onRemoved.removeListener(onTabRemoved);
             if (isError) {
                 reject(value instanceof Error ? value : new Error(value));
             } else {
                 resolve(value);
-            }
-        }
-
-        function onMessage(message) {
-            if (!message || !message[correlationId]) return;
-            if (message.error) {
-                settle(message.error, true);
-            } else {
-                settle(message.value !== undefined ? String(message.value) : "undefined", false);
             }
         }
 
@@ -238,16 +232,57 @@ async function handleJavaScriptTool(args) {
             }
         }
 
-        browser.runtime.onMessage.addListener(onMessage);
+        function poll() {
+            if (settled) return;
+            if (Date.now() >= deadline) {
+                settle("Script execution timed out after 30 seconds", true);
+                return;
+            }
+            browser.tabs.executeScript(realTabId, {
+                code: buildPollScript(correlationId),
+                runAt: "document_idle",
+            }).then((results) => {
+                if (settled) return;
+                const raw = results && results[0];
+                if (raw) {
+                    let parsed;
+                    try {
+                        parsed = JSON.parse(raw);
+                    } catch (e) {
+                        settle("Failed to parse result: " + e.message, true);
+                        return;
+                    }
+                    if (parsed.error) {
+                        settle(parsed.error, true);
+                    } else {
+                        settle(parsed.value !== undefined ? String(parsed.value) : "undefined", false);
+                    }
+                } else {
+                    // Result not ready — schedule next poll.
+                    pollTimer = setTimeout(poll, POLL_INTERVAL_MS);
+                }
+            }).catch((err) => {
+                if (settled) return;
+                const classified = typeof globalThis.classifyExecuteScriptError === "function"
+                    ? globalThis.classifyExecuteScriptError("javascript_tool", realTabId, err)
+                    : err;
+                settle(classified, true);
+            });
+        }
+
         browser.tabs.onRemoved.addListener(onTabRemoved);
 
-        timer = setTimeout(() => {
-            settle("Script execution timed out after 30 seconds", true);
-        }, TIMEOUT_MS);
-
+        // Phase 1: inject bridge to run user code in the main world.
         browser.tabs.executeScript(realTabId, {
             code: buildJavaScriptExecScript(text, correlationId),
             runAt: "document_idle",
+        }).then(() => {
+            // Phase 2: start polling for the result attribute.
+            // poll() is called without an initial delay so that synchronous
+            // user code (e.g. "1 + 1") resolves in the next microtask.
+            // Async user code will not be ready yet; poll() schedules itself
+            // with POLL_INTERVAL_MS until the attribute appears or timeout fires.
+            poll();
         }).catch((err) => {
             if (settled) return;
             const classified = typeof globalThis.classifyExecuteScriptError === "function"
