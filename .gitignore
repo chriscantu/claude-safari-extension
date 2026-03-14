@@ -21,6 +21,8 @@ DerivedData/
 
 # Claude
 .claude/
+!.claude/skills/
+!.claude/skills/**
 
 # Dependencies
 node_modules/
