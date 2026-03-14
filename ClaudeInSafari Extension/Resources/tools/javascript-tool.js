@@ -51,10 +51,10 @@
 "use strict";
 
 const RESULT_FLAG        = "__claudeJsToolResult";
-const RESULT_ATTR_PREFIX = "data-claude-js-result-";
-const MAX_OUTPUT         = 100000;
-const TIMEOUT_MS         = 30000;
-const POLL_INTERVAL_MS   = 100;
+const RESULT_ATTR_PREFIX  = "data-claude-js-result-";
+const MAX_OUTPUT          = 100000;
+const TIMEOUT_MS          = 30000;
+const JS_TOOL_POLL_MS     = 100;  // distinct from background.js POLL_INTERVAL_MS
 
 // ---------------------------------------------------------------------------
 // IIFE builder
@@ -259,7 +259,7 @@ async function handleJavaScriptTool(args) {
                     }
                 } else {
                     // Result not ready — schedule next poll.
-                    pollTimer = setTimeout(poll, POLL_INTERVAL_MS);
+                    pollTimer = setTimeout(poll, JS_TOOL_POLL_MS);
                 }
             }).catch((err) => {
                 if (settled) return;
@@ -281,7 +281,7 @@ async function handleJavaScriptTool(args) {
             // poll() is called without an initial delay so that synchronous
             // user code (e.g. "1 + 1") resolves in the next microtask.
             // Async user code will not be ready yet; poll() schedules itself
-            // with POLL_INTERVAL_MS until the attribute appears or timeout fires.
+            // with JS_TOOL_POLL_MS until the attribute appears or timeout fires.
             poll();
         }).catch((err) => {
             if (settled) return;
