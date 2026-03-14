@@ -78,6 +78,15 @@ Then repeat Step 5 (Allow Unsigned Extensions resets).
 
 ## Standard Recovery After Any Code Change
 
+**For JavaScript changes** (background.js, tool handlers, content scripts):
+```fish
+make safari-restart
+# Re-enable "Allow Unsigned Extensions" + extension in Settings
+make health
+```
+Safari caches the background page JS — `make kill && make run` is NOT enough for JS changes. A full Safari restart is required.
+
+**For Swift-only changes** (no JS modified):
 ```fish
 make kill && make build && make run && make health
 ```

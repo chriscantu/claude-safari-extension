@@ -80,11 +80,28 @@ async function refreshStaleness(tabEntry) {
 async function resolveTab(virtualTabId) {
     // null / undefined → active tab
     if (virtualTabId == null) {
-        const [activeTab] = await browser.tabs.query({ active: true, currentWindow: true });
-        if (!activeTab) {
-            throw new Error("No active tab found in the current window");
+        // Safari MV2's browser.tabs.query is unreliable in several scenarios:
+        // - After native app relaunch (make kill && make run)
+        // - When called from sendNativeMessage callback context
+        // - During focus transitions between Safari, Inspector, and Terminal
+        // Retry with increasing delays to ride out transient unavailability.
+        for (let attempt = 0; attempt < 3; attempt++) {
+            if (attempt > 0) {
+                await new Promise(r => setTimeout(r, attempt * 300));
+            }
+            let [activeTab] = await browser.tabs.query({ active: true, lastFocusedWindow: true });
+            if (!activeTab) {
+                [activeTab] = await browser.tabs.query({ active: true, currentWindow: true });
+            }
+            if (!activeTab) {
+                const allActive = await browser.tabs.query({ active: true });
+                activeTab = allActive.find(t => !t.url?.startsWith("safari-extension://")) || allActive[0];
+            }
+            if (activeTab) {
+                return activeTab.id;
+            }
         }
-        return activeTab.id;
+        throw new Error("No active tab found in the current window");
     }
 
     const state = await readState();

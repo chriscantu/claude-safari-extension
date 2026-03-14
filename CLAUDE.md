@@ -34,7 +34,8 @@ See `docs/debugging.md` for the full troubleshooting guide. Key rules:
 - **Never run `xcodebuild clean` alone.** The first build after a clean produces an invalid app signature, causing pluginkit to silently drop the extension and it disappears from Safari Settings. Always use `make clean` (which runs `clean build` in one invocation) or just `make build`.
 - **Never use `pluginkit -e use/ignore`.** Force-overriding pluginkit state conflicts with Safari's native extension management and can prevent the background page from loading. Use `pluginkit -e default` to reset, or don't touch pluginkit at all.
 - **`make kill` kills zombie Xcode debug processes.** Xcode's debugserver can hold the app process in `TX` (stopped) state, blocking extension loading. Always use `make kill` rather than `pkill` directly.
-- **`make dev` never restarts Safari.** Safari restart resets "Allow Unsigned Extensions". Use `make reload-ext` for JS-only changes; `make safari-restart` only as a last resort.
+- **Safari caches background page JS.** After `make kill && make run`, Safari does NOT reload the extension's JavaScript. Every JS change (background.js, tool handlers, content scripts) requires `make safari-restart`. Swift-only changes work with just `make kill && make build && make run`.
+- **`make dev` never restarts Safari.** Safari restart resets "Allow Unsigned Extensions". Use `make safari-restart` for JS changes; avoid it for Swift-only changes.
 - **Standard recovery when extension stops loading:** `make kill && make build && make run && make health`. If health fails: toggle extension in Settings, check Allow Unsigned Extensions. If still failing: `make safari-restart`.
 
 ## Chrome Extension Reference

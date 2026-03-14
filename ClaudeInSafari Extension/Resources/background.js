@@ -73,9 +73,22 @@ async function pollForRequests() {
         }
 
         // Phase 3: execute the tool
+        // IMPORTANT: Yield to the event loop before executing the tool.
+        // Safari MV2 restricts browser.tabs.query (and possibly other tab APIs)
+        // when called from within a sendNativeMessage response handler. By
+        // dispatching via setTimeout(0), the tool runs in a fresh microtask
+        // outside the native-messaging callback context.
         let result;
         try {
-            result = await globalThis.executeTool(payload.tool, payload.args, payload.context);
+            result = await new Promise((resolve, reject) => {
+                setTimeout(async () => {
+                    try {
+                        resolve(await globalThis.executeTool(payload.tool, payload.args, payload.context));
+                    } catch (e) {
+                        reject(e);
+                    }
+                }, 0);
+            });
         } catch (error) {
             console.error("Poll: tool execution error for", payload.tool, ":", error);
             try {

@@ -40,7 +40,8 @@
             "js": [
                 "content-scripts/accessibility-tree.js",
                 "content-scripts/console-monitor.js",
-                "content-scripts/network-monitor.js"
+                "content-scripts/network-monitor.js",
+                "content-scripts/js-bridge-relay.js"
             ],
             "run_at": "document_start",
             "all_frames": true
