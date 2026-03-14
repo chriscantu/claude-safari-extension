@@ -105,6 +105,8 @@ claude-safari-extension/
 │   └── validate-injected-scripts.js         # CI: syntax-check IIFE code strings in tool files
 │
 ├── docs/
+│   ├── debugging.md                         # Extension troubleshooting guide (read before debugging)
+│   ├── regression-tests.md                  # Manual regression checklist
 │   └── plans/                               # Implementation plans (one per feature, YYYY-MM-DD-<feature>.md)
 │
 └── Specs/                                   # Feature specifications (one per feature)
