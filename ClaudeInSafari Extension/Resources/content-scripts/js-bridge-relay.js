@@ -56,11 +56,15 @@ setInterval(function pollJsResults() {
                 [corrId]: true,
                 value: parsed.value,
                 error: parsed.error,
+            }).catch(function(sendErr) {
+                console.error("js-bridge-relay: sendMessage failed for", corrId, sendErr);
             });
         } catch (parseErr) {
             browser.runtime.sendMessage({
                 [corrId]: true,
                 error: "Failed to parse script result: " + parseErr.message,
+            }).catch(function(sendErr) {
+                console.error("js-bridge-relay: sendMessage (parse error path) failed for", corrId, sendErr);
             });
         }
     }

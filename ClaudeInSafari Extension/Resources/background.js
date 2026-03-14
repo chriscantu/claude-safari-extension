@@ -76,8 +76,11 @@ async function pollForRequests() {
         // IMPORTANT: Yield to the event loop before executing the tool.
         // Safari MV2 restricts browser.tabs.query (and possibly other tab APIs)
         // when called from within a sendNativeMessage response handler. By
-        // dispatching via setTimeout(0), the tool runs in a fresh microtask
-        // outside the native-messaging callback context.
+        // dispatching via setTimeout(0), the tool runs in a fresh macrotask
+        // (next task queue entry) outside the native-messaging callback's current turn.
+        // NOTE: This pattern is safe only because "persistent": true prevents the
+        // background page from being torn down between setTimeout scheduling and
+        // callback execution.
         let result;
         try {
             result = await new Promise((resolve, reject) => {

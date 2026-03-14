@@ -4,15 +4,13 @@
  * Executes arbitrary JavaScript in the active tab's page main world.
  *
  * Architecture: executeScript injects a bridge IIFE into the isolated world.
- * The bridge creates a <script> element whose content evals the user code in
- * the main world and writes the result to a DOM attribute on <html>. Because
- * <script> content runs synchronously during appendChild, the attribute is
- * set before appendChild returns. The bridge reads it back and returns it as
- * the executeScript result (sync path).
+ * The bridge creates a <script> element whose content evals the user code (wrapped
+ * in an async IIFE) in the main world. The async IIFE always returns a Promise, so
+ * the result is always written by the .then() callback after appendChild returns.
+ * js-bridge-relay.js (persistent content script) polls for the DOM attribute and
+ * relays the result to the background via sendMessage (async path).
  *
- * For async code (eval returns a Promise), the result is written later by
- * the .then() callback. js-bridge-relay.js (persistent content script) polls
- * for it and relays via sendMessage (async path).
+ * The async IIFE wrapper enables `await` syntax at the top level of user code.
  *
  * See Spec 012 (javascript-tool).
  */
@@ -30,24 +28,25 @@ const TIMEOUT_MS  = 30000;
 function buildBridge(text, correlationId) {
     const attr = "data-claude-js-result-" + correlationId;
 
-    // Main-world script: eval user code, write result to DOM attribute.
+    // Main-world script: eval user code inside an async IIFE, write result to DOM attribute.
+    // Wrapping in async IIFE allows `await` syntax at the top level of user code (e.g.
+    // `await fetch(...).then(r => r.json())`). The result is always a Promise, so results
+    // are always delivered via the .then() relay path through js-bridge-relay.js.
     // Built here as a plain string, then JSON.stringify'd for embedding.
     const mainWorld =
         "(function(){" +
         "var a=" + JSON.stringify(attr) + ";" +
         "function wr(d){document.documentElement.setAttribute(a,JSON.stringify(d))}" +
         "try{" +
-        "var r=eval(" + JSON.stringify(text) + ");" +
-        "if(r&&typeof r==='object'&&typeof r.then==='function'){" +
+        "var r=(async function(){return eval(" + JSON.stringify(text) + ")})();" +
         "r.then(function(v){var s=(v===undefined)?'undefined':(typeof v==='string'?v:JSON.stringify(v,null,2)||'[circular]');if(s.length>" + MAX_OUTPUT + ")s=s.slice(0," + MAX_OUTPUT + ")+'\\n[truncated]';wr({value:s})},function(e){wr({error:String(e)})})" +
-        "}else{" +
-        "var s=(r===undefined)?'undefined':(typeof r==='string'?r:JSON.stringify(r,null,2)||'[circular]');if(s.length>" + MAX_OUTPUT + ")s=s.slice(0," + MAX_OUTPUT + ")+'\\n[truncated]';wr({value:s})" +
-        "}" +
         "}catch(e){wr({error:'JavaScript error: '+e.message+'\\n'+(e.stack||'')})}" +
         "})()";
 
     // Bridge IIFE: runs in isolated world via executeScript.
-    // Pattern matches the "mini bridge" that was verified working.
+    // The main-world script always resolves asynchronously (async IIFE), so the attribute
+    // is never set before appendChild returns. The bridge always returns null and the
+    // async relay (js-bridge-relay.js) picks up the result via DOM attribute polling.
     return (
         "(function(){" +
         "var s=document.createElement('script');" +
@@ -56,7 +55,7 @@ function buildBridge(text, correlationId) {
         "var a=" + JSON.stringify(attr) + ";" +
         "var r=document.documentElement.getAttribute(a);" +
         "if(r){document.documentElement.removeAttribute(a);s.remove();return r}" +
-        "return null" +
+        "s.remove();return null" +
         "})()"
     );
 }

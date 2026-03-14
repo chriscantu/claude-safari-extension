@@ -89,16 +89,25 @@ async function resolveTab(virtualTabId) {
             if (attempt > 0) {
                 await new Promise(r => setTimeout(r, attempt * 300));
             }
-            let [activeTab] = await browser.tabs.query({ active: true, lastFocusedWindow: true });
-            if (!activeTab) {
-                [activeTab] = await browser.tabs.query({ active: true, currentWindow: true });
-            }
-            if (!activeTab) {
-                const allActive = await browser.tabs.query({ active: true });
-                activeTab = allActive.find(t => !t.url?.startsWith("safari-extension://")) || allActive[0];
-            }
-            if (activeTab) {
-                return activeTab.id;
+            try {
+                let [activeTab] = await browser.tabs.query({ active: true, lastFocusedWindow: true });
+                if (!activeTab) {
+                    [activeTab] = await browser.tabs.query({ active: true, currentWindow: true });
+                }
+                if (!activeTab) {
+                    const allActive = await browser.tabs.query({ active: true });
+                    activeTab = allActive.find(t => !t.url?.startsWith("safari-extension://")) || allActive[0];
+                }
+                if (activeTab) {
+                    return activeTab.id;
+                }
+            } catch (queryErr) {
+                // browser.tabs.query can hard-reject during focus transitions or after
+                // native app relaunch. Swallow and retry — on final attempt, fall through
+                // to the "No active tab" throw below.
+                if (attempt === 2) {
+                    console.warn("resolveTab: tabs.query rejected on all attempts:", queryErr);
+                }
             }
         }
         throw new Error("No active tab found in the current window");
