@@ -28,9 +28,10 @@
             "tools/read-console.js",
             "tools/read-network.js",
             "tools/upload-image.js",
+            "tools/file-upload.js",
             "background.js"
         ],
-        "persistent": false
+        "persistent": true
     },
 
     "content_scripts": [

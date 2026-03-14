@@ -17,7 +17,8 @@
  *  11. tools/read-console.js   — registers read_console_messages
  *  12. tools/read-network.js   — registers read_network_requests
  *  13. tools/upload-image.js   — registers upload_image
- *  14. background.js           — this file; starts the poll loop
+ *  14. tools/file-upload.js    — registers file_upload
+ *  15. background.js           — this file; starts the poll loop
  */
 
 const POLL_INTERVAL_MS = 100;
@@ -126,17 +127,20 @@ if (typeof browser.alarms !== "undefined") {
     // background page suspension where ToolRouter timed out before we could respond.
     // If the alarm already fired (alarms.get returns undefined), remove the storage
     // entry so the next handleWait call doesn't mistake it for a live resume.
-    browser.storage.session.get("computer-wait-alarmName").then((stored) => {
-        const alarmName = stored["computer-wait-alarmName"];
-        if (!alarmName) return;
-        return browser.alarms.get(alarmName).then((alarm) => {
-            if (!alarm) {
-                return browser.storage.session.remove("computer-wait-alarmName");
-            }
+    // Guard browser.storage.session — it may be absent in some Safari builds.
+    if (browser.storage?.session) {
+        browser.storage.session.get("computer-wait-alarmName").then((stored) => {
+            const alarmName = stored["computer-wait-alarmName"];
+            if (!alarmName) return;
+            return browser.alarms.get(alarmName).then((alarm) => {
+                if (!alarm) {
+                    return browser.storage.session.remove("computer-wait-alarmName");
+                }
+            });
+        }).catch((err) => {
+            console.warn("computer: stale alarm cleanup failed (non-critical):", err);
         });
-    }).catch((err) => {
-        console.warn("computer: stale alarm cleanup failed (non-critical):", err);
-    });
+    }
 }
 
 // Start polling when the extension loads

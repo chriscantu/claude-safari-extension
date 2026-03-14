@@ -7,25 +7,32 @@ class ToolRouter: MCPSocketServerDelegate {
     private let screenshotService: ScreenshotService
     private let appleScriptBridge = AppleScriptBridge()
     private let gifService: GifService
+    private let fileService: FileService
 
     // Production init — all services created fresh
     convenience init() {
         self.init(
             screenshotService: ScreenshotService(),
-            gifService: GifService()
+            gifService: GifService(),
+            fileService: FileService()
         )
     }
 
     // Testable init — inject mock services for unit tests
-    init(screenshotService: ScreenshotService, gifService: GifService) {
+    init(screenshotService: ScreenshotService, gifService: GifService, fileService: FileService) {
         self.screenshotService = screenshotService
         self.gifService = gifService
+        self.fileService = fileService
     }
 
     /// Staging set for native tools whose handler branch is not yet wired up in handleToolCall().
     /// Empty by default. Add a tool name here to have it return "not yet implemented" instead of
     /// being silently forwarded to the extension (useful while developing a new native handler).
     private let nativeTools: Set<String> = []
+
+    /// Last enrichedArgs assembled in handleFileUpload success path — exposed for unit testing only.
+    /// Set to nil between calls. Do not use in production logic.
+    var _testLastFileUploadEnrichedArgs: [String: Any]?
 
     /// Maps requestId → (clientId, jsonrpcId) for in-flight extension calls.
     private var pendingRequests = [String: (clientId: String, jsonrpcId: Any?)]()
@@ -113,6 +120,8 @@ class ToolRouter: MCPSocketServerDelegate {
             handleGifCreator(arguments: arguments, id: id, clientId: clientId)
         } else if toolName == "upload_image" {
             handleUploadImage(arguments: arguments, id: id, clientId: clientId)
+        } else if toolName == "file_upload" {
+            handleFileUpload(arguments: arguments, id: id, clientId: clientId)
         } else if nativeTools.contains(toolName) {
             sendError(id: id, code: -32000, message: "Native tool '\(toolName)' not yet implemented", to: clientId)
         } else {
@@ -405,6 +414,63 @@ class ToolRouter: MCPSocketServerDelegate {
             context: NativeMessageContext(clientId: clientId, tabGroupId: nil)
         )
         forwardToExtension(queued, id: id, clientId: clientId, arguments: enrichedArgs)
+    }
+
+    // MARK: - Native File Upload
+
+    /// Internal (not private) for unit testing via ToolRouterTests.
+    func handleFileUpload(arguments: [String: Any], id: Any?, clientId: String) {
+        _testLastFileUploadEnrichedArgs = nil
+        // Validate paths — must be a non-empty array of strings.
+        // JSONSerialization.jsonObject returns [Any] for JSON arrays, never [String],
+        // so we cast to [Any] first then compactMap to [String].
+        let paths: [String]
+        if let rawPaths = arguments["paths"] as? [Any], !rawPaths.isEmpty {
+            let mapped = rawPaths.compactMap { $0 as? String }
+            guard mapped.count == rawPaths.count else {
+                let badIndex = rawPaths.firstIndex(where: { !($0 is String) }) ?? -1
+                sendError(id: id, code: -32000,
+                          message: "paths must be an array of strings; element at index \(badIndex) was not a string",
+                          to: clientId)
+                return
+            }
+            paths = mapped
+        } else {
+            sendError(id: id, code: -32000,
+                      message: "paths is required and must be a non-empty array",
+                      to: clientId)
+            return
+        }
+        // Validate ref — must be present and non-empty
+        guard let ref = arguments["ref"] as? String, !ref.isEmpty else {
+            sendError(id: id, code: -32000, message: "ref parameter is required", to: clientId)
+            return
+        }
+
+        switch fileService.readFiles(paths: paths) {
+        case .failure(let error):
+            NSLog("handleFileUpload: readFiles failed for clientId=%@ — %@", clientId, error.userMessage)
+            sendError(id: id, code: -32000, message: error.userMessage, to: clientId)
+        case .success(let descriptors):
+            var enrichedArgs = arguments
+            enrichedArgs.removeValue(forKey: "paths")
+            enrichedArgs["files"] = descriptors.map { d in
+                [
+                    "base64": d.data.base64EncodedString(),
+                    "filename": d.filename,
+                    "mimeType": d.mimeType,
+                    "size": d.size
+                ] as [String: Any]
+            }
+            _testLastFileUploadEnrichedArgs = enrichedArgs
+            let queued = QueuedToolRequest(
+                requestId: UUID().uuidString,
+                tool: "file_upload",
+                args: enrichedArgs.mapValues { AnyCodable($0) },
+                context: NativeMessageContext(clientId: clientId, tabGroupId: nil)
+            )
+            forwardToExtension(queued, id: id, clientId: clientId, arguments: enrichedArgs)
+        }
     }
 
     // MARK: - Extension Forwarding

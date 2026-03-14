@@ -248,24 +248,29 @@ make send TOOL=form_input ARGS='{"ref":"<select_ref>","value":"<option_value>"}'
 
 ## 7  JavaScript Tool
 
+> **Known issue:** `javascript_tool` currently returns "executeScript returned no result" in Safari MV2
+> because Safari does not await Promises returned by `browser.tabs.executeScript`. This is a
+> pre-existing bug (not introduced by any specific PR). Track fix in a separate issue.
+> The parameter name in this tool is `text` (not `code`); the tool spec (Spec 012) matches.
+
 ```fish
 make send TOOL=navigate ARGS='{"url":"https://example.com"}'
-make send TOOL=javascript_tool ARGS='{"action":"javascript_exec","code":"document.title"}'
+make send TOOL=javascript_tool ARGS='{"action":"javascript_exec","text":"document.title"}'
 ```
 
-- [ ] Returns `"Example Domain"` (or current page title)
+- [ ] Returns `"Example Domain"` (or current page title) *(currently fails — known issue)*
 
 ```fish
-make send TOOL=javascript_tool ARGS='{"action":"javascript_exec","code":"1 + 1"}'
+make send TOOL=javascript_tool ARGS='{"action":"javascript_exec","text":"1 + 1"}'
 ```
 
-- [ ] Returns `"2"`
+- [ ] Returns `"2"` *(currently fails — known issue)*
 
 ```fish
-make send TOOL=javascript_tool ARGS='{"action":"javascript_exec","code":"await fetch(\"https://example.com\").then(r => r.status)"}'
+make send TOOL=javascript_tool ARGS='{"action":"javascript_exec","text":"await fetch(\"https://example.com\").then(r => r.status)"}'
 ```
 
-- [ ] Returns `"200"` (async code resolved correctly)
+- [ ] Returns `"200"` (async code resolved correctly) *(currently fails — known issue)*
 
 ---
 
@@ -273,9 +278,13 @@ make send TOOL=javascript_tool ARGS='{"action":"javascript_exec","code":"await f
 
 ### 8.1  read_console_messages
 
+> **Note:** javascript_tool is used here to generate a console message. If javascript_tool is
+> broken (see Section 7 known issue), skip the `javascript_tool` step and check for any
+> pre-existing console messages instead.
+
 ```fish
 make send TOOL=navigate ARGS='{"url":"https://example.com"}'
-make send TOOL=javascript_tool ARGS='{"action":"javascript_exec","code":"console.log(\"regression-test\")"}'
+make send TOOL=javascript_tool ARGS='{"action":"javascript_exec","text":"console.log(\"regression-test\")"}'
 make send TOOL=read_console_messages ARGS='{"tabId":1}'
 ```
 
@@ -425,12 +434,16 @@ make send TOOL=upload_image ARGS='{"imageId":"<imageId>","ref":"<file-input-ref>
 
 - [ ] Image from screenshot appears in the file input
 
-### 13.2  Navigate → read_page → click → verify navigation
+### 13.2  Navigate → find → click → verify navigation
+
+> **Note:** `computer` ref-clicks require `data-claude-ref` DOM attributes, which are set by
+> `find.js` only — NOT by `read_page`/`accessibility-tree.js` (which uses an in-memory WeakRef
+> map). Always use `find` to get refs for `computer`, not `read_page`.
 
 ```fish
 make send TOOL=navigate ARGS='{"url":"https://example.com"}'
-make send TOOL=read_page ARGS='{}'
-# Find the "More information..." link ref_id
+make send TOOL=find ARGS='{"query":"Learn more"}'
+# Note the ref value (e.g. ref_2)
 make send TOOL=computer ARGS='{"action":"left_click","ref":"<ref_id>"}'
 make send TOOL=get_page_text ARGS='{}'
 ```
@@ -505,6 +518,82 @@ wait
 
 ---
 
+## 15  File Upload
+
+### 15.1  Fast-fail: missing paths
+
+```fish
+make send TOOL=file_upload ARGS='{"ref":"upload-ref"}'
+```
+
+- [ ] Returns error "paths is required and must be a non-empty array"
+
+### 15.2  Fast-fail: missing ref
+
+```fish
+make send TOOL=file_upload ARGS='{"paths":["/tmp/test.txt"]}'
+```
+
+- [ ] Returns error "ref parameter is required"
+
+### 15.3  Fast-fail: non-existent path
+
+```fish
+make send TOOL=file_upload ARGS='{"paths":["/tmp/this-file-does-not-exist-99999.txt"],"ref":"upload-ref"}'
+```
+
+- [ ] Returns error "File not found"
+- [ ] Does **not** wait or timeout
+
+### 15.4  Fast-fail: relative path
+
+```fish
+make send TOOL=file_upload ARGS='{"paths":["relative/file.txt"],"ref":"upload-ref"}'
+```
+
+- [ ] Returns error "Path must be absolute"
+
+### 15.5  E2E — single file upload *(requires extension loaded)*
+
+> **Note:** Use an HTTP server, not `file://`. Safari restricts `executeScript` on `file://`
+> pages, causing `results[0]` to be null (no rejection, just silent null return).
+
+Create a test page at `/tmp/upload-test.html`:
+
+```html
+<html><body>
+  <input type="file" data-claude-ref="upload-test" id="f">
+  <script>document.getElementById('f').addEventListener('change', function(){ document.title = 'changed:'+this.files[0].name; });</script>
+</body></html>
+```
+
+Start a local HTTP server and open it in Safari:
+
+```fish
+python3 -m http.server 8765 --directory /tmp &
+echo "hello from file_upload" > /tmp/hello.txt
+make send TOOL=navigate ARGS='{"url":"http://localhost:8765/upload-test.html"}'
+make send TOOL=file_upload ARGS='{"paths":["/tmp/hello.txt"],"ref":"upload-test"}'
+```
+
+- [ ] Returns "Uploaded hello.txt (22 B) to file input upload-test"
+- [ ] Page title changes to "changed:hello.txt" (change event fired)
+
+### 15.6  E2E — multiple files to `multiple` input *(requires extension loaded)*
+
+Modify the test page to use `<input type="file" multiple data-claude-ref="multi-test">`, then:
+
+```fish
+echo "file one" > /tmp/f1.txt
+echo "file two" > /tmp/f2.txt
+make send TOOL=file_upload ARGS='{"paths":["/tmp/f1.txt","/tmp/f2.txt"],"ref":"multi-test"}'
+```
+
+- [ ] Returns "Uploaded 2 files to file input multi-test:"
+- [ ] Both filenames listed in response
+
+---
+
 ## Checklist Summary
 
 Copy this into a PR description when a full regression run is required:
@@ -526,4 +615,5 @@ Copy this into a PR description when a full regression run is required:
 - [ ] 12. Tabs manager
 - [ ] 13. Cross-tool E2E flows
 - [ ] 14. Error & edge cases
+- [ ] 15. File upload: fast-fail paths, E2E single file, E2E multiple files
 ```

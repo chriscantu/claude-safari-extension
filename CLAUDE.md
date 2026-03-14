@@ -17,7 +17,7 @@ A macOS Safari Web Extension that replicates the "Claude in Chrome" browser auto
 - **Implementation plans** live in `docs/plans/` — one file per feature, named `YYYY-MM-DD-<feature>.md`
 
 ## Key Technical Decisions
-- **MV2 manifest** with `"persistent": false` + alarms keepalive — MV2 avoids MV3's service-worker lifecycle unpredictability on macOS Safari; `persistent: false` allows Safari to suspend the page when idle, with `browser.alarms` (every 24 s) preventing suspension during active polling
+- **MV2 manifest** with `"persistent": true` — MV2 avoids MV3's service-worker lifecycle unpredictability on macOS Safari; `persistent: true` is required on Safari 26+ because the background page never bootstraps with `false` (the event that would wake it never fires, since polling is initiated from the background itself)
 - **ScreenCaptureKit** for screenshots (Safari's `captureVisibleTab` is unreliable)
 - **AppleScript** for window management (Safari's `browser.windows` API is limited)
 - **Virtual tab groups** via `browser.storage.session` (no `browser.tabGroups` API in Safari)
@@ -26,6 +26,16 @@ A macOS Safari Web Extension that replicates the "Claude in Chrome" browser auto
 
 ## Socket Path Convention
 `/tmp/claude-mcp-browser-bridge-<username>/<pid>.sock` — must match Claude Code CLI expectations
+
+## Extension Workflow — Critical Rules
+
+See `docs/debugging.md` for the full troubleshooting guide. Key rules:
+
+- **Never run `xcodebuild clean` alone.** The first build after a clean produces an invalid app signature, causing pluginkit to silently drop the extension and it disappears from Safari Settings. Always use `make clean` (which runs `clean build` in one invocation) or just `make build`.
+- **Never use `pluginkit -e use/ignore`.** Force-overriding pluginkit state conflicts with Safari's native extension management and can prevent the background page from loading. Use `pluginkit -e default` to reset, or don't touch pluginkit at all.
+- **`make kill` kills zombie Xcode debug processes.** Xcode's debugserver can hold the app process in `TX` (stopped) state, blocking extension loading. Always use `make kill` rather than `pkill` directly.
+- **`make dev` never restarts Safari.** Safari restart resets "Allow Unsigned Extensions". Use `make reload-ext` for JS-only changes; `make safari-restart` only as a last resort.
+- **Standard recovery when extension stops loading:** `make kill && make build && make run && make health`. If health fails: toggle extension in Settings, check Allow Unsigned Extensions. If still failing: `make safari-restart`.
 
 ## Chrome Extension Reference
 Source at: `~/Library/Application Support/Google/Chrome/Default/Extensions/fcoeoabgfenejglbffodgkkbkcdhcgfn/1.0.59_0/`
@@ -40,7 +50,7 @@ Every PR review MUST verify all three areas:
 ### 1. Safari Extension Best Practices
 - **Event listener lifecycle**: Any Promise that registers a browser event listener (`onUpdated`, `onRemoved`, etc.) MUST clean up that listener on ALL exit paths (resolve, reject, timeout). Use a `settled` guard flag to prevent double-settlement races.
 - **Cancellable promises**: Promises that own external resources (listeners, timers) MUST expose a `.cancel()` method. Callers MUST invoke `.cancel()` when abandoning a promise early (e.g., in a `catch` block).
-- **MV2 non-persistent background page**: With `"persistent": false`, listeners registered inside Promises may be lost if the background page is suspended. Document this risk in JSDoc where relevant.
+- **MV2 persistent background page**: We use `"persistent": true` (required on Safari 26+). The background page runs continuously; no suspension risk. The `browser.alarms` keepalive is kept for forward compatibility but is no longer load-bearing.
 - **`browser.tabs.onRemoved`**: Navigation settlement MUST listen for tab closure and reject immediately with a clear error rather than waiting for the 30s timeout.
 - **BFCache / history navigation**: `goBack()`/`goForward()` may complete without a `"loading"` status event in Safari (BFCache). Do not require a `"loading"` event before accepting `"complete"` for history navigations.
 - **Manifest load order**: `background.scripts` in `manifest.json` determines execution order and dependency availability. The load-order comment in `background.js` MUST stay in sync with the manifest.
