@@ -30,10 +30,6 @@ class ToolRouter: MCPSocketServerDelegate {
     /// being silently forwarded to the extension (useful while developing a new native handler).
     private let nativeTools: Set<String> = []
 
-    /// Last enrichedArgs assembled in handleFileUpload success path — exposed for unit testing only.
-    /// Set to nil between calls. Do not use in production logic.
-    var _testLastFileUploadEnrichedArgs: [String: Any]?
-
     /// Maps requestId → (clientId, jsonrpcId) for in-flight extension calls.
     private var pendingRequests = [String: (clientId: String, jsonrpcId: Any?)]()
     /// Maps requestId → (toolName, arguments) for gif post-action hook context.
@@ -418,9 +414,25 @@ class ToolRouter: MCPSocketServerDelegate {
 
     // MARK: - Native File Upload
 
+    /// Assembles the enriched args dict sent to the extension for file_upload.
+    /// Internal (not private) so ToolRouterTests can verify the wire payload directly.
+    func buildEnrichedArgs(from arguments: [String: Any],
+                           descriptors: [FileService.FileDescriptor]) -> [String: Any] {
+        var enriched = arguments
+        enriched.removeValue(forKey: "paths")
+        enriched["files"] = descriptors.map { d in
+            [
+                "base64": d.data.base64EncodedString(),
+                "filename": d.filename,
+                "mimeType": d.mimeType,
+                "size": d.size
+            ] as [String: Any]
+        }
+        return enriched
+    }
+
     /// Internal (not private) for unit testing via ToolRouterTests.
     func handleFileUpload(arguments: [String: Any], id: Any?, clientId: String) {
-        _testLastFileUploadEnrichedArgs = nil
         // Validate paths — must be a non-empty array of strings.
         // JSONSerialization.jsonObject returns [Any] for JSON arrays, never [String],
         // so we cast to [Any] first then compactMap to [String].
@@ -452,17 +464,7 @@ class ToolRouter: MCPSocketServerDelegate {
             NSLog("handleFileUpload: readFiles failed for clientId=%@ — %@", clientId, error.userMessage)
             sendError(id: id, code: -32000, message: error.userMessage, to: clientId)
         case .success(let descriptors):
-            var enrichedArgs = arguments
-            enrichedArgs.removeValue(forKey: "paths")
-            enrichedArgs["files"] = descriptors.map { d in
-                [
-                    "base64": d.data.base64EncodedString(),
-                    "filename": d.filename,
-                    "mimeType": d.mimeType,
-                    "size": d.size
-                ] as [String: Any]
-            }
-            _testLastFileUploadEnrichedArgs = enrichedArgs
+            let enrichedArgs = buildEnrichedArgs(from: arguments, descriptors: descriptors)
             let queued = QueuedToolRequest(
                 requestId: UUID().uuidString,
                 tool: "file_upload",
