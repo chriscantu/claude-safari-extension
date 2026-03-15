@@ -98,6 +98,7 @@ claude-safari-extension/
 │           ├── upload-image.test.js
 │           ├── file-upload.test.js
 │           ├── accessibility-tree.test.js
+│           ├── agent-visual-indicator.test.js
 │           ├── console-monitor.test.js
 │           ├── network-monitor.test.js
 │           └── js-bridge-relay.test.js

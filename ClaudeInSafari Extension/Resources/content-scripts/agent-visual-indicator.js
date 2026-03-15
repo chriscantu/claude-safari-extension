@@ -222,7 +222,9 @@
   });
 
   chatBtn.addEventListener('click', function () {
-    browser.tabs.create({ url: 'https://claude.ai' });
+    browser.tabs.create({ url: 'https://claude.ai' }).catch(function (e) {
+      console.warn('indicator: failed to open claude.ai:', e && e.message);
+    });
   });
 
   dismissBtn.addEventListener('click', function () {

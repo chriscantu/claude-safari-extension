@@ -163,7 +163,9 @@ async function pollForRequests() {
                 browser.tabs.sendMessage(toolTabId, {
                     type: "CLAUDE_AGENT_INDICATOR",
                     action: "hide_for_tool",
-                }).catch(function () {});
+                }).catch(function (e) {
+                    console.warn("indicator: hide_for_tool message failed (non-critical):", e && e.message);
+                });
             } else {
                 showIndicatorOnTab(toolTabId);
             }
@@ -190,6 +192,7 @@ async function pollForRequests() {
                 return;
             }
             currentRequestId = null;
+            currentToolTabId = null;
 
             // Post-tool indicator: restore (screenshot) or schedule hide (all others).
             if (toolTabId != null) {
@@ -197,7 +200,9 @@ async function pollForRequests() {
                     browser.tabs.sendMessage(toolTabId, {
                         type: "CLAUDE_AGENT_INDICATOR",
                         action: "show_after_tool",
-                    }).catch(function () {});
+                    }).catch(function (e) {
+                        console.warn("indicator: show_after_tool message failed (non-critical):", e && e.message);
+                    });
                 } else {
                     scheduleHideIndicator(toolTabId);
                 }
@@ -205,7 +210,8 @@ async function pollForRequests() {
         } catch (error) {
             console.error("Poll: tool execution error for", payload.tool, ":", error);
             currentRequestId = null;
-            scheduleHideIndicator(currentToolTabId);
+            currentToolTabId = null;
+            scheduleHideIndicator(toolTabId);
             try {
                 await browser.runtime.sendNativeMessage(NATIVE_APP_ID, {
                     type: "tool_response",
@@ -286,19 +292,23 @@ if (typeof browser.runtime !== "undefined" && browser.runtime.onMessage) {
       // tool_response. ToolRouter picks it up via its normal poll loop — no new
       // native message type is required.
       var reqId = currentRequestId;
+      // Capture and clear both state vars atomically before any async work
+      var savedToolTabId = currentToolTabId;
       if (reqId) {
         currentRequestId = null;
+        currentToolTabId = null;
         browser.runtime.sendNativeMessage(NATIVE_APP_ID, {
           type: "tool_response",
           requestId: reqId,
           error: { content: [{ type: "text", text: "Cancelled by user" }] },
         }).catch(function (e) {
-          console.warn("indicator: failed to send cancel response:", e && e.message);
+          // Failure means the CLI did not receive the cancel — it will time out naturally.
+          console.error("indicator: failed to send cancel response:", e && e.message);
         });
       }
       // Hide on the tab that sent Stop, or the current tool's tab
       var senderTabId = sender && sender.tab && sender.tab.id;
-      var tabToHide   = (senderTabId != null) ? senderTabId : currentToolTabId;
+      var tabToHide   = (senderTabId != null) ? senderTabId : savedToolTabId;
       if (tabToHide != null) hideIndicatorOnTab(tabToHide);
 
       sendResponse({ success: true });

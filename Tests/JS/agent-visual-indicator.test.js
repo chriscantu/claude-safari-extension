@@ -40,7 +40,7 @@ function loadIndicator(opts) {
   messageHandler = null;
 
   var sendMessage = jest.fn(sendMessageImpl);
-  var tabsCreate  = jest.fn();
+  var tabsCreate  = jest.fn(function () { return Promise.resolve(); });
 
   globalThis.browser = {
     runtime: {
