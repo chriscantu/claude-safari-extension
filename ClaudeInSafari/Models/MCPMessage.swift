@@ -1,23 +1,5 @@
 import Foundation
 
-/// Represents an incoming MCP tool request from the CLI client.
-struct ToolRequest: Codable {
-    let method: String
-    let params: ToolRequestParams
-}
-
-struct ToolRequestParams: Codable {
-    let clientId: String
-    let tool: String
-    let args: [String: AnyCodable]
-
-    enum CodingKeys: String, CodingKey {
-        case clientId = "client_id"
-        case tool
-        case args
-    }
-}
-
 /// Represents an outgoing MCP tool response to the CLI client.
 struct ToolResponse: Codable {
     let type: String
