@@ -323,3 +323,224 @@ describe("background.js poll loop", () => {
         expect(() => loadBackground({ browser })).not.toThrow();
     });
 });
+
+// ---------------------------------------------------------------------------
+// Extended mock — adds tabs.sendMessage, tabs.executeScript, onMessage capture
+// Used by indicator and STOP_AGENT tests only; does not affect T1-T12.
+// ---------------------------------------------------------------------------
+
+function makeBrowserMockWithMessaging(opts) {
+  var base = makeBrowserMock(opts);
+  var onMessageHandler = null;
+  base.tabs.sendMessage   = jest.fn(async () => {});
+  base.tabs.executeScript = jest.fn(async () => {});
+  base.runtime.onMessage  = {
+    addListener: jest.fn(function (fn) { onMessageHandler = fn; }),
+  };
+  base._getOnMessageHandler = function () { return onMessageHandler; };
+  return base;
+}
+
+function loadBackgroundWithMessaging(opts) {
+  var browser     = opts.browser;
+  var executeTool = opts.executeTool;
+  loadBackground({ browser: browser, executeTool: executeTool });
+  return browser._getOnMessageHandler();
+}
+
+describe("background.js — indicator hooks and STOP_AGENT", () => {
+  beforeEach(() => {
+    jest.useFakeTimers();
+    jest.spyOn(console, "warn").mockImplementation(() => {});
+    jest.spyOn(console, "error").mockImplementation(() => {});
+    jest.spyOn(console, "log").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
+    jest.restoreAllMocks();
+    jest.resetModules();
+    delete globalThis.browser;
+    delete globalThis.NATIVE_APP_ID;
+    delete globalThis.executeTool;
+  });
+
+  // T_ind1 — show called before executeTool
+  test("T_ind1: tabs.sendMessage show sent before executeTool is called", async () => {
+    const calls = [];
+    const payload = {
+      tool: "navigate",
+      args: { url: "https://example.com", tabId: 42 },
+      requestId: "r1",
+    };
+    const browser = makeBrowserMockWithMessaging({
+      nativeResponses: [
+        { type: "tool_request", payload: JSON.stringify(payload) },
+        { type: "idle" },
+      ],
+    });
+    const executeTool = jest.fn(async () => {
+      calls.push("executeTool");
+      return { result: { content: [{ type: "text", text: "done" }] } };
+    });
+    browser.tabs.sendMessage = jest.fn(async (_tabId, msg) => {
+      if (msg && msg.action) calls.push("sendMessage:" + msg.action);
+    });
+
+    loadBackground({ browser, executeTool });
+
+    // One await drains all microtasks from the first poll cycle including
+    // showIndicatorOnTab's two internal awaits (executeScript + sendMessage).
+    await Promise.resolve();
+    jest.runAllTimers(); // setTimeout(0) fires -> executeTool runs
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const showIdx    = calls.indexOf("sendMessage:show");
+    const executeIdx = calls.indexOf("executeTool");
+    expect(showIdx).toBeGreaterThanOrEqual(0);
+    expect(executeIdx).toBeGreaterThan(showIdx);
+  });
+
+  // T_ind2 — hide debounced 500ms after tool completes
+  test("T_ind2: tabs.sendMessage hide sent 500ms after tool completes (not immediately)", async () => {
+    const payload = {
+      tool: "navigate",
+      args: { url: "https://example.com", tabId: 42 },
+      requestId: "r2",
+    };
+    const browser = makeBrowserMockWithMessaging({
+      nativeResponses: [
+        { type: "tool_request", payload: JSON.stringify(payload) },
+        { type: "idle" },
+      ],
+    });
+
+    loadBackground({ browser });
+
+    await Promise.resolve();
+    jest.runAllTimers();
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    // Hide not yet sent
+    const hideBefore = browser.tabs.sendMessage.mock.calls
+      .filter(([, msg]) => msg && msg.action === "hide").length;
+    expect(hideBefore).toBe(0);
+
+    // Advance past debounce window
+    jest.advanceTimersByTime(500);
+    await Promise.resolve();
+
+    const hideAfter = browser.tabs.sendMessage.mock.calls
+      .filter(([, msg]) => msg && msg.action === "hide").length;
+    expect(hideAfter).toBeGreaterThan(0);
+  });
+
+  // T_ind3 — rapid tool calls: debounce reset keeps indicator showing
+  test("T_ind3: second tool call cancels pending hide — no hide sent between calls", async () => {
+    const p1 = { tool: "navigate", args: { url: "https://a.com", tabId: 7 }, requestId: "r3" };
+    const p2 = { tool: "navigate", args: { url: "https://b.com", tabId: 7 }, requestId: "r4" };
+    const browser = makeBrowserMockWithMessaging({
+      nativeResponses: [
+        { type: "tool_request", payload: JSON.stringify(p1) },
+        { type: "tool_request", payload: JSON.stringify(p2) },
+        { type: "idle" },
+      ],
+    });
+
+    loadBackground({ browser });
+
+    // First cycle
+    await Promise.resolve();
+    jest.runAllTimers();
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    // Advance only 100ms (< 500ms debounce) — second poll starts
+    jest.advanceTimersByTime(100);
+
+    // Second cycle
+    await Promise.resolve();
+    jest.runAllTimers();
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    // No hide should have fired yet
+    const hideCalls = browser.tabs.sendMessage.mock.calls
+      .filter(([, msg]) => msg && msg.action === "hide");
+    expect(hideCalls.length).toBe(0);
+  });
+
+  // T_ind4 — no tabId: no indicator sendMessage
+  test("T_ind4: tool with no tabId — indicator sendMessage not called", async () => {
+    const payload = {
+      tool: "navigate",
+      args: { url: "https://example.com" }, // no tabId
+      requestId: "r5",
+    };
+    const browser = makeBrowserMockWithMessaging({
+      nativeResponses: [
+        { type: "tool_request", payload: JSON.stringify(payload) },
+        { type: "idle" },
+      ],
+    });
+
+    loadBackground({ browser });
+
+    await Promise.resolve();
+    jest.runAllTimers();
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    jest.advanceTimersByTime(500);
+    await Promise.resolve();
+
+    const indicatorCalls = browser.tabs.sendMessage.mock.calls
+      .filter(([, msg]) => msg && msg.type === "CLAUDE_AGENT_INDICATOR");
+    expect(indicatorCalls.length).toBe(0);
+  });
+
+  // T_ind5 — screenshot: hide_for_tool before executeTool, show_after_tool after
+  test("T_ind5: screenshot action sends hide_for_tool before and show_after_tool after executeTool", async () => {
+    const calls = [];
+    const payload = {
+      tool: "computer",
+      args: { action: "screenshot", tabId: 5 },
+      requestId: "r6",
+    };
+    const browser = makeBrowserMockWithMessaging({
+      nativeResponses: [
+        { type: "tool_request", payload: JSON.stringify(payload) },
+        { type: "idle" },
+      ],
+    });
+    const executeTool = jest.fn(async () => {
+      calls.push("executeTool");
+      return { result: { content: [{ type: "text", text: "screenshot done" }] } };
+    });
+    browser.tabs.sendMessage = jest.fn(async (_tabId, msg) => {
+      if (msg && msg.action) calls.push("sendMessage:" + msg.action);
+    });
+
+    loadBackground({ browser, executeTool });
+
+    await Promise.resolve();
+    jest.runAllTimers();
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const hideForTool   = calls.indexOf("sendMessage:hide_for_tool");
+    const executeIdx    = calls.indexOf("executeTool");
+    const showAfterTool = calls.indexOf("sendMessage:show_after_tool");
+
+    expect(hideForTool).toBeGreaterThanOrEqual(0);
+    expect(executeIdx).toBeGreaterThan(hideForTool);
+    expect(showAfterTool).toBeGreaterThan(executeIdx);
+  });
+});
