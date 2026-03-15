@@ -39,6 +39,7 @@ claude-safari-extension/
 │   │       │   ├── accessibility-tree.js    # DOM traversal, ref_id mapping, role detection
 │   │       │   ├── console-monitor.js       # console.* method override for message capture
 │   │       │   ├── network-monitor.js       # fetch/XHR patching + PerformanceObserver
+│   │       │   ├── js-bridge-relay.js       # Relay async javascript_tool results from DOM attrs to background
 │   │       │   └── agent-visual-indicator.js # Orange pulsing border + "Stop Claude" button
 │   │       │
 │   │       ├── tools/                       # Tool handler modules (one per MCP tool)
@@ -98,7 +99,8 @@ claude-safari-extension/
 │           ├── file-upload.test.js
 │           ├── accessibility-tree.test.js
 │           ├── console-monitor.test.js
-│           └── network-monitor.test.js
+│           ├── network-monitor.test.js
+│           └── js-bridge-relay.test.js
 │
 ├── Makefile                                 # Dev workflow: build, run, test, send tool calls
 ├── scripts/                                 # Development and testing scripts

@@ -9,14 +9,20 @@ access the DOM, `window` object, page variables, and functions defined by the pa
 ## Scope
 
 - Background: `ClaudeInSafari Extension/Resources/tools/javascript-tool.js`
-- Content: Two-phase injection — `browser.tabs.executeScript` injects a content script
-  (isolated world) which creates a `<script>` element to run user code in the main world.
+- Content: `ClaudeInSafari Extension/Resources/content-scripts/js-bridge-relay.js` (async fallback)
 - Tool name: `"javascript_tool"`
 
 ## Manifest & Load Order
 
 `javascript-tool.js` must be added to `manifest.json` `background.scripts` and the
 load-order comment in `background.js`. See CLAUDE.md Code Review Checklist.
+
+`js-bridge-relay.js` must be in `manifest.json` `content_scripts` with its **own entry**:
+`"run_at": "document_idle"` and **`"all_frames": false`**.
+
+Placing the relay in a shared `all_frames: true` block causes it to run inside sub-frames,
+which can consume the top-frame result attribute before the correct frame reads it. The relay
+must only run in the top-level frame.
 
 ## Tool Arguments
 
@@ -30,12 +36,15 @@ load-order comment in `background.js`. See CLAUDE.md Code Review Checklist.
 
 ### Code Execution Model
 
-- The `text` is evaluated as an expression. The result of the **last expression** is
-  returned automatically.
-- Callers should **not** use `return` statements — the code is wrapped internally,
+- The `text` is wrapped in an `async IIFE` and evaluated via `eval()` in the page's main
+  world. The async IIFE enables `await` at the top level of user code, and means the result
+  is **always** delivered through the relay (async path). (Note: `eval()` is the correct
+  mechanism here — this tool replicates the browser DevTools console over a local-only MCP
+  socket.)
+- Callers should **not** use `return` statements — the code is `eval()`'d directly,
   and the last expression's value is captured.
-- Async code: if the last expression is a Promise, it is awaited and the resolved value
-  is returned.
+- **All results go through the relay** — the async IIFE always produces a Promise,
+  so `js-bridge-relay.js` always delivers the result (never via executeScript return value).
 
 #### Examples
 
@@ -46,10 +55,10 @@ load-order comment in `background.js`. See CLAUDE.md Code Review Checklist.
 // ✅ Correct — multi-statement, last expression returned
 "const items = document.querySelectorAll('.item'); items.length"
 
-// ✅ Correct — async
-"await fetch('/api/data').then(r => r.json())"
+// ✅ Correct — async (Promise detected, result relayed)
+"fetch('/api/data').then(r => r.json())"
 
-// ❌ Wrong — bare `return` causes SyntaxError
+// ❌ Wrong — bare `return` causes SyntaxError (eval, not function body)
 "return document.title"
 ```
 
@@ -58,72 +67,117 @@ load-order comment in `background.js`. See CLAUDE.md Code Review Checklist.
 ### MV2 Main-World Execution Architecture
 
 Safari MV2 does not have `browser.scripting.executeScript` with `world: "MAIN"` (that is
-an MV3 API). Instead, main-world execution uses a two-phase injection:
+an MV3 API). Instead, main-world execution uses a two-phase injection with **dual-path
+result delivery**.
 
-**Phase 1 — Inject bridge content script** (isolated world):
+**Phase 1 — Inject bridge IIFE** (isolated world via `executeScript`):
 ```js
 browser.tabs.executeScript(realTabId, {
-  code: bridgeScript,   // Content script that creates a <script> element
+  code: bridgeIIFE,        // Compact IIFE built by buildBridge()
   runAt: "document_idle"
 });
 ```
 
-**Phase 2 — Bridge content script creates a `<script>` element** (main world):
-The content script injects a `<script>` element into the page DOM. Code inside `<script>`
-elements runs in the page's main world, with access to page variables and the real `window`.
+**Phase 2 — Bridge creates a `<script>` element** (main world):
+The bridge IIFE creates a `<script>` element whose `textContent` is the main-world script.
+Code inside `<script>` elements runs in the page's main world. The main-world script
+evaluates the user's code and writes the result as JSON to a DOM attribute on
+`document.documentElement`.
 
-```js
-// Bridge content script (runs in isolated world):
-const script = document.createElement('script');
-script.textContent = wrappedUserCode;
-(document.head || document.documentElement).appendChild(script);
-script.remove();
-
-// Listen for the result via window.postMessage:
-window.addEventListener('message', function handler(event) {
-  if (event.data && event.data.__claudeJsToolResult) {
-    window.removeEventListener('message', handler);
-    // Return result to background script
-  }
-});
+```
+Bridge IIFE (isolated world)          Main-world <script>
+─────────────────────────────         ──────────────────────
+1. createElement('script')      →     1. async IIFE wraps eval(userCode)
+2. set textContent              →     2. async IIFE always returns a Promise
+3. appendChild(script)          →     3. .then() writes setAttribute(attr, JSON) later
+4. getAttribute(attr) → null    ←        (attribute never set synchronously)
+5. s.remove(); return null            js-bridge-relay.js polls attr every 50ms
+                                      When found: removeAttribute + sendMessage(result)
+                                      background onMessage listener resolves the Promise
 ```
 
-**Result return channel:** The injected `<script>` uses `window.postMessage` to send the
-result back to the content script (isolated world), which then returns it to the background
-script via the `executeScript` return value.
+### Result Delivery — Async-Only
 
-### Wrapper Template
+Because user code is wrapped in an `async IIFE`, the result is **always** a Promise.
+The DOM attribute is written by the `.then()` callback after `appendChild` returns, so
+the bridge IIFE always reads `null` and returns `null`. All results are delivered via
+the relay path:
 
-The user's code is wrapped to capture the last expression's value. The wrapper uses an
-async IIFE with `AsyncFunction` constructor to provide expression-level return semantics
-(the last expression in the function body is returned).
+1. Main-world `<script>` wraps user code in `(async function(){ return eval(code) })()`.
+2. The async IIFE's `.then()` writes the result JSON to `data-claude-js-result-{corrId}`
+   on `<html>` after the bridge IIFE has already returned.
+3. Bridge IIFE reads attribute → `null` → returns `null`.
+4. Background handler sees `execResults[0]` is null → enters async fallback.
+5. `js-bridge-relay.js` (persistent content script) polls the DOM attribute every 50ms.
+6. When attribute appears, relay reads it, removes it, and calls
+   `browser.runtime.sendMessage({ [corrId]: true, ...parsed })`.
+7. Background handler's `onMessage` listener receives the relay and resolves the Promise.
 
-**Note on dynamic code execution:** This tool's entire purpose is to execute arbitrary
-user-provided JavaScript in the page context — equivalent to a user typing in the browser
-DevTools console. The `AsyncFunction` constructor is the correct mechanism for this because
-it provides `return`-capable function bodies from string input. The MCP protocol is
-local-only (Unix domain socket), so the trust boundary is the local machine.
+**Note:** The bridge IIFE contains dead-code for the sync path (`if(r){...return r}`) as
+a safety net. It would only activate if user code somehow set the attribute synchronously,
+which cannot happen with the async IIFE wrapper.
 
-The user code string is passed as a JSON-serialized value, not concatenated into the
-source template, to prevent injection of the wrapper itself.
+**Why the bridge IIFE cannot poll (async path):**
+Safari MV2 tears down the `executeScript` isolated-world context after the IIFE returns
+synchronously. ALL async callbacks (setTimeout, setInterval, Promise.then) scheduled within
+the IIFE are **silently dropped** by Safari. This is why a separate persistent content
+script (`js-bridge-relay.js`) is required for the async path.
+
+**Why not `window.postMessage`:** In Safari MV2, `window.postMessage` from main-world
+`<script>` elements is NOT delivered to isolated-world content script event listeners.
+Both the bridge IIFE's own listener and `js-bridge-relay.js`'s listener are silently
+ignored by Safari for cross-world postMessage.
+
+### Bridge Construction
+
+`buildBridge(text, correlationId)` produces a compact bridge IIFE. The main-world script
+is pre-serialized via `JSON.stringify()` at build time, so the bridge IIFE only needs to:
+
+1. Create a `<script>` element
+2. Set its `textContent` to the pre-serialized main-world code
+3. Append it to the DOM
+4. Read the result attribute (sync path)
+5. Return the result or `null`
+
+The correlation ID uses the format `__claudejstoolresult_{random}`. The attribute name is
+`data-claude-js-result-{correlationId}`. Both MUST be lowercase — HTML attribute names
+are case-insensitive.
 
 ### Result Serialization
 
 - Primitive values: converted to string via `String(value)`.
 - Objects/Arrays: serialized via `JSON.stringify(value, null, 2)`.
 - `undefined`: returned as the string `"undefined"`.
-- Circular references: caught by `JSON.stringify` — return error message.
-- DOM elements: not serializable — return `"[object HTMLElement]"` with a helpful note.
+- DOM Elements: detected via `instanceof Element` — returns `"[object HTMLFooElement]
+  (DOM element - use .outerHTML or .textContent to serialize)"` with a helpful note.
+- Circular references: caught by `JSON.stringify` — uses `'[circular]'` fallback.
+- Errors in user code: returned as `{error: "JavaScript error: <message>\n<stack>"}`,
+  matching the sync-path catch format. Non-Error throws use `String(e)` as the message.
 
 ### Timeout Enforcement
 
-The content script must implement a `Promise.race` between:
-1. The `window.postMessage` listener (resolves on result).
-2. A 30-second timeout (rejects with timeout error).
+The background handler registers:
+1. `browser.runtime.onMessage` listener — for async path relay results.
+2. `browser.tabs.onRemoved` listener — rejects immediately if tab closes.
+3. `setTimeout(30s)` — rejects with "Script execution timed out after 30 seconds".
 
-The losing branch must clean up: remove the `message` event listener on timeout, and
-discard late-arriving results. This prevents leaked listeners (per CLAUDE.md Code Review
-Checklist: event listener lifecycle cleanup).
+All three share a `settled` flag and a `settle()` function. The first to fire wins; the
+others are cleaned up. The Swift ToolRouter has a separate 30-second timeout on the native
+side.
+
+### Cancellation
+
+The Promise returned by `handleJavaScriptTool` exposes a `.cancel()` method per the
+CLAUDE.md requirement for Promises owning external resources. Calling `promise.cancel()`
+immediately settles the async fallback Promise with an error, releasing all listeners and
+timers. If called before the async fallback is reached (e.g., while `resolveTab` or
+`executeScript` is pending), cancel is a safe no-op.
+
+```js
+const promise = handleJavaScriptTool(args);
+// ...
+promise.cancel(); // cleans up onMessage, onRemoved, setTimeout
+```
 
 ## Return Value
 
@@ -149,7 +203,7 @@ Checklist: event listener lifecycle cleanup).
 ## Output Truncation
 
 If the serialized result exceeds **100,000 characters**, truncate and append
-`"\n[output truncated]"`.
+`"\n[truncated]"`.
 
 ## Error Handling
 
@@ -158,12 +212,10 @@ If the serialized result exceeds **100,000 characters**, truncate and append
 | `action` is not `"javascript_exec"` | `isError: true`, "'javascript_exec' is the only supported action" |
 | `text` is empty or missing | `isError: true`, "Code parameter is required" |
 | User code throws an error | `isError: true`, "JavaScript error: `<message>`\n`<stack>`" |
-| User code throws a non-Error (e.g., `throw "string"`) | `isError: true`, message from `String(thrown)`, stack is `"(no stack)"` |
-| User code returns circular object | `isError: true`, "Result contains circular references" |
-| Tab not accessible | `isError: true`, "Cannot access tab `<tabId>`" (use `classifyExecuteScriptError`) |
-| Script injection fails | `isError: true`, classified error via `globalThis.classifyExecuteScriptError` |
+| Script injection fails (CSP, etc.) | `isError: true`, "Script injection failed: `<message>`" |
+| Tab not accessible | `isError: true`, classified error via `globalThis.classifyExecuteScriptError` |
 | Execution timeout (> 30s) | `isError: true`, "Script execution timed out after 30 seconds" |
-| CSP blocks script injection | `isError: true`, "Page Content Security Policy blocks script execution" |
+| Tab closed during execution | `isError: true`, "Tab closed during javascript_tool" |
 
 ## Safari Considerations
 
@@ -174,7 +226,16 @@ is in the background, the injection fails with a permission error.
 
 **Impact:** Same as Spec 010 — the user cannot Cmd-Tab away during JavaScript execution.
 
-**Mitigation:** `ToolRouter.swift` activates Safari before forwarding (shared helper).
+**Mitigation:** `make send` activates Safari via `osascript` before forwarding.
+
+### ⚠ executeScript Isolated-World Contexts Are Ephemeral
+
+Safari MV2 tears down the isolated-world context created by `executeScript` after the
+injected IIFE returns synchronously. Any async callbacks (setTimeout, setInterval,
+Promise.then, MutationObserver) scheduled within the IIFE are silently dropped.
+
+**Impact:** The bridge IIFE cannot poll for async results. A persistent content script
+(`js-bridge-relay.js`) handles async relay instead.
 
 ### ⚠ `<script>` Element Injection and CSP
 
@@ -184,17 +245,36 @@ will block the injected `<script>` element.
 
 **Affected pages:** GitHub, Gmail, and many SPAs with strict CSPs.
 
-**Behavior:** If CSP blocks execution, return `isError: true` with a clear error message:
-`"Page Content Security Policy blocks script execution. The page's CSP does not allow
-inline scripts."` **Do NOT** silently fall back to the isolated world — this would
-produce confusing wrong results when user code references page variables.
+**Behavior when CSP blocks `appendChild`:** The bridge `try/catch` catches the synchronous
+exception and returns `{error: "Script injection failed: ..."}` immediately via the sync
+path — this surfaces quickly as an `isError: true` response.
 
-### postMessage Security
+**Behavior when CSP silently blocks `<script>` execution** (allows `appendChild` but
+blocks the script from running): The main-world script never executes, the DOM attribute
+is never written, and the handler waits through the full 30-second timeout before
+reporting "Script execution timed out". There is no way to distinguish this from
+user code that genuinely hangs. This is a known limitation.
 
-The `window.postMessage` result channel uses a distinctive `__claudeJsToolResult` flag
-to identify result messages. The content script must verify `event.data.__claudeJsToolResult`
-before processing, to avoid being spoofed by page-originated messages. The `event.origin`
-check is not useful here since both sender and receiver are on the same origin.
+**Do NOT** silently fall back to the isolated world — this would produce confusing wrong
+results when user code references page variables.
+
+### ⚠ browser.tabs.query Restriction in Native Messaging Context
+
+`browser.tabs.query` returns empty arrays when called from within a `sendNativeMessage`
+callback handler unless Safari has been recently activated (frontmost).
+
+**Mitigation:** Three layers:
+1. `background.js` dispatches tool execution via `setTimeout(0)` to escape the native
+   messaging callback context.
+2. `resolveTab(null)` retries 3 times with 300ms/600ms delays.
+3. `make send` activates Safari and waits 2 seconds before sending.
+
+### ⚠ Safari Caches Background Page JavaScript
+
+Safari does NOT reload the extension's background page JavaScript when the native app
+is relaunched (`make kill && make run`). A full Safari restart (`make safari-restart`)
+is required for any JavaScript changes to take effect. Having Web Inspector open does
+NOT change this — Safari caches the background page independently.
 
 ## Chrome Parity Notes
 
@@ -202,8 +282,8 @@ check is not useful here since both sender and receiver are on the same origin.
 |---------|--------|--------|-----|
 | Execute arbitrary JS in page context | ✅ | ✅ | Different mechanism (script injection vs world: MAIN) |
 | Access page variables and DOM | ✅ | ✅ | None |
-| Async code (await) | ✅ | ✅ | None |
-| Multi-statement last-expression return | ✅ | ✅ | None (AsyncFunction constructor) |
+| Async code (Promises) | ✅ | ✅ | Safari needs relay content script for async path |
+| Multi-statement last-expression return | ✅ | ✅ | None (eval captures last expression) |
 | Works when browser in background | ✅ | ❌ | Safari must be frontmost |
 | CSP-restricted pages | Partial (unsafe-eval) | Partial (unsafe-inline) | Different CSP requirement |
 
@@ -215,18 +295,17 @@ check is not useful here since both sender and receiver are on the same origin.
 | T2 | `text: "1 + 1"` | Returns "2" |
 | T3 | `text: "const x = 5; x * 3"` | Returns "15" |
 | T4 | `text: "document.querySelectorAll('a').length"` | Returns link count |
-| T5 | `text: "await fetch('/api').then(r => r.status)"` | Returns status code |
+| T5 | `text: "fetch('/api').then(r => r.status)"` | Returns status code (async path) |
 | T6 | `text: "({name: 'test', value: 42})"` | Returns JSON string |
 | T7 | `text: "throw new Error('test')"` | `isError: true`, includes "test" |
 | T8 | `text: ""` | `isError: true`, "Code parameter is required" |
 | T9 | `action: "wrong"` | `isError: true`, "javascript_exec is the only supported action" |
 | T10 | Invalid tab ID | `isError: true` |
-| T11 | Result > 100,000 chars | Truncated with `[output truncated]` |
-| T12 | `text: "return 5"` | `isError: true`, SyntaxError (bare return) |
+| T11 | Result > 100,000 chars | Truncated with `[truncated]` |
+| T12 | `text: "return 5"` | `isError: true`, SyntaxError (bare return in eval) |
 | T13 | `text: "undefined"` | Returns string "undefined" |
 | T14 | `text: "throw 'a string'"` (non-Error throw) | `isError: true`, message is "a string" |
 | T15 | Code with infinite loop | Timeout fires at 30s |
-| T16 | CSP-restricted page blocks inline scripts | `isError: true`, CSP error message |
+| T16 | CSP-restricted page blocks inline scripts | `isError: true`, injection failed message |
 | T17 | Code accessing `window.myPageVar` (page variable) | Accessible in main world |
-| T18 | Code returning a DOM element | Returns `"[object HTMLElement]"` with note |
-| T19 | `postMessage` listener cleaned up on timeout | No leaked event listeners |
+| T18 | Tab closed during async execution | `isError: true`, "Tab closed during javascript_tool" |

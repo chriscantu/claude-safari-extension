@@ -113,8 +113,15 @@ the background page from loading entirely.
 Other Safari extensions (Dark Reader, Okta) have no pluginkit override — Safari manages
 them natively. We must do the same.
 
-**Wrong:** The old `make reload-ext` used `pluginkit -e ignore` then `pluginkit -e use`.
-**Fixed:** `make reload-ext` now uses `pluginkit -e default` to reset to native management.
+**Symptoms of pluginkit poisoning:**
+- `browser.tabs.query({ active: true, currentWindow: true })` returns empty
+- `executeScript` fails with "does not have access to this tab"
+- All tools fail even though `make health` passes (health only checks queue polling)
+
+**Recovery:** `make safari-restart` + re-enable "Allow Unsigned Extensions" + re-enable extension.
+
+**Prevention:** `make dev` and `make reload-ext` no longer use pluginkit. The app relaunch
+(kill + build + run) is sufficient — Safari picks up the updated `.appex` from the new app bundle.
 
 ---
 
@@ -143,10 +150,76 @@ because the background page runs inside Safari's WebContent process.
 
 ---
 
+## Safari Caches Background Page JavaScript
+
+Safari does NOT reload the extension's background page JavaScript when the native app is
+relaunched (`make kill && make run`). The background page JS is cached independently of
+the `.appex` bundle.
+
+**This means:** Every JavaScript change to the extension requires a full Safari restart:
+
+```fish
+make safari-restart
+```
+
+Then re-enable "Allow Unsigned Extensions" and re-enable the extension in Settings.
+
+**Symptoms of stale JS:**
+- Code changes have no effect (new `console.log` statements don't appear)
+- Bug fixes don't work despite successful `make build`
+- New tool registrations are missing
+
+**Confirming staleness:** Add a distinctive `console.log("BUILD_MARKER_<timestamp>")` to
+`background.js`. If the marker doesn't appear in the background page console after
+`make kill && make run`, Safari is running cached JS. Restart Safari.
+
+**Note:** Having Web Inspector open does NOT force a reload. Safari caches the background
+page independently of the inspector state.
+
+---
+
+## browser.tabs.query Returns Empty in Poll Loop
+
+`browser.tabs.query` returns empty arrays when called from within a `sendNativeMessage`
+callback handler unless Safari has been recently activated (frontmost). Having Web Inspector
+open also "activates" the tab API context, which is why it works during debugging but fails
+in production.
+
+**This affects ALL tools** that use `resolveTab(null)` to find the active tab.
+
+**Three mitigation layers are in place:**
+1. `background.js` dispatches tool execution via `setTimeout(0)` to escape the native
+   messaging callback context.
+2. `resolveTab(null)` in `tabs-manager.js` retries 3 times with 300ms/600ms delays.
+3. `make send` activates Safari via `osascript` and waits 2 seconds before sending
+   (the idle poll interval is 5s, so requests can be picked up long after activation).
+
+**If tools fail with "No active tab found":**
+- Ensure Safari is frontmost (not just visible — actually frontmost/active)
+- Use `make send` instead of `mcp-test.py` directly (make send handles activation)
+- Check the idle poll interval timing — if it's been >2s since activation, the request
+  may arrive after Safari's tab API context has gone stale
+
+---
+
 ## Standard Recovery Procedure
 
 When the extension stops working after a code change:
 
+**For JavaScript changes** (background.js, tool handlers, content scripts):
+```fish
+make safari-restart     # REQUIRED — Safari caches background page JS
+# Re-enable "Allow Unsigned Extensions" and the extension in Settings
+make health             # verify extension is polling
+```
+
+**For Swift-only changes** (no JS modified):
+```fish
+make dev                # build + kill + relaunch + health check (safe — no pluginkit!)
+make functional-check   # verify executeScript actually works (not just queue polling)
+```
+
+Or step by step:
 ```fish
 make kill          # kills app + any zombie Xcode debug processes
 make build         # incremental build (never breaks signing)
@@ -159,5 +232,10 @@ If `make health` fails:
 2. Safari → Settings → Extensions → Claude in Safari — toggle off, then on
 3. Navigate to any page
 4. `make health` again
+
+If `make health` passes but `make functional-check` fails:
+- Extension can poll queue but lost tab/executeScript permissions
+- This was typically caused by `pluginkit -e ignore/use` (now removed from Makefile)
+- Recovery: `make safari-restart`, then re-enable both settings above
 
 If still failing: `make safari-restart`, then repeat steps 1–3.

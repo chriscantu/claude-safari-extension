@@ -180,10 +180,11 @@ describe("background.js poll loop", () => {
         const executeTool = jest.fn(async () => ({ result: { content: [{ type: "text", text: "done" }] } }));
         loadBackground({ browser, executeTool });
 
-        await Promise.resolve(); // start first poll
-        await Promise.resolve(); // await sendNativeMessage (poll)
-        await Promise.resolve(); // await executeTool
-        await Promise.resolve(); // await sendNativeMessage (response)
+        await Promise.resolve(); // sendNativeMessage(poll) resolves → setTimeout(0) queued
+        jest.runAllTimers();     // fire setTimeout(0) → executeTool starts
+        await Promise.resolve(); // executeTool resolves → outer Promise resolves
+        await Promise.resolve(); // pollForRequests resumes → Phase 4 sendNativeMessage queued
+        await Promise.resolve(); // Phase 4 resolves
 
         expect(executeTool).toHaveBeenCalledWith("navigate", { url: "https://example.com" }, undefined);
     });
@@ -199,10 +200,11 @@ describe("background.js poll loop", () => {
         const executeTool = jest.fn(async () => ({ result: { content: [{ type: "text", text: "Page text" }] } }));
         loadBackground({ browser, executeTool });
 
-        await Promise.resolve();
-        await Promise.resolve();
-        await Promise.resolve();
-        await Promise.resolve();
+        await Promise.resolve(); // sendNativeMessage(poll) resolves → setTimeout(0) queued
+        jest.runAllTimers();     // fire setTimeout(0) → executeTool starts
+        await Promise.resolve(); // executeTool resolves → outer Promise resolves
+        await Promise.resolve(); // pollForRequests resumes → Phase 4 sendNativeMessage queued
+        await Promise.resolve(); // Phase 4 resolves
 
         const calls = browser.runtime.sendNativeMessage.mock.calls;
         const responseCalls = calls.filter(([, msg]) => msg.type === "tool_response");
@@ -239,10 +241,11 @@ describe("background.js poll loop", () => {
         const executeTool = jest.fn(async () => { throw new Error("tool exploded"); });
         loadBackground({ browser, executeTool });
 
-        await Promise.resolve();
-        await Promise.resolve();
-        await Promise.resolve();
-        await Promise.resolve();
+        await Promise.resolve(); // sendNativeMessage(poll) resolves → setTimeout(0) queued
+        jest.runAllTimers();     // fire setTimeout(0) → executeTool starts (throws)
+        await Promise.resolve(); // executeTool rejects → outer Promise rejects
+        await Promise.resolve(); // pollForRequests resumes error path → error response queued
+        await Promise.resolve(); // error sendNativeMessage resolves
 
         const calls = browser.runtime.sendNativeMessage.mock.calls;
         const errorResponse = calls.find(([, msg]) => msg.type === "tool_response" && msg.error);
@@ -266,15 +269,18 @@ describe("background.js poll loop", () => {
         const executeTool = jest.fn(async () => ({ result: { content: [{ type: "text", text: "data" }] } }));
         loadBackground({ browser, executeTool });
 
-        await Promise.resolve();
-        await Promise.resolve();
-        await Promise.resolve();
-        await Promise.resolve();
+        await Promise.resolve(); // sendNativeMessage(poll) resolves → setTimeout(0) queued
+        jest.runAllTimers();     // fire setTimeout(0) → executeTool starts
+        await Promise.resolve(); // executeTool resolves → outer Promise resolves
+        await Promise.resolve(); // pollForRequests resumes → Phase 4 sendNativeMessage queued (throws)
+        await Promise.resolve(); // Phase 4 error → console.error logged → finally schedules next poll
 
         expect(console.error).toHaveBeenCalledWith(
             expect.stringContaining("send tool response"),
             expect.anything()
         );
+        // Finally block must always schedule the next poll even after Phase 4 error
+        expect(jest.getTimerCount()).toBeGreaterThan(0);
     });
 
     test("T10 — active poll: next setTimeout uses POLL_INTERVAL_MS (100ms)", async () => {
@@ -287,11 +293,12 @@ describe("background.js poll loop", () => {
         });
         loadBackground({ browser });
 
-        // Flush the first active poll cycle
-        await Promise.resolve();
-        await Promise.resolve();
-        await Promise.resolve();
-        await Promise.resolve();
+        // Flush the first active poll cycle (setTimeout(0) dispatch requires timer flush)
+        await Promise.resolve(); // sendNativeMessage(poll) resolves → setTimeout(0) queued
+        jest.runAllTimers();     // fire setTimeout(0) → executeTool starts
+        await Promise.resolve(); // executeTool resolves
+        await Promise.resolve(); // pollForRequests resumes → Phase 4 queued
+        await Promise.resolve(); // Phase 4 resolves → finally schedules next poll timer
 
         // After an active poll, the next timer should be ~100ms
         const timerCount = jest.getTimerCount();

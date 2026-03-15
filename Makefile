@@ -2,7 +2,8 @@
 #
 # Usage:
 #   make dev            Build + relaunch app + health check (preserves Safari state)
-#   make reload-ext     Toggle extension off/on to pick up JS changes
+#   make reload-ext     Activate Safari to trigger extension load (safe — no pluginkit!)
+#   make functional-check  Verify executeScript works (not just queue polling)
 #   make safari-restart Nuclear option: quit Safari, reopen (resets Allow Unsigned Extensions!)
 #   make health         Verify extension is responding
 #   make doctor         Full diagnostic of all prerequisites
@@ -44,7 +45,7 @@ APP_PATH     = $(BUILD_DIR)/$(APP_NAME).app
 # ---------------------------------------------------------------------------
 
 .PHONY: dev build run kill test test-swift test-all send list-tools status clean help \
-        health doctor queue-clean safari-quit safari-open safari-restart reload-ext
+        health doctor queue-clean safari-quit safari-open safari-restart reload-ext functional-check
 
 help: ## Show this help
 	@grep -E '^[a-z_-]+:.*##' $(MAKEFILE_LIST) | awk -F ':.*## ' '{printf "  %-16s %s\n", $$1, $$2}'
@@ -53,7 +54,7 @@ help: ## Show this help
 # Dev workflow
 # ---------------------------------------------------------------------------
 
-dev: build kill queue-clean run reload-ext health ## Build + relaunch + reload extension + verify
+dev: build kill queue-clean run reload-ext health ## Build + relaunch + activate Safari + verify
 	@echo ""
 	@echo "=== Claude in Safari is running ==="
 	@echo "Socket: $(DEV_SOCK)"
@@ -114,15 +115,12 @@ kill: ## Kill the running app (including zombie Xcode debug processes)
 # Extension reload (no Safari restart — preserves Allow Unsigned Extensions)
 # ---------------------------------------------------------------------------
 
-reload-ext: ## Toggle extension via pluginkit to reload JS from updated build
-	@echo "Reloading extension..."
-	@# Deregister then re-register the extension plugin to force Safari to
-	@# pick up the new .appex from the rebuilt app bundle.
-	@pluginkit -e ignore -i $(EXT_BUNDLE) 2>/dev/null || true
-	@sleep 1
-	@pluginkit -e use -i $(EXT_BUNDLE) 2>/dev/null || true
-	@sleep 2
-	@# Navigate to a page to trigger extension background page startup
+reload-ext: ## Activate Safari and navigate to trigger extension load (NO pluginkit!)
+	@echo "Activating Safari to load extension..."
+	@# IMPORTANT: Do NOT use pluginkit -e ignore/use here!
+	@# pluginkit toggling poisons browser.tabs.query and executeScript permissions,
+	@# requiring a full Safari restart + re-enable to recover. The app relaunch
+	@# (kill + run) already registers the updated .appex with Safari.
 	@if pgrep -x Safari >/dev/null 2>&1; then \
 		osascript -e 'tell application "Safari" to activate' 2>/dev/null || true; \
 		sleep 0.5; \
@@ -134,7 +132,7 @@ reload-ext: ## Toggle extension via pluginkit to reload JS from updated build
 		osascript -e 'tell application "Safari" to open location "https://example.com"' 2>/dev/null || true; \
 		sleep 2; \
 	fi
-	@echo "Extension reloaded"
+	@echo "Extension activated"
 
 # ---------------------------------------------------------------------------
 # Safari lifecycle (nuclear option — resets Allow Unsigned Extensions!)
@@ -298,6 +296,34 @@ doctor: ## Full diagnostic of all prerequisites and runtime state
 	fi
 
 # ---------------------------------------------------------------------------
+# Functional check (verifies executeScript permissions, not just queue polling)
+# ---------------------------------------------------------------------------
+
+functional-check: ## Verify a real tool call works (executeScript + tab access)
+	@echo "Running functional check (read_page on active tab)..."
+	@osascript -e 'tell application "Safari" to activate' 2>/dev/null; sleep 0.5
+	@result=$$(python3 scripts/mcp-test.py call read_page '{}' 2>&1); \
+	if echo "$$result" | grep -qi "error\|not found\|cannot access\|timed out"; then \
+		echo ""; \
+		echo "*** FUNCTIONAL CHECK FAILED ***"; \
+		echo "$$result" | head -20; \
+		echo ""; \
+		echo "Extension can poll queue but cannot access tabs."; \
+		echo "  1. Safari > Settings > Extensions > Claude in Safari > Website Access: All Websites"; \
+		echo "  2. If that's already set, try: make safari-restart"; \
+		exit 1; \
+	elif echo "$$result" | grep -q "Viewport\|heading\|link\|generic\|button"; then \
+		echo "Functional check passed (read_page returned accessibility tree)"; \
+	else \
+		echo ""; \
+		echo "*** FUNCTIONAL CHECK INCONCLUSIVE ***"; \
+		echo "$$result" | head -10; \
+		echo ""; \
+		echo "Could not parse response. Check manually."; \
+		exit 1; \
+	fi
+
+# ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
 
@@ -324,7 +350,7 @@ test-all: test test-swift ## Run all tests (JS + Swift)
 TOOL ?= read_page
 ARGS ?= {}
 send: ## Send a tool call (TOOL=name ARGS='{}')
-	@osascript -e 'tell application "Safari" to activate' 2>/dev/null; sleep 0.3; python3 scripts/mcp-test.py call $(TOOL) '$(ARGS)'
+	@osascript -e 'tell application "Safari" to activate' 2>/dev/null; sleep 2; python3 scripts/mcp-test.py call $(TOOL) '$(ARGS)'
 
 list-tools: ## List all registered MCP tools
 	@python3 scripts/mcp-test.py list

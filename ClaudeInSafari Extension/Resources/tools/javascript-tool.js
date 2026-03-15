@@ -3,253 +3,165 @@
  *
  * Executes arbitrary JavaScript in the active tab's page main world.
  *
- * Safari MV2 has no browser.scripting.executeScript with world:"MAIN", so
- * execution uses a two-phase bridge:
- *   Phase 1 — content script (isolated world) injected via executeScript
- *   Phase 2 — content script injects a <script> element → runs in main world
- *   Result   — main world script sends result via window.postMessage; content
- *              script resolves its returned Promise with the result object.
+ * Architecture: executeScript injects a bridge IIFE into the isolated world.
+ * The bridge creates a <script> element whose content evals the user code (wrapped
+ * in an async IIFE) in the main world. The async IIFE always returns a Promise, so
+ * the result is always written by the .then() callback after appendChild returns.
+ * js-bridge-relay.js (persistent content script) polls for the DOM attribute and
+ * relays the result to the background via sendMessage (async path).
  *
- * The bridge script returns a Promise as its last expression. Safari's MV2
- * executeScript implementation awaits Promises returned from injected scripts.
- * Note: this is Safari-specific — Chrome MV2 does not await Promise results.
+ * The async IIFE wrapper enables `await` syntax at the top level of user code.
  *
- * CSP detection: before the main-world script is injected, a synchronous probe
- * <script> element mutates a DOM attribute. If the attribute is unchanged after
- * appendChild, CSP blocks inline scripts and we return an error immediately
- * without waiting for the 30-second timeout. A unique nonce per invocation
- * prevents concurrent calls from sharing the same probe attribute.
- *
- * Concurrent-call isolation: RFLAG (the postMessage channel key) is suffixed
- * with a per-invocation random nonce, so two concurrent calls on the same tab
- * cannot cross-contaminate each other's results. Without this, both onMessage
- * listeners would fire for the first postMessage that arrives.
- *
- * eval() semantics: the main-world script uses eval() inside an AsyncFunction
- * to provide console-like last-expression return semantics. eval() returns the
- * completion value of the last statement (e.g. eval('1+1') returns 2, not
- * undefined). await is valid because direct eval() shares the enclosing async
- * function's execution context. Note: eval() requires 'unsafe-eval' in the
- * page's CSP script-src directive (separate from 'unsafe-inline' for <script>).
- *
- * ⚠ Safari must be frontmost for executeScript to succeed (same restriction
- *   as the computer tool). ToolRouter.swift activates Safari before forwarding.
- *
- * Args: { action: "javascript_exec", text: string, tabId?: number }
- *
- * Dependencies:
- *   globalThis.resolveTab                — tabs-manager.js
- *   globalThis.classifyExecuteScriptError — tool-registry.js
- *   globalThis.registerTool              — tool-registry.js
+ * Cancellation: the returned Promise exposes a .cancel() method that settles the
+ * async fallback immediately, cleaning up all listeners and timers.
  *
  * See Spec 012 (javascript-tool).
  */
 
 "use strict";
 
-const RESULT_FLAG  = "__claudeJsToolResult";
-const MAX_OUTPUT   = 100000;
-const TIMEOUT_MS   = 30000;
+const RESULT_FLAG = "__claudejstoolresult";
+const MAX_OUTPUT  = 100000;
+const TIMEOUT_MS  = 30000;
 
 // ---------------------------------------------------------------------------
-// IIFE builder
+// Bridge builder
 // ---------------------------------------------------------------------------
 
-/**
- * Builds the bridge content script that runs in the isolated world.
- * The script injects a <script> element into the page (main world) that
- * uses eval() inside an AsyncFunction for last-expression return semantics.
- *
- * Security: text is JSON-serialized into the outer IIFE argument at build time
- * (in the background page). Inside the bridge, userCode is JSON-serialized at
- * bridge-build time (in the extension's isolated world) before being passed as
- * the call argument to fn(). No user-controlled string is concatenated without
- * serialization at either stage.
- *
- * Spec 012 describes the timeout/message race as Promise.race. The implementation
- * uses a single Promise with a settled guard flag instead — equivalent and avoids
- * the cleanup race that Promise.race introduces.
- *
- * Note on postMessage spoofing: event.source === window guards against
- * cross-origin iframes. Same-page scripts could still forge the flag, but
- * the local-machine MCP trust boundary makes this an accepted risk.
- *
- * @param {string} text - The user-provided JavaScript code to execute.
- * @returns {string} JS source for browser.tabs.executeScript code option.
- */
-function buildJavaScriptExecScript(text) {
-    return `(function(userCode) {
-        "use strict";
-        var RFLAG   = ${JSON.stringify(RESULT_FLAG + "_")} + Math.random().toString(36).slice(2);
-        var MAX_OUT = ${MAX_OUTPUT};
-        var TIMEOUT = ${TIMEOUT_MS};
+function buildBridge(text, correlationId) {
+    const attr = "data-claude-js-result-" + correlationId;
 
-        // This Promise always resolves (never rejects). Errors from user code,
-        // timeout, and CSP detection resolve with { error: string }; the handler
-        // layer converts them to thrown Errors. This avoids unhandled rejections
-        // from synchronous exceptions thrown inside the executor.
-        return new Promise(function(resolve) {
-            var settled = false;
-            var timer;
+    // Main-world script: eval user code inside an async IIFE, write result to DOM attribute.
+    // Wrapping in async IIFE allows `await` syntax at the top level of user code (e.g.
+    // `await fetch(...).then(r => r.json())`). The result is always a Promise, so results
+    // are always delivered via the .then() relay path through js-bridge-relay.js.
+    // Built here as a plain string, then JSON.stringify'd for embedding.
+    const mainWorld =
+        "(function(){" +
+        "var a=" + JSON.stringify(attr) + ";" +
+        "function wr(d){document.documentElement.setAttribute(a,JSON.stringify(d))}" +
+        "try{" +
+        "var r=(async function(){return eval(" + JSON.stringify(text) + ")})();" +
+        "r.then(function(v){" +
+            "var s;" +
+            "if(v===undefined){s='undefined'}" +
+            "else if(typeof v==='string'){s=v}" +
+            "else if(v instanceof Element){s=Object.prototype.toString.call(v)+' (DOM element - use .outerHTML or .textContent to serialize)'}" +
+            "else{s=JSON.stringify(v,null,2)||'[circular]'}" +
+            "if(s.length>" + MAX_OUTPUT + ")s=s.slice(0," + MAX_OUTPUT + ")+'\\n[truncated]';" +
+            "wr({value:s})" +
+        "},function(e){wr({error:(e instanceof Error)?'JavaScript error: '+e.message+'\\n'+(e.stack||''):'JavaScript error: '+String(e)})})" +
+        "}catch(e){wr({error:'JavaScript error: '+e.message+'\\n'+(e.stack||'')})}"+
+        "})()";
 
-            function settle(data) {
-                if (settled) return;
-                settled = true;
-                clearTimeout(timer);
-                window.removeEventListener("message", onMessage);
-                resolve(data);
-            }
-
-            // event.source === window rejects messages from cross-origin iframes.
-            // Same-page scripts could still forge the flag — accepted risk given
-            // the local-machine MCP trust boundary (see file-level JSDoc).
-            function onMessage(event) {
-                if (event.source !== window) return;
-                if (event.data && event.data[RFLAG]) {
-                    settle(event.data);
-                }
-            }
-
-            // --- Synchronous CSP probe ---
-            // A <script> without async/defer executes synchronously on appendChild.
-            // If the attribute stays "pending" after append, CSP blocks inline scripts.
-            // A unique nonce prevents concurrent calls from matching each other's probe.
-            var cspNonce = Math.random().toString(36).slice(2);
-            var probeAttr = "data-claude-csp-probe-" + cspNonce;
-            var probe = document.createElement("script");
-            probe.setAttribute(probeAttr, "pending");
-            probe.textContent = "document.querySelector('[" + probeAttr + "]').setAttribute('" + probeAttr + "','ok');";
-            try {
-                (document.head || document.documentElement).appendChild(probe);
-            } catch (appendErr) {
-                settle({ error: "Cannot inject script: document has no injectable parent element (" + appendErr.message + ")" });
-                return;
-            }
-            probe.remove();
-
-            if (probe.getAttribute(probeAttr) !== "ok") {
-                settle({ error: "Page Content Security Policy blocks script execution. The page's CSP does not allow inline scripts." });
-                return;
-            }
-
-            // Register listener before starting the timer: canonical order per
-            // CLAUDE.md event listener lifecycle guidance — listener → timer → inject.
-            // This ensures the clock never runs against an unregistered handler.
-            window.addEventListener("message", onMessage);
-
-            timer = setTimeout(function() {
-                settle({ error: "Script execution timed out after 30 seconds" });
-            }, TIMEOUT);
-
-            // Build and inject main-world script.
-            // userCode is embedded via JSON.stringify(userCode) at bridge-build time
-            // (here in the IIFE, before injection) — not at background-page build time.
-            //
-            // eval() inside an AsyncFunction gives console-like semantics:
-            //   eval('1+1') returns 2  (last expression value, not undefined)
-            //   eval('const x=5; x*3') returns 15
-            //   eval('await fetch(...)') works because direct eval() shares the async context
-            //
-            // Note: RFLAG and MAX_OUT are IIFE-local variables (declared above as
-            // var RFLAG/MAX_OUT). They are referenced here at bridge-runtime via
-            // JSON.stringify(RFLAG) and MAX_OUT — both are in IIFE scope. The module-level
-            // constants RESULT_FLAG and MAX_OUTPUT are NOT in scope here.
-            var mainScript = [
-                "(async function() {",
-                "  try {",
-                "    var AsyncFunc = Object.getPrototypeOf(async function(){}).constructor;",
-                "    var fn = new AsyncFunc('return eval(arguments[0])');",
-                "    var result = await fn(" + JSON.stringify(userCode) + ");",
-                "    var output;",
-                "    if (result === undefined) {",
-                "      output = 'undefined';",
-                "    } else if (result !== null && typeof result === 'object') {",
-                "      if (typeof Element !== 'undefined' && result instanceof Element) {",
-                "        output = Object.prototype.toString.call(result) + ' (DOM element \\u2014 use .outerHTML or .textContent to serialize)';",
-                "      } else {",
-                "        try { output = JSON.stringify(result, null, 2); }",
-                "        catch(circ) { window.postMessage({ [" + JSON.stringify(RFLAG) + "]: true, error: 'Result contains circular references' }, '*'); return; }",
-                "      }",
-                "    } else {",
-                "      output = String(result);",
-                "    }",
-                "    if (output.length > " + MAX_OUT + ") output = output.slice(0, " + MAX_OUT + ") + '\\n[output truncated]';",
-                "    window.postMessage({ [" + JSON.stringify(RFLAG) + "]: true, value: output }, '*');",
-                "  } catch(e) {",
-                "    var msg;",
-                "    if (e instanceof Error) {",
-                "      msg = 'JavaScript error: ' + e.message + '\\n' + (e.stack || '(no stack)');",
-                "    } else {",
-                "      try { msg = JSON.stringify(e, null, 2); } catch(_) { msg = String(e); }",
-                "    }",
-                "    window.postMessage({ [" + JSON.stringify(RFLAG) + "]: true, error: msg }, '*');",
-                "  }",
-                "})();"
-            ].join("\\n");
-
-            var script = document.createElement("script");
-            script.textContent = mainScript;
-            try {
-                (document.head || document.documentElement).appendChild(script);
-            } catch (injectErr) {
-                settle({ error: "Script injection failed: " + injectErr.message });
-                return;
-            }
-            script.remove();
-        });
-    })(${JSON.stringify(text)})`;
+    // Bridge IIFE: runs in isolated world via executeScript.
+    // The main-world script always resolves asynchronously (async IIFE), so the attribute
+    // is never set before appendChild returns. The bridge always returns null and the
+    // async relay (js-bridge-relay.js) picks up the result via DOM attribute polling.
+    return (
+        "(function(){" +
+        "var s=document.createElement('script');" +
+        "s.textContent=" + JSON.stringify(mainWorld) + ";" +
+        "try{(document.head||document.documentElement).appendChild(s)}catch(e){return JSON.stringify({error:'Script injection failed: '+e.message})}" +
+        "var a=" + JSON.stringify(attr) + ";" +
+        "var r=document.documentElement.getAttribute(a);" +
+        "if(r){document.documentElement.removeAttribute(a);s.remove();return r}" +
+        "s.remove();return null" +
+        "})()"
+    );
 }
 
 // ---------------------------------------------------------------------------
 // Tool handler
 // ---------------------------------------------------------------------------
 
-/**
- * @param {{ action: string, text: string, tabId?: number }} args
- * @returns {Promise<string>} String representation of the execution result.
- * @throws {Error} on validation failure, tab resolution failure, or execution error.
- */
-async function handleJavaScriptTool(args) {
+function handleJavaScriptTool(args) {
     const { action, text, tabId: virtualTabId = null } = args || {};
 
     if (!action || action !== "javascript_exec") {
-        throw new Error("'javascript_exec' is the only supported action");
+        return Promise.reject(new Error("'javascript_exec' is the only supported action"));
     }
     if (!text || typeof text !== "string" || text.trim() === "") {
-        throw new Error("Code parameter is required");
+        return Promise.reject(new Error("Code parameter is required"));
     }
 
-    const realTabId = await globalThis.resolveTab(virtualTabId);
+    // Cancellation token: cancelled is set immediately by promise.cancel() regardless
+    // of which async step the chain is currently in (resolveTab, executeScript, or the
+    // async fallback). Each .then() step checks cancelled first to short-circuit early.
+    // cancelFn is upgraded from a flag-setter to a full settle() call once the async
+    // fallback Promise is constructed and owns listeners/timer.
+    let cancelled = false;
+    let cancelFn = function() { cancelled = true; };
 
-    let results;
-    try {
-        results = await globalThis.executeScriptWithTabGuard(
-            realTabId,
-            buildJavaScriptExecScript(text),
-            "javascript_tool"
-        );
-    } catch (err) {
-        if (err && /was closed during/.test(err.message)) throw err;
-        if (typeof globalThis.classifyExecuteScriptError === "function") {
-            throw globalThis.classifyExecuteScriptError("javascript_tool", realTabId, err);
-        }
-        throw err;
-    }
+    const promise = globalThis.resolveTab(virtualTabId).then(function(realTabId) {
+        if (cancelled) return Promise.reject(new Error("javascript_tool cancelled"));
 
-    if (!results || results.length === 0 || results[0] == null) {
-        throw new Error("javascript_tool: executeScript returned no result");
-    }
+        const correlationId = RESULT_FLAG + "_" + Math.random().toString(36).slice(2);
 
-    const r = results[0];
-    if (r.error) {
-        throw new Error(r.error);
-    }
+        return browser.tabs.executeScript(realTabId, {
+            code: buildBridge(text, correlationId),
+            runAt: "document_idle",
+        }).catch(function(err) {
+            const classified = typeof globalThis.classifyExecuteScriptError === "function"
+                ? globalThis.classifyExecuteScriptError("javascript_tool", realTabId, err)
+                : err;
+            throw classified instanceof Error ? classified : new Error(classified);
+        }).then(function(execResults) {
+            if (cancelled) return Promise.reject(new Error("javascript_tool cancelled"));
 
-    return r.value !== undefined ? String(r.value) : "undefined";
+            // Sync path: bridge returned result directly (safety net; with async IIFE this
+            // is always null since the attribute is never set synchronously).
+            const raw = execResults && execResults[0];
+            if (raw) {
+                let parsed;
+                try { parsed = JSON.parse(raw); } catch (_) { return String(raw); }
+                if (parsed.error) throw new Error(parsed.error);
+                return parsed.value !== undefined ? String(parsed.value) : "undefined";
+            }
+
+            // Async fallback: wait for relay (js-bridge-relay.js) to deliver result.
+            return new Promise(function(resolve, reject) {
+                let settled = false;
+                let timer;
+
+                function settle(value, isError) {
+                    if (settled) return;
+                    settled = true;
+                    clearTimeout(timer);
+                    browser.runtime.onMessage.removeListener(onMessage);
+                    browser.tabs.onRemoved.removeListener(onTabRemoved);
+                    isError ? reject(value instanceof Error ? value : new Error(value)) : resolve(value);
+                }
+
+                // Upgrade cancelFn: now that listeners and timer will be registered,
+                // cancel must call settle() to clean them up properly.
+                cancelFn = function() { settle(new Error("javascript_tool cancelled"), true); };
+
+                // If cancel() was called before we reached this point, settle immediately.
+                if (cancelled) { cancelFn(); return; }
+
+                function onMessage(message) {
+                    if (!message || !message[correlationId]) return;
+                    message.error ? settle(message.error, true) : settle(message.value !== undefined ? String(message.value) : "undefined", false);
+                }
+
+                function onTabRemoved(id) {
+                    if (id === realTabId) settle("Tab closed during javascript_tool", true);
+                }
+
+                browser.runtime.onMessage.addListener(onMessage);
+                browser.tabs.onRemoved.addListener(onTabRemoved);
+                timer = setTimeout(function() { settle("Script execution timed out after 30 seconds", true); }, TIMEOUT_MS);
+            });
+        });
+    });
+
+    // Attach .cancel() so callers can abandon the operation at any point.
+    // cancelFn starts as a flag-setter (for early cancel before async fallback is reached)
+    // and is upgraded to a full settle() call once listeners/timer are registered.
+    promise.cancel = function() { cancelFn(); };
+
+    return promise;
 }
-
-// ---------------------------------------------------------------------------
-// Registration
-// ---------------------------------------------------------------------------
 
 globalThis.registerTool("javascript_tool", handleJavaScriptTool);

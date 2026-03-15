@@ -47,6 +47,12 @@
         },
         {
             "matches": ["<all_urls>"],
+            "js": ["content-scripts/js-bridge-relay.js"],
+            "run_at": "document_idle",
+            "all_frames": false
+        },
+        {
+            "matches": ["<all_urls>"],
             "js": ["content-scripts/agent-visual-indicator.js"],
             "run_at": "document_idle",
             "all_frames": false
