@@ -98,6 +98,19 @@ function scheduleHideIndicator(tabId) {
 }
 
 /**
+ * Parse the raw poll response payload into an object.
+ * Accepts either a JSON string or a pre-parsed object.
+ * Throws SyntaxError on malformed JSON.
+ */
+function normalizePayload(response) {
+    const raw = response.payload;
+    if (typeof raw === "string") {
+        return JSON.parse(raw);
+    }
+    return raw;
+}
+
+/**
  * Poll the native app for pending tool requests.
  * Each phase (poll, parse, execute, respond) has its own try/catch so errors
  * in one phase do not misclassify errors from another.
@@ -134,9 +147,7 @@ async function pollForRequests() {
         // Phase 2: parse the tool request payload
         let payload;
         try {
-            payload = typeof response.payload === "string"
-                ? JSON.parse(response.payload)
-                : response.payload;
+            payload = normalizePayload(response);
         } catch (error) {
             console.error("Poll: failed to parse tool request payload:", error);
             isActive = false;
