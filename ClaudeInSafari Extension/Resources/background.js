@@ -145,6 +145,11 @@ async function pollForRequests() {
         const isScreenshotTool = payload.tool === "computer" &&
             !!(payload.args && SCREENSHOT_ACTIONS[payload.args.action]);
 
+        // Set currentRequestId before showing the indicator so a Stop handler
+        // that fires while the indicator is already visible sees the in-flight request.
+        currentRequestId = payload.requestId;
+        currentToolTabId = toolTabId;
+
         // Show indicator before the tool runs. showIndicatorOnTab calls sendMessage
         // synchronously (fire-and-forget) so the "show" action is dispatched before
         // the setTimeout(0) that yields to executeTool. Non-blocking — never blocks execution.
@@ -163,9 +168,6 @@ async function pollForRequests() {
                 showIndicatorOnTab(toolTabId);
             }
         }
-
-        currentRequestId = payload.requestId;
-        currentToolTabId = toolTabId;
 
         let result;
         try {

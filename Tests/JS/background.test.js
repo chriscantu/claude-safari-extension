@@ -389,8 +389,8 @@ describe("background.js — indicator hooks and STOP_AGENT", () => {
 
     loadBackground({ browser, executeTool });
 
-    // One await drains all microtasks from the first poll cycle including
-    // showIndicatorOnTab's two internal awaits (executeScript + sendMessage).
+    // Drain the poll cycle microtasks. showIndicatorOnTab is synchronous
+    // (fire-and-forget), so "show" is recorded before setTimeout(0) is reached.
     await Promise.resolve();
     jest.runAllTimers(); // setTimeout(0) fires -> executeTool runs
     await Promise.resolve();
