@@ -12,6 +12,9 @@
  *
  * The async IIFE wrapper enables `await` syntax at the top level of user code.
  *
+ * Cancellation: the returned Promise exposes a .cancel() method that settles the
+ * async fallback immediately, cleaning up all listeners and timers.
+ *
  * See Spec 012 (javascript-tool).
  */
 
@@ -39,8 +42,16 @@ function buildBridge(text, correlationId) {
         "function wr(d){document.documentElement.setAttribute(a,JSON.stringify(d))}" +
         "try{" +
         "var r=(async function(){return eval(" + JSON.stringify(text) + ")})();" +
-        "r.then(function(v){var s=(v===undefined)?'undefined':(typeof v==='string'?v:JSON.stringify(v,null,2)||'[circular]');if(s.length>" + MAX_OUTPUT + ")s=s.slice(0," + MAX_OUTPUT + ")+'\\n[truncated]';wr({value:s})},function(e){wr({error:String(e)})})" +
-        "}catch(e){wr({error:'JavaScript error: '+e.message+'\\n'+(e.stack||'')})}" +
+        "r.then(function(v){" +
+            "var s;" +
+            "if(v===undefined){s='undefined'}" +
+            "else if(typeof v==='string'){s=v}" +
+            "else if(v instanceof Element){s=Object.prototype.toString.call(v)+' (DOM element - use .outerHTML or .textContent to serialize)'}" +
+            "else{s=JSON.stringify(v,null,2)||'[circular]'}" +
+            "if(s.length>" + MAX_OUTPUT + ")s=s.slice(0," + MAX_OUTPUT + ")+'\\n[truncated]';" +
+            "wr({value:s})" +
+        "},function(e){wr({error:(e instanceof Error)?'JavaScript error: '+e.message+'\\n'+(e.stack||''):'JavaScript error: '+String(e)})})" +
+        "}catch(e){wr({error:'JavaScript error: '+e.message+'\\n'+(e.stack||'')})}"+
         "})()";
 
     // Bridge IIFE: runs in isolated world via executeScript.
@@ -64,65 +75,79 @@ function buildBridge(text, correlationId) {
 // Tool handler
 // ---------------------------------------------------------------------------
 
-async function handleJavaScriptTool(args) {
+function handleJavaScriptTool(args) {
     const { action, text, tabId: virtualTabId = null } = args || {};
 
     if (!action || action !== "javascript_exec") {
-        throw new Error("'javascript_exec' is the only supported action");
+        return Promise.reject(new Error("'javascript_exec' is the only supported action"));
     }
     if (!text || typeof text !== "string" || text.trim() === "") {
-        throw new Error("Code parameter is required");
+        return Promise.reject(new Error("Code parameter is required"));
     }
 
-    const realTabId = await globalThis.resolveTab(virtualTabId);
-    const correlationId = RESULT_FLAG + "_" + Math.random().toString(36).slice(2);
+    // cancelFn is set once the async fallback Promise is constructed.
+    // Calling promise.cancel() before that point is a safe no-op.
+    let cancelFn = null;
 
-    const execResults = await browser.tabs.executeScript(realTabId, {
-        code: buildBridge(text, correlationId),
-        runAt: "document_idle",
-    }).catch((err) => {
-        const classified = typeof globalThis.classifyExecuteScriptError === "function"
-            ? globalThis.classifyExecuteScriptError("javascript_tool", realTabId, err)
-            : err;
-        throw classified instanceof Error ? classified : new Error(classified);
+    const promise = globalThis.resolveTab(virtualTabId).then(function(realTabId) {
+        const correlationId = RESULT_FLAG + "_" + Math.random().toString(36).slice(2);
+
+        return browser.tabs.executeScript(realTabId, {
+            code: buildBridge(text, correlationId),
+            runAt: "document_idle",
+        }).catch(function(err) {
+            const classified = typeof globalThis.classifyExecuteScriptError === "function"
+                ? globalThis.classifyExecuteScriptError("javascript_tool", realTabId, err)
+                : err;
+            throw classified instanceof Error ? classified : new Error(classified);
+        }).then(function(execResults) {
+            // Sync path: bridge returned result directly (safety net; with async IIFE this
+            // is always null since the attribute is never set synchronously).
+            const raw = execResults && execResults[0];
+            if (raw) {
+                let parsed;
+                try { parsed = JSON.parse(raw); } catch (_) { return String(raw); }
+                if (parsed.error) throw new Error(parsed.error);
+                return parsed.value !== undefined ? String(parsed.value) : "undefined";
+            }
+
+            // Async fallback: wait for relay (js-bridge-relay.js) to deliver result.
+            return new Promise(function(resolve, reject) {
+                let settled = false;
+                let timer;
+
+                function settle(value, isError) {
+                    if (settled) return;
+                    settled = true;
+                    clearTimeout(timer);
+                    browser.runtime.onMessage.removeListener(onMessage);
+                    browser.tabs.onRemoved.removeListener(onTabRemoved);
+                    isError ? reject(value instanceof Error ? value : new Error(value)) : resolve(value);
+                }
+
+                // Expose settle via cancelFn so the outer promise.cancel() can trigger it.
+                cancelFn = function() { settle(new Error("javascript_tool cancelled"), true); };
+
+                function onMessage(message) {
+                    if (!message || !message[correlationId]) return;
+                    message.error ? settle(message.error, true) : settle(message.value !== undefined ? String(message.value) : "undefined", false);
+                }
+
+                function onTabRemoved(id) {
+                    if (id === realTabId) settle("Tab closed during javascript_tool", true);
+                }
+
+                browser.runtime.onMessage.addListener(onMessage);
+                browser.tabs.onRemoved.addListener(onTabRemoved);
+                timer = setTimeout(function() { settle("Script execution timed out after 30 seconds", true); }, TIMEOUT_MS);
+            });
+        });
     });
 
-    // Sync path: bridge returned result directly
-    const raw = execResults && execResults[0];
-    if (raw) {
-        let parsed;
-        try { parsed = JSON.parse(raw); } catch (_) { return String(raw); }
-        if (parsed.error) throw new Error(parsed.error);
-        return parsed.value !== undefined ? String(parsed.value) : "undefined";
-    }
+    // Attach .cancel() so callers can clean up listeners/timer on early abandonment.
+    promise.cancel = function() { if (cancelFn) cancelFn(); };
 
-    // Async fallback: wait for relay
-    return new Promise((resolve, reject) => {
-        let settled = false;
-        let timer;
-
-        function settle(value, isError) {
-            if (settled) return;
-            settled = true;
-            clearTimeout(timer);
-            browser.runtime.onMessage.removeListener(onMessage);
-            browser.tabs.onRemoved.removeListener(onTabRemoved);
-            isError ? reject(value instanceof Error ? value : new Error(value)) : resolve(value);
-        }
-
-        function onMessage(message) {
-            if (!message || !message[correlationId]) return;
-            message.error ? settle(message.error, true) : settle(message.value !== undefined ? String(message.value) : "undefined", false);
-        }
-
-        function onTabRemoved(id) {
-            if (id === realTabId) settle("Tab closed during javascript_tool", true);
-        }
-
-        browser.runtime.onMessage.addListener(onMessage);
-        browser.tabs.onRemoved.addListener(onTabRemoved);
-        timer = setTimeout(() => settle("Script execution timed out after 30 seconds", true), TIMEOUT_MS);
-    });
+    return promise;
 }
 
 globalThis.registerTool("javascript_tool", handleJavaScriptTool);

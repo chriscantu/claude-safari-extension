@@ -17,8 +17,12 @@ access the DOM, `window` object, page variables, and functions defined by the pa
 `javascript-tool.js` must be added to `manifest.json` `background.scripts` and the
 load-order comment in `background.js`. See CLAUDE.md Code Review Checklist.
 
-`js-bridge-relay.js` must be in `manifest.json` `content_scripts` with `"run_at": "document_idle"`
-and `"all_frames": true`.
+`js-bridge-relay.js` must be in `manifest.json` `content_scripts` with its **own entry**:
+`"run_at": "document_idle"` and **`"all_frames": false`**.
+
+Placing the relay in a shared `all_frames: true` block causes it to run inside sub-frames,
+which can consume the top-frame result attribute before the correct frame reads it. The relay
+must only run in the top-level frame.
 
 ## Tool Arguments
 
@@ -32,13 +36,15 @@ and `"all_frames": true`.
 
 ### Code Execution Model
 
-- The `text` is evaluated via `eval()` in the page's main world. The result of the
-  **last expression** is returned automatically. (Note: `eval()` is the correct mechanism
-  here — this tool replicates the browser DevTools console over a local-only MCP socket.)
+- The `text` is wrapped in an `async IIFE` and evaluated via `eval()` in the page's main
+  world. The async IIFE enables `await` at the top level of user code, and means the result
+  is **always** delivered through the relay (async path). (Note: `eval()` is the correct
+  mechanism here — this tool replicates the browser DevTools console over a local-only MCP
+  socket.)
 - Callers should **not** use `return` statements — the code is `eval()`'d directly,
   and the last expression's value is captured.
-- Async code: if `eval()` returns a Promise, its `.then()` callback writes the resolved
-  value to a DOM attribute for relay back to the background (see Async Path below).
+- **All results go through the relay** — the async IIFE always produces a Promise,
+  so `js-bridge-relay.js` always delivers the result (never via executeScript return value).
 
 #### Examples
 
@@ -81,37 +87,35 @@ evaluates the user's code and writes the result as JSON to a DOM attribute on
 ```
 Bridge IIFE (isolated world)          Main-world <script>
 ─────────────────────────────         ──────────────────────
-1. createElement('script')      →     1. evaluate(userCode)
-2. set textContent              →     2. setAttribute(attr, JSON.stringify(result))
-3. appendChild(script)          →        (sync for non-Promise results)
-4. getAttribute(attr)           ←     3. For Promises: .then() writes attr later
-5. Return attr value (sync)
-   OR return null (async)
+1. createElement('script')      →     1. async IIFE wraps eval(userCode)
+2. set textContent              →     2. async IIFE always returns a Promise
+3. appendChild(script)          →     3. .then() writes setAttribute(attr, JSON) later
+4. getAttribute(attr) → null    ←        (attribute never set synchronously)
+5. s.remove(); return null            js-bridge-relay.js polls attr every 50ms
+                                      When found: removeAttribute + sendMessage(result)
+                                      background onMessage listener resolves the Promise
 ```
 
-### Dual-Path Result Delivery
+### Result Delivery — Async-Only
 
-Results are delivered via one of two paths depending on whether the evaluated code returns
-synchronously or asynchronously:
+Because user code is wrapped in an `async IIFE`, the result is **always** a Promise.
+The DOM attribute is written by the `.then()` callback after `appendChild` returns, so
+the bridge IIFE always reads `null` and returns `null`. All results are delivered via
+the relay path:
 
-**Sync path (non-Promise results):**
-1. Main-world `<script>` evaluates user code.
-2. Result is not a Promise → immediately writes JSON to `data-claude-js-result-{corrId}`
-   attribute on `<html>`.
-3. Bridge IIFE reads the attribute synchronously (DOM attributes set by main-world scripts
-   ARE visible to isolated-world scripts immediately — verified).
-4. Bridge returns the JSON string as the `executeScript` result.
-5. Background handler reads `execResults[0]`, parses JSON, returns to caller.
-
-**Async path (Promise results):**
-1. Main-world `<script>` evaluates user code.
-2. Result IS a Promise → `.then()` callback will write the attribute later.
-3. Bridge IIFE reads attribute → `null` (not set yet) → returns `null`.
+1. Main-world `<script>` wraps user code in `(async function(){ return eval(code) })()`.
+2. The async IIFE's `.then()` writes the result JSON to `data-claude-js-result-{corrId}`
+   on `<html>` after the bridge IIFE has already returned.
+3. Bridge IIFE reads attribute → `null` → returns `null`.
 4. Background handler sees `execResults[0]` is null → enters async fallback.
 5. `js-bridge-relay.js` (persistent content script) polls the DOM attribute every 50ms.
 6. When attribute appears, relay reads it, removes it, and calls
    `browser.runtime.sendMessage({ [corrId]: true, ...parsed })`.
 7. Background handler's `onMessage` listener receives the relay and resolves the Promise.
+
+**Note:** The bridge IIFE contains dead-code for the sync path (`if(r){...return r}`) as
+a safety net. It would only activate if user code somehow set the attribute synchronously,
+which cannot happen with the async IIFE wrapper.
 
 **Why the bridge IIFE cannot poll (async path):**
 Safari MV2 tears down the `executeScript` isolated-world context after the IIFE returns
@@ -144,8 +148,11 @@ are case-insensitive.
 - Primitive values: converted to string via `String(value)`.
 - Objects/Arrays: serialized via `JSON.stringify(value, null, 2)`.
 - `undefined`: returned as the string `"undefined"`.
+- DOM Elements: detected via `instanceof Element` — returns `"[object HTMLFooElement]
+  (DOM element - use .outerHTML or .textContent to serialize)"` with a helpful note.
 - Circular references: caught by `JSON.stringify` — uses `'[circular]'` fallback.
-- Errors in user code: caught by try/catch, returned as `{error: "JavaScript error: ..."}`.
+- Errors in user code: returned as `{error: "JavaScript error: <message>\n<stack>"}`,
+  matching the sync-path catch format. Non-Error throws use `String(e)` as the message.
 
 ### Timeout Enforcement
 
@@ -157,6 +164,20 @@ The background handler registers:
 All three share a `settled` flag and a `settle()` function. The first to fire wins; the
 others are cleaned up. The Swift ToolRouter has a separate 30-second timeout on the native
 side.
+
+### Cancellation
+
+The Promise returned by `handleJavaScriptTool` exposes a `.cancel()` method per the
+CLAUDE.md requirement for Promises owning external resources. Calling `promise.cancel()`
+immediately settles the async fallback Promise with an error, releasing all listeners and
+timers. If called before the async fallback is reached (e.g., while `resolveTab` or
+`executeScript` is pending), cancel is a safe no-op.
+
+```js
+const promise = handleJavaScriptTool(args);
+// ...
+promise.cancel(); // cleans up onMessage, onRemoved, setTimeout
+```
 
 ## Return Value
 

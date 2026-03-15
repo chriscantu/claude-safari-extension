@@ -463,6 +463,63 @@ describe("javascript_tool", () => {
         });
     });
 
+    describe("cancellation", () => {
+        test("handler returns a Promise with a .cancel() method", async () => {
+            const handler = loadJavaScriptTool({
+                browser: makeBrowserMock({ syncResult: JSON.stringify({ value: "ok" }) }),
+                resolveTab: jest.fn(async () => 1),
+            });
+            const promise = handler({ action: "javascript_exec", text: "1+1" });
+            expect(typeof promise.cancel).toBe("function");
+            await promise; // ensure cleanup
+        });
+
+        test(".cancel() before async fallback is a no-op (does not throw)", () => {
+            const handler = loadJavaScriptTool({
+                browser: makeBrowserMock({ syncResult: null, asyncResult: null }),
+                resolveTab: jest.fn(async () => 1),
+            });
+            const promise = handler({ action: "javascript_exec", text: "1+1" });
+            // cancel() before resolveTab resolves — cancelFn is null, should not throw
+            expect(() => promise.cancel()).not.toThrow();
+        });
+
+        test(".cancel() during async fallback rejects with 'cancelled'", async () => {
+            jest.useFakeTimers();
+            const browser = makeBrowserMock({ syncResult: null, asyncResult: null });
+            const handler = loadJavaScriptTool({ browser, resolveTab: jest.fn(async () => 1) });
+
+            const promise = handler({ action: "javascript_exec", text: "new Promise(()=>{})" });
+            // Let handler reach the async fallback (resolveTab → executeScript → new Promise setup)
+            await Promise.resolve();
+            await Promise.resolve();
+            await Promise.resolve();
+            await Promise.resolve();
+
+            promise.cancel();
+
+            await expect(promise).rejects.toThrow(/cancelled/);
+        });
+
+        test(".cancel() cleans up listeners", async () => {
+            jest.useFakeTimers();
+            const browser = makeBrowserMock({ syncResult: null, asyncResult: null });
+            const handler = loadJavaScriptTool({ browser, resolveTab: jest.fn(async () => 1) });
+
+            const promise = handler({ action: "javascript_exec", text: "new Promise(()=>{})" });
+            await Promise.resolve();
+            await Promise.resolve();
+            await Promise.resolve();
+            await Promise.resolve();
+
+            promise.cancel();
+            await expect(promise).rejects.toThrow();
+
+            expect(browser.runtime.onMessage.removeListener).toHaveBeenCalled();
+            expect(browser.tabs.onRemoved.removeListener).toHaveBeenCalled();
+        });
+    });
+
     describe("timeout", () => {
         test("T15 -- async code that never resolves times out after 30s", async () => {
             jest.useFakeTimers();
