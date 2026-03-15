@@ -8,8 +8,6 @@
 
 **Tech Stack:** Swift / XCTest (L3, L5), JavaScript / Jest (M5, M6)
 
-**Spec:** `docs/plans/2026-03-15-phase7-cleanup.md`
-
 ---
 
 ## Chunk 1: Swift changes (L5, L3)
