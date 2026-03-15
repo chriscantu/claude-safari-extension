@@ -222,9 +222,4 @@ registerTool("tabs_create_mcp", handleTabsCreateMcp);
 // Expose resolveTab globally so other tool modules can use it
 if (typeof globalThis !== "undefined") {
     globalThis.resolveTab = resolveTab;
-
-    // Test hook: allows tests to capture the resolveTab function directly
-    if (typeof globalThis.__captureResolveTab === "function") {
-        globalThis.__captureResolveTab(resolveTab);
-    }
 }

@@ -137,9 +137,8 @@ describe("tabs-manager", () => {
         globalThis.browser = browser;
         const registrations = {};
         globalThis.registerTool = (name, handler) => { registrations[name] = handler; };
-        let resolveTabFn;
-        globalThis.__captureResolveTab = (fn) => { resolveTabFn = fn; };
         require("../../ClaudeInSafari Extension/Resources/tools/tabs-manager.js");
+        const resolveTabFn = globalThis.resolveTab;
 
         expect(resolveTabFn).toBeDefined();
         const realId = await resolveTabFn(null);
@@ -153,9 +152,8 @@ describe("tabs-manager", () => {
         globalThis.browser = browser;
         const registrations = {};
         globalThis.registerTool = (name, handler) => { registrations[name] = handler; };
-        let resolveTabFn;
-        globalThis.__captureResolveTab = (fn) => { resolveTabFn = fn; };
         require("../../ClaudeInSafari Extension/Resources/tools/tabs-manager.js");
+        const resolveTabFn = globalThis.resolveTab;
 
         // Create a tab first
         await registrations["tabs_create_mcp"]({});
@@ -201,9 +199,8 @@ describe("tabs-manager", () => {
         globalThis.browser = browser;
         const registrations = {};
         globalThis.registerTool = (name, handler) => { registrations[name] = handler; };
-        let resolveTabFn;
-        globalThis.__captureResolveTab = (fn) => { resolveTabFn = fn; };
         require("../../ClaudeInSafari Extension/Resources/tools/tabs-manager.js");
+        const resolveTabFn = globalThis.resolveTab;
 
         await expect(resolveTabFn(null)).rejects.toThrow("No active tab found in the current window");
     });
