@@ -296,4 +296,47 @@ final class MCPMessageTests: XCTestCase {
         XCTAssertNotNil(response.error)
         XCTAssertEqual(response.error?.content.first?.text, "Extension response contained no valid content blocks")
     }
+
+    // MARK: - AnyCodable edge case coverage
+
+    func testAnyCodableNullRoundTrip() throws {
+        let json = "null".data(using: .utf8)!
+        let decoded = try JSONDecoder().decode(AnyCodable.self, from: json)
+        XCTAssertTrue(decoded.value is NSNull)
+        let reencoded = try JSONEncoder().encode(decoded)
+        XCTAssertEqual(String(data: reencoded, encoding: .utf8), "null")
+    }
+
+    func testAnyCodableStringRoundTrip() throws {
+        let json = #""hello world""#.data(using: .utf8)!
+        let decoded = try JSONDecoder().decode(AnyCodable.self, from: json)
+        XCTAssertEqual(decoded.value as? String, "hello world")
+        let reencoded = try JSONEncoder().encode(decoded)
+        XCTAssertEqual(String(data: reencoded, encoding: .utf8), #""hello world""#)
+    }
+
+    func testAnyCodableNestedArrayRoundTrip() throws {
+        let json = #"[1,"two",true,null]"#.data(using: .utf8)!
+        let decoded = try JSONDecoder().decode(AnyCodable.self, from: json)
+        let arr = decoded.value as? [Any]
+        XCTAssertEqual(arr?.count, 4)
+        let reencoded = try JSONEncoder().encode(decoded)
+        // Verify the full JSON roundtrip preserves types exactly.
+        // Checking the raw string catches Int/Bool coercion bugs (true must not become 1).
+        let reencodedStr = String(data: reencoded, encoding: .utf8)!
+        XCTAssertEqual(reencodedStr, #"[1,"two",true,null]"#)
+    }
+
+    func testAnyCodableNestedDictRoundTrip() throws {
+        let json = #"{"a":1,"b":"two","c":null}"#.data(using: .utf8)!
+        let decoded = try JSONDecoder().decode(AnyCodable.self, from: json)
+        let dict = decoded.value as? [String: Any]
+        XCTAssertEqual(dict?.count, 3)
+        let reencoded = try JSONEncoder().encode(decoded)
+        let result = try JSONSerialization.jsonObject(with: reencoded) as? [String: Any]
+        XCTAssertNotNil(result)
+        XCTAssertEqual(result?["a"] as? Int, 1)
+        XCTAssertEqual(result?["b"] as? String, "two")
+        XCTAssertTrue(result?["c"] is NSNull)
+    }
 }
