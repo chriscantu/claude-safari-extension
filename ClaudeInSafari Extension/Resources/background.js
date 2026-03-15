@@ -271,6 +271,48 @@ if (typeof browser.alarms !== "undefined") {
     }
 }
 
+// Handle messages from content scripts (Stop button, heartbeat, dismiss).
+// Guard: browser.runtime.onMessage may be absent in test environments that
+// use the minimal makeBrowserMock (which only provides sendNativeMessage).
+if (typeof browser.runtime !== "undefined" && browser.runtime.onMessage) {
+  browser.runtime.onMessage.addListener(function (message, sender, sendResponse) {
+    if (message.type === "STATIC_INDICATOR_HEARTBEAT") {
+      sendResponse({ success: true });
+      return true; // keep channel open for synchronous sendResponse
+    }
+
+    if (message.type === "STOP_AGENT") {
+      // Cancel the in-flight extension-forwarded tool call by injecting an error
+      // tool_response. ToolRouter picks it up via its normal poll loop — no new
+      // native message type is required.
+      var reqId = currentRequestId;
+      if (reqId) {
+        currentRequestId = null;
+        browser.runtime.sendNativeMessage(NATIVE_APP_ID, {
+          type: "tool_response",
+          requestId: reqId,
+          error: { content: [{ type: "text", text: "Cancelled by user" }] },
+        }).catch(function (e) {
+          console.warn("indicator: failed to send cancel response:", e && e.message);
+        });
+      }
+      // Hide on the tab that sent Stop, or the current tool's tab
+      var senderTabId = sender && sender.tab && sender.tab.id;
+      var tabToHide   = (senderTabId != null) ? senderTabId : currentToolTabId;
+      if (tabToHide != null) hideIndicatorOnTab(tabToHide);
+
+      sendResponse({ success: true });
+      return true;
+    }
+
+    if (message.type === "DISMISS_STATIC_INDICATOR_FOR_GROUP") {
+      // No-op for PR A — full tab-group iteration deferred to PR B
+      sendResponse({ success: true });
+      return true;
+    }
+  });
+}
+
 // Start polling when the extension loads
 pollForRequests();
 

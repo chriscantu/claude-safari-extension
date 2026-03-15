@@ -543,4 +543,79 @@ describe("background.js — indicator hooks and STOP_AGENT", () => {
     expect(executeIdx).toBeGreaterThan(hideForTool);
     expect(showAfterTool).toBeGreaterThan(executeIdx);
   });
+
+  // T_stop1 — STOP_AGENT while in-flight: error tool_response sent
+  test("T_stop1: STOP_AGENT while currentRequestId set sends error tool_response with Cancelled by user", async () => {
+    const payload = {
+      tool: "navigate",
+      args: { url: "https://slow.example.com", tabId: 9 },
+      requestId: "req-stop-1",
+    };
+    const browser = makeBrowserMockWithMessaging({
+      nativeResponses: [
+        { type: "tool_request", payload: JSON.stringify(payload) },
+        { type: "idle" },
+      ],
+    });
+
+    // executeTool hangs until explicitly resolved by the test
+    let resolveExec;
+    const execPromise = new Promise(function (res) { resolveExec = res; });
+    const executeTool = jest.fn(() => execPromise);
+
+    const onMessage = loadBackgroundWithMessaging({ browser, executeTool });
+
+    await Promise.resolve(); // Phase 1 poll resolves, Phase 3 setup runs
+    jest.runAllTimers();     // setTimeout(0) fires -> executeTool called (hangs)
+    await Promise.resolve(); // setTimeout(0) callback started; currentRequestId is now set
+
+    // Simulate Stop button click from content script
+    onMessage({ type: "STOP_AGENT" }, { tab: { id: 9 } }, jest.fn());
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const cancelCalls = browser.runtime.sendNativeMessage.mock.calls
+      .filter(([, msg]) => msg.type === "tool_response" && msg.error);
+    expect(cancelCalls.length).toBeGreaterThanOrEqual(1);
+    expect(cancelCalls[0][1].requestId).toBe("req-stop-1");
+    expect(cancelCalls[0][1].error.content[0].text).toContain("Cancelled by user");
+
+    // Clean up the hanging promise so Jest does not leak
+    resolveExec({ result: { content: [{ type: "text", text: "late result" }] } });
+    await execPromise;
+  });
+
+  // T_stop2 — STOP_AGENT with no in-flight request: no extra tool_response sent
+  test("T_stop2: STOP_AGENT with no in-flight request sends no tool_response", async () => {
+    const browser = makeBrowserMockWithMessaging({
+      nativeResponses: [{ type: "idle" }],
+    });
+    const onMessage = loadBackgroundWithMessaging({ browser });
+
+    await Promise.resolve(); // idle poll
+
+    const beforeCount = browser.runtime.sendNativeMessage.mock.calls
+      .filter(([, msg]) => msg.type === "tool_response").length;
+
+    onMessage({ type: "STOP_AGENT" }, { tab: { id: 1 } }, jest.fn());
+    await Promise.resolve();
+
+    const afterCount = browser.runtime.sendNativeMessage.mock.calls
+      .filter(([, msg]) => msg.type === "tool_response").length;
+    expect(afterCount).toBe(beforeCount);
+  });
+
+  // T_heartbeat1 — STATIC_INDICATOR_HEARTBEAT: sendResponse({ success: true })
+  test("T_heartbeat1: STATIC_INDICATOR_HEARTBEAT calls sendResponse with success: true", async () => {
+    const browser = makeBrowserMockWithMessaging({
+      nativeResponses: [{ type: "idle" }],
+    });
+    const onMessage = loadBackgroundWithMessaging({ browser });
+
+    await Promise.resolve();
+
+    const sendResponse = jest.fn();
+    onMessage({ type: "STATIC_INDICATOR_HEARTBEAT" }, {}, sendResponse);
+    expect(sendResponse).toHaveBeenCalledWith({ success: true });
+  });
 });
