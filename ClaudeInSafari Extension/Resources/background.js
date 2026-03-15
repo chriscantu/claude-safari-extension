@@ -26,6 +26,64 @@ const POLL_IDLE_INTERVAL_MS = 5000;
 let isActive = false;
 let pollTimer = null;
 
+// ── Indicator state ───────────────────────────────────────────────────────
+var currentRequestId   = null; // requestId of the in-flight extension-forwarded tool call
+var currentToolTabId   = null; // tabId of the in-flight tool call
+var hideIndicatorTimer = null; // debounce timer handle for post-tool indicator hide
+
+// Screenshot/zoom actions must suppress the glow border so it does not appear
+// in ScreenCaptureKit captures.
+var SCREENSHOT_ACTIONS = { screenshot: true, zoom: true };
+
+/**
+ * Send the show message then re-inject the indicator content script.
+ * sendMessage is called first so the "show" action is dispatched synchronously
+ * (before the setTimeout(0) that yields to executeTool), satisfying the
+ * ordering guarantee tested by T_ind1. Both steps are fire-and-forget:
+ * failures are logged as warnings and must never block tool execution.
+ */
+function showIndicatorOnTab(tabId) {
+  browser.tabs.sendMessage(tabId, {
+    type: "CLAUDE_AGENT_INDICATOR",
+    action: "show",
+  }).catch(function (e) {
+    console.warn("indicator: show message failed (non-critical):", e && e.message);
+  });
+  // Re-inject the content script after sending the show message (idempotent via
+  // installation guard in the content script itself).
+  browser.tabs.executeScript(tabId, {
+    file: "content-scripts/agent-visual-indicator.js",
+  }).catch(function (e) {
+    console.warn("indicator: re-inject failed (non-critical):", e && e.message);
+  });
+}
+
+/**
+ * Send the hide message to a tab. Failure is non-critical.
+ */
+async function hideIndicatorOnTab(tabId) {
+  try {
+    await browser.tabs.sendMessage(tabId, {
+      type: "CLAUDE_AGENT_INDICATOR",
+      action: "hide",
+    });
+  } catch (e) {
+    console.warn("indicator: hide message failed (non-critical):", e && e.message);
+  }
+}
+
+/**
+ * Schedule a hide 500ms from now. Cancels any pending hide so rapid back-to-back
+ * tool calls keep the indicator visible throughout the sequence.
+ */
+function scheduleHideIndicator(tabId) {
+  if (hideIndicatorTimer !== null) clearTimeout(hideIndicatorTimer);
+  hideIndicatorTimer = setTimeout(function () {
+    hideIndicatorTimer = null;
+    if (tabId != null) hideIndicatorOnTab(tabId);
+  }, 500);
+}
+
 /**
  * Poll the native app for pending tool requests.
  * Each phase (poll, parse, execute, respond) has its own try/catch so errors
@@ -81,6 +139,38 @@ async function pollForRequests() {
         // NOTE: This pattern is safe only because "persistent": true prevents the
         // background page from being torn down between setTimeout scheduling and
         // callback execution.
+        const toolTabId = (payload.args && payload.args.tabId != null)
+            ? payload.args.tabId
+            : null;
+        const isScreenshotTool = payload.tool === "computer" &&
+            !!(payload.args && SCREENSHOT_ACTIONS[payload.args.action]);
+
+        // Set currentRequestId before showing the indicator so a Stop handler
+        // that fires while the indicator is already visible sees the in-flight request.
+        currentRequestId = payload.requestId;
+        currentToolTabId = toolTabId;
+
+        // Show indicator before the tool runs. showIndicatorOnTab calls sendMessage
+        // synchronously (fire-and-forget) so the "show" action is dispatched before
+        // the setTimeout(0) that yields to executeTool. Non-blocking — never blocks execution.
+        if (toolTabId != null) {
+            if (hideIndicatorTimer !== null) {
+                clearTimeout(hideIndicatorTimer);
+                hideIndicatorTimer = null;
+            }
+            if (isScreenshotTool) {
+                // Suppress glow immediately so ScreenCaptureKit does not capture it.
+                browser.tabs.sendMessage(toolTabId, {
+                    type: "CLAUDE_AGENT_INDICATOR",
+                    action: "hide_for_tool",
+                }).catch(function (e) {
+                    console.warn("indicator: hide_for_tool message failed (non-critical):", e && e.message);
+                });
+            } else {
+                showIndicatorOnTab(toolTabId);
+            }
+        }
+
         let result;
         try {
             result = await new Promise((resolve, reject) => {
@@ -92,8 +182,36 @@ async function pollForRequests() {
                     }
                 }, 0);
             });
+
+            // Check whether this request was cancelled by the Stop handler while the
+            // tool was running. If so, the indicator is already hidden and the error
+            // response has already been sent — skip Phase 4.
+            if (currentRequestId === null) {
+                currentToolTabId = null;
+                isActive = false;
+                return;
+            }
+            currentRequestId = null;
+            currentToolTabId = null;
+
+            // Post-tool indicator: restore (screenshot) or schedule hide (all others).
+            if (toolTabId != null) {
+                if (isScreenshotTool) {
+                    browser.tabs.sendMessage(toolTabId, {
+                        type: "CLAUDE_AGENT_INDICATOR",
+                        action: "show_after_tool",
+                    }).catch(function (e) {
+                        console.warn("indicator: show_after_tool message failed (non-critical):", e && e.message);
+                    });
+                } else {
+                    scheduleHideIndicator(toolTabId);
+                }
+            }
         } catch (error) {
             console.error("Poll: tool execution error for", payload.tool, ":", error);
+            currentRequestId = null;
+            currentToolTabId = null;
+            scheduleHideIndicator(toolTabId);
             try {
                 await browser.runtime.sendNativeMessage(NATIVE_APP_ID, {
                     type: "tool_response",
@@ -157,6 +275,52 @@ if (typeof browser.alarms !== "undefined") {
             console.warn("computer: stale alarm cleanup failed (non-critical):", err);
         });
     }
+}
+
+// Handle messages from content scripts (Stop button, heartbeat, dismiss).
+// Guard: browser.runtime.onMessage may be absent in test environments that
+// use the minimal makeBrowserMock (which only provides sendNativeMessage).
+if (typeof browser.runtime !== "undefined" && browser.runtime.onMessage) {
+  browser.runtime.onMessage.addListener(function (message, sender, sendResponse) {
+    if (message.type === "STATIC_INDICATOR_HEARTBEAT") {
+      sendResponse({ success: true });
+      return true; // keep channel open for synchronous sendResponse
+    }
+
+    if (message.type === "STOP_AGENT") {
+      // Cancel the in-flight extension-forwarded tool call by injecting an error
+      // tool_response. ToolRouter picks it up via its normal poll loop — no new
+      // native message type is required.
+      var reqId = currentRequestId;
+      // Capture and clear both state vars atomically before any async work
+      var savedToolTabId = currentToolTabId;
+      if (reqId) {
+        currentRequestId = null;
+        currentToolTabId = null;
+        browser.runtime.sendNativeMessage(NATIVE_APP_ID, {
+          type: "tool_response",
+          requestId: reqId,
+          error: { content: [{ type: "text", text: "Cancelled by user" }] },
+        }).catch(function (e) {
+          // Failure means the CLI did not receive the cancel — it will time out naturally.
+          console.error("indicator: failed to send cancel response:", e && e.message);
+        });
+      }
+      // Hide on the tab that sent Stop, or the current tool's tab
+      var senderTabId = sender && sender.tab && sender.tab.id;
+      var tabToHide   = (senderTabId != null) ? senderTabId : savedToolTabId;
+      if (tabToHide != null) hideIndicatorOnTab(tabToHide);
+
+      sendResponse({ success: true });
+      return true;
+    }
+
+    if (message.type === "DISMISS_STATIC_INDICATOR_FOR_GROUP") {
+      // No-op for PR A — full tab-group iteration deferred to PR B
+      sendResponse({ success: true });
+      return true;
+    }
+  });
 }
 
 // Start polling when the extension loads

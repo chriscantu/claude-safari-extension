@@ -323,3 +323,299 @@ describe("background.js poll loop", () => {
         expect(() => loadBackground({ browser })).not.toThrow();
     });
 });
+
+// ---------------------------------------------------------------------------
+// Extended mock — adds tabs.sendMessage, tabs.executeScript, onMessage capture
+// Used by indicator and STOP_AGENT tests only; does not affect T1-T12.
+// ---------------------------------------------------------------------------
+
+function makeBrowserMockWithMessaging(opts) {
+  var base = makeBrowserMock(opts);
+  var onMessageHandler = null;
+  base.tabs.sendMessage   = jest.fn(async () => {});
+  base.tabs.executeScript = jest.fn(async () => {});
+  base.runtime.onMessage  = {
+    addListener: jest.fn(function (fn) { onMessageHandler = fn; }),
+  };
+  base._getOnMessageHandler = function () { return onMessageHandler; };
+  return base;
+}
+
+function loadBackgroundWithMessaging(opts) {
+  var browser     = opts.browser;
+  var executeTool = opts.executeTool;
+  loadBackground({ browser: browser, executeTool: executeTool });
+  return browser._getOnMessageHandler();
+}
+
+describe("background.js — indicator hooks and STOP_AGENT", () => {
+  beforeEach(() => {
+    jest.useFakeTimers();
+    jest.spyOn(console, "warn").mockImplementation(() => {});
+    jest.spyOn(console, "error").mockImplementation(() => {});
+    jest.spyOn(console, "log").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
+    jest.restoreAllMocks();
+    jest.resetModules();
+    delete globalThis.browser;
+    delete globalThis.NATIVE_APP_ID;
+    delete globalThis.executeTool;
+  });
+
+  // T_ind1 — show called before executeTool
+  test("T_ind1: tabs.sendMessage show sent before executeTool is called", async () => {
+    const calls = [];
+    const payload = {
+      tool: "navigate",
+      args: { url: "https://example.com", tabId: 42 },
+      requestId: "r1",
+    };
+    const browser = makeBrowserMockWithMessaging({
+      nativeResponses: [
+        { type: "tool_request", payload: JSON.stringify(payload) },
+        { type: "idle" },
+      ],
+    });
+    const executeTool = jest.fn(async () => {
+      calls.push("executeTool");
+      return { result: { content: [{ type: "text", text: "done" }] } };
+    });
+    browser.tabs.sendMessage = jest.fn(async (_tabId, msg) => {
+      if (msg && msg.action) calls.push("sendMessage:" + msg.action);
+    });
+
+    loadBackground({ browser, executeTool });
+
+    // Drain the poll cycle microtasks. showIndicatorOnTab is synchronous
+    // (fire-and-forget), so "show" is recorded before setTimeout(0) is reached.
+    await Promise.resolve();
+    jest.runAllTimers(); // setTimeout(0) fires -> executeTool runs
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const showIdx    = calls.indexOf("sendMessage:show");
+    const executeIdx = calls.indexOf("executeTool");
+    expect(showIdx).toBeGreaterThanOrEqual(0);
+    expect(executeIdx).toBeGreaterThan(showIdx);
+  });
+
+  // T_ind2 — hide debounced 500ms after tool completes
+  test("T_ind2: tabs.sendMessage hide sent 500ms after tool completes (not immediately)", async () => {
+    const payload = {
+      tool: "navigate",
+      args: { url: "https://example.com", tabId: 42 },
+      requestId: "r2",
+    };
+    const browser = makeBrowserMockWithMessaging({
+      nativeResponses: [
+        { type: "tool_request", payload: JSON.stringify(payload) },
+        { type: "idle" },
+      ],
+    });
+
+    loadBackground({ browser });
+
+    await Promise.resolve();
+    jest.runAllTimers();
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    // Hide not yet sent
+    const hideBefore = browser.tabs.sendMessage.mock.calls
+      .filter(([, msg]) => msg && msg.action === "hide").length;
+    expect(hideBefore).toBe(0);
+
+    // Advance past debounce window
+    jest.advanceTimersByTime(500);
+    await Promise.resolve();
+
+    const hideAfter = browser.tabs.sendMessage.mock.calls
+      .filter(([, msg]) => msg && msg.action === "hide").length;
+    expect(hideAfter).toBeGreaterThan(0);
+  });
+
+  // T_ind3 — rapid tool calls: debounce reset keeps indicator showing
+  test("T_ind3: second tool call cancels pending hide — no hide sent between calls", async () => {
+    const p1 = { tool: "navigate", args: { url: "https://a.com", tabId: 7 }, requestId: "r3" };
+    const p2 = { tool: "navigate", args: { url: "https://b.com", tabId: 7 }, requestId: "r4" };
+    const browser = makeBrowserMockWithMessaging({
+      nativeResponses: [
+        { type: "tool_request", payload: JSON.stringify(p1) },
+        { type: "tool_request", payload: JSON.stringify(p2) },
+        { type: "idle" },
+      ],
+    });
+
+    loadBackground({ browser });
+
+    // First cycle
+    await Promise.resolve();
+    jest.runAllTimers();
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    // Advance only 100ms (< 500ms debounce) — second poll starts
+    jest.advanceTimersByTime(100);
+
+    // Second cycle
+    await Promise.resolve();
+    jest.runAllTimers();
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    // No hide should have fired yet
+    const hideCalls = browser.tabs.sendMessage.mock.calls
+      .filter(([, msg]) => msg && msg.action === "hide");
+    expect(hideCalls.length).toBe(0);
+  });
+
+  // T_ind4 — no tabId: no indicator sendMessage
+  test("T_ind4: tool with no tabId — indicator sendMessage not called", async () => {
+    const payload = {
+      tool: "navigate",
+      args: { url: "https://example.com" }, // no tabId
+      requestId: "r5",
+    };
+    const browser = makeBrowserMockWithMessaging({
+      nativeResponses: [
+        { type: "tool_request", payload: JSON.stringify(payload) },
+        { type: "idle" },
+      ],
+    });
+
+    loadBackground({ browser });
+
+    await Promise.resolve();
+    jest.runAllTimers();
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    jest.advanceTimersByTime(500);
+    await Promise.resolve();
+
+    const indicatorCalls = browser.tabs.sendMessage.mock.calls
+      .filter(([, msg]) => msg && msg.type === "CLAUDE_AGENT_INDICATOR");
+    expect(indicatorCalls.length).toBe(0);
+  });
+
+  // T_ind5 — screenshot: hide_for_tool before executeTool, show_after_tool after
+  test("T_ind5: screenshot action sends hide_for_tool before and show_after_tool after executeTool", async () => {
+    const calls = [];
+    const payload = {
+      tool: "computer",
+      args: { action: "screenshot", tabId: 5 },
+      requestId: "r6",
+    };
+    const browser = makeBrowserMockWithMessaging({
+      nativeResponses: [
+        { type: "tool_request", payload: JSON.stringify(payload) },
+        { type: "idle" },
+      ],
+    });
+    const executeTool = jest.fn(async () => {
+      calls.push("executeTool");
+      return { result: { content: [{ type: "text", text: "screenshot done" }] } };
+    });
+    browser.tabs.sendMessage = jest.fn(async (_tabId, msg) => {
+      if (msg && msg.action) calls.push("sendMessage:" + msg.action);
+    });
+
+    loadBackground({ browser, executeTool });
+
+    await Promise.resolve();
+    jest.runAllTimers();
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const hideForTool   = calls.indexOf("sendMessage:hide_for_tool");
+    const executeIdx    = calls.indexOf("executeTool");
+    const showAfterTool = calls.indexOf("sendMessage:show_after_tool");
+
+    expect(hideForTool).toBeGreaterThanOrEqual(0);
+    expect(executeIdx).toBeGreaterThan(hideForTool);
+    expect(showAfterTool).toBeGreaterThan(executeIdx);
+  });
+
+  // T_stop1 — STOP_AGENT while in-flight: error tool_response sent
+  test("T_stop1: STOP_AGENT while currentRequestId set sends error tool_response with Cancelled by user", async () => {
+    const payload = {
+      tool: "navigate",
+      args: { url: "https://slow.example.com", tabId: 9 },
+      requestId: "req-stop-1",
+    };
+    const browser = makeBrowserMockWithMessaging({
+      nativeResponses: [
+        { type: "tool_request", payload: JSON.stringify(payload) },
+        { type: "idle" },
+      ],
+    });
+
+    // executeTool hangs until explicitly resolved by the test
+    let resolveExec;
+    const execPromise = new Promise(function (res) { resolveExec = res; });
+    const executeTool = jest.fn(() => execPromise);
+
+    const onMessage = loadBackgroundWithMessaging({ browser, executeTool });
+
+    await Promise.resolve(); // Phase 1 poll resolves, Phase 3 setup runs
+    jest.runAllTimers();     // setTimeout(0) fires -> executeTool called (hangs)
+    await Promise.resolve(); // setTimeout(0) callback started; currentRequestId is now set
+
+    // Simulate Stop button click from content script
+    onMessage({ type: "STOP_AGENT" }, { tab: { id: 9 } }, jest.fn());
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const cancelCalls = browser.runtime.sendNativeMessage.mock.calls
+      .filter(([, msg]) => msg.type === "tool_response" && msg.error);
+    expect(cancelCalls.length).toBeGreaterThanOrEqual(1);
+    expect(cancelCalls[0][1].requestId).toBe("req-stop-1");
+    expect(cancelCalls[0][1].error.content[0].text).toContain("Cancelled by user");
+
+    // Clean up the hanging promise so Jest does not leak
+    resolveExec({ result: { content: [{ type: "text", text: "late result" }] } });
+    await execPromise;
+  });
+
+  // T_stop2 — STOP_AGENT with no in-flight request: no extra tool_response sent
+  test("T_stop2: STOP_AGENT with no in-flight request sends no tool_response", async () => {
+    const browser = makeBrowserMockWithMessaging({
+      nativeResponses: [{ type: "idle" }],
+    });
+    const onMessage = loadBackgroundWithMessaging({ browser });
+
+    await Promise.resolve(); // idle poll
+
+    const beforeCount = browser.runtime.sendNativeMessage.mock.calls
+      .filter(([, msg]) => msg.type === "tool_response").length;
+
+    onMessage({ type: "STOP_AGENT" }, { tab: { id: 1 } }, jest.fn());
+    await Promise.resolve();
+
+    const afterCount = browser.runtime.sendNativeMessage.mock.calls
+      .filter(([, msg]) => msg.type === "tool_response").length;
+    expect(afterCount).toBe(beforeCount);
+  });
+
+  // T_heartbeat1 — STATIC_INDICATOR_HEARTBEAT: sendResponse({ success: true })
+  test("T_heartbeat1: STATIC_INDICATOR_HEARTBEAT calls sendResponse with success: true", async () => {
+    const browser = makeBrowserMockWithMessaging({
+      nativeResponses: [{ type: "idle" }],
+    });
+    const onMessage = loadBackgroundWithMessaging({ browser });
+
+    await Promise.resolve();
+
+    const sendResponse = jest.fn();
+    onMessage({ type: "STATIC_INDICATOR_HEARTBEAT" }, {}, sendResponse);
+    expect(sendResponse).toHaveBeenCalledWith({ success: true });
+  });
+});

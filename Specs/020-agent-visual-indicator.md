@@ -74,11 +74,14 @@ The content script listens for these messages and toggles the overlay.
 
 ### When to Activate
 
-The background script shows the indicator:
-1. When any tool call begins processing (before `executeScript`).
-2. Hides it when the tool call completes (success or error).
-3. For sequences of rapid tool calls, keep the indicator visible between calls
-   (debounce hide with a 500ms delay).
+The background script shows the indicator inside `pollForRequests` in `background.js`:
+
+1. **Show:** at the start of Phase 3 (after `payload` is parsed, before `executeTool` is called).
+2. **Hide:** after Phase 3 completes (success or error), debounced 500ms.
+3. **Debounce:** maintain a `hideIndicatorTimer` variable. On each tool start, cancel any
+   pending hide timer (so rapid back-to-back calls keep the indicator visible). On each
+   completion, schedule `hideIndicatorTimer = setTimeout(hideOnAllTabs, 500)`.
+4. **Tab ID:** read from `payload.args?.tabId`; if absent, skip indicator (background-only tool).
 
 ### Tool-Use Suppression
 
@@ -106,6 +109,8 @@ A fixed-position pill bar at the bottom of the viewport:
 - Background: semi-transparent with backdrop blur.
 - Contains: Claude icon + "Claude is active in this tab group" text + "Chat" button +
   "Dismiss" button.
+- **"Chat" button behavior:** calls `browser.tabs.create({ url: 'https://claude.ai' })`
+  to open Claude.ai in a new tab.
 - Lower z-index than the agent glow border (visible between tool calls, hidden during
   active tool execution when the agent indicator is shown).
 
@@ -158,40 +163,41 @@ When the user clicks "Stop Claude":
 
 1. The content script sends a message to the background script:
    ```js
-   browser.runtime.sendMessage({ type: "STOP_AGENT", fromTabId: currentTabId });
+   browser.runtime.sendMessage({ type: "STOP_AGENT" });
    ```
+   If the background page is suspended when Stop is clicked, `sendMessage` will throw —
+   the content script must catch this and still hide the indicator locally.
+
 2. The background script:
-   a. Cancels any pending tool call (if a Promise is in flight, call `.cancel()`).
-   b. Sends a stop notification to the MCP client via native messaging.
-   c. Hides the indicator on all tabs in the active group.
-3. The MCP client (Claude Code CLI) receives the stop signal and halts the current
-   automation sequence.
+   a. Hides the indicator on all tabs in the active group.
+   b. If a tool call is currently in-flight (i.e. `currentRequestId` is set), sends an
+      error `tool_response` for that requestId via the existing native IPC:
+      ```js
+      await browser.runtime.sendNativeMessage(NATIVE_APP_ID, {
+        type: "tool_response",
+        requestId: currentRequestId,
+        error: { content: [{ type: "text", text: "Cancelled by user" }] }
+      });
+      ```
+   c. Clears `currentRequestId`.
 
-### Stop Signal to MCP Client
+3. `ToolRouter.swift` receives the error `tool_response` through its normal poll loop and
+   delivers the error to the MCP client — no new native message type required.
 
-If a tool call is currently in flight, `ToolRouter.swift` cancels it by sending an
-error response with the in-flight `requestId`:
+### Scope of Cancellation (PR A)
 
-```json
-{
-  "jsonrpc": "2.0",
-  "id": "<requestId>",
-  "error": { "code": -32000, "message": "Cancelled by user" }
-}
-```
+This approach cancels extension-forwarded tool calls (the majority). Native-handled tools
+(`computer(screenshot)`, `gif_creator`, `resize_window`, `file_upload`) run to completion
+since they execute entirely in Swift; the CLI receives the result but can choose to ignore
+it after receiving the preceding error. Full native-side cancellation is deferred to PR B.
 
-If no tool call is in flight, the stop signal is informational. `ToolRouter.swift` should
-expose a `cancelCurrentRequest(clientId:)` method that the extension can trigger via a
-native message. This requires a new native message type:
+### `currentRequestId` Lifecycle
 
-```json
-{ "type": "stop_agent", "clientId": "<clientId>" }
-```
-
-The content script's Stop button click sends `browser.runtime.sendMessage` to the
-background script, which relays to the native app via `browser.runtime.sendNativeMessage`.
-If the background page is suspended when Stop is clicked, `sendMessage` will throw — the
-content script must catch this and still hide the indicator locally.
+Background.js maintains a module-level `currentRequestId` variable:
+- Set to `payload.requestId` at the start of Phase 3 (before `executeTool`).
+- Cleared (`null`) after Phase 3 completes (success, error, or cancelled).
+- The Stop handler checks for `null` before sending the error response (guard against
+  double-send if Stop is clicked after the tool already completed).
 
 ## Content Script Details
 
@@ -268,6 +274,23 @@ Post notifications for:
 **Do not** post notifications for every individual tool call — that would be noisy.
 Debounce: only post "started" if no notification was posted in the last 10 seconds.
 
+### Debounce State Location
+
+`ToolRouter.swift` owns the debounce state:
+```swift
+private var lastNotificationDate: Date? = nil
+```
+Checked and updated inside `handleToolCall` before dispatching to native or extension.
+`postAutomationNotification` is a private method on `ToolRouter`; it calls
+`UNUserNotificationCenter.current().add(request)` directly (no delegate needed for
+fire-and-forget delivery).
+
+`AppDelegate` requests notification authorization once at startup:
+```swift
+UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
+```
+If permission is not granted, `add(request)` silently fails — no special handling needed.
+
 ### Notification Actions
 
 macOS notifications support actions. Add a "Stop" action that triggers the same stop
@@ -325,8 +348,30 @@ the glow border and stop button would remain visible indefinitely.
 When Safari restores a tab from memory (tab discarding), content scripts may need to be
 re-injected. The `document_idle` injection timing handles this automatically for new page
 loads, but discarded-and-restored tabs may not re-trigger content script injection in all
-Safari versions. The background script should re-inject the indicator content script when
-activating the indicator on a tab, as a safety measure.
+Safari versions.
+
+The background script re-injects defensively before every `show` message:
+```js
+async function showIndicatorOnTab(tabId) {
+  try {
+    await browser.tabs.executeScript(tabId, {
+      file: "content-scripts/agent-visual-indicator.js"
+    });
+  } catch (e) {
+    console.warn("indicator re-inject failed (non-critical):", e);
+  }
+  try {
+    await browser.tabs.sendMessage(tabId, {
+      type: "CLAUDE_AGENT_INDICATOR", action: "show"
+    });
+  } catch (e) {
+    console.warn("indicator show message failed (non-critical):", e);
+  }
+}
+```
+The installation guard (`window.__claudeVisualIndicatorInstalled`) makes re-injection
+idempotent — the script body exits immediately on the second call, so no duplicate
+overlays are created.
 
 ## Chrome Parity Notes
 
@@ -343,6 +388,22 @@ activating the indicator on a tab, as a safety measure.
 | Shadow DOM isolation | ❌ | ✅ | Safari enhancement |
 | macOS native notifications | ❌ | ✅ | Safari enhancement |
 | Notification Center stop action | ❌ | ✅ | Safari enhancement |
+
+## Implementation Phasing
+
+This spec is implemented in two PRs to manage risk:
+
+### PR A — JS-only (content script + background.js)
+- `agent-visual-indicator.js` — full glow/stop + static indicator implementation
+- `background.js` — indicator show/hide hooks around `executeTool`, `currentRequestId`
+  tracking, `STOP_AGENT` handler
+- No Swift changes required
+
+### PR B — Native integration (deferred)
+- `AppDelegate.swift` — `requestAuthorization` at startup
+- `ToolRouter.swift` — `postAutomationNotification`, `lastNotificationDate` debounce
+- `UNNotificationAction` "Stop Claude" action and delegate wiring
+- Full cancellation for native-handled tools (screenshot, gif, file_upload)
 
 ## Test Cases
 
