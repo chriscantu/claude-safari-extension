@@ -181,9 +181,36 @@
     requestAnimationFrame(function () { host.classList.remove('no-transition'); });
   }
 
-  // Stub implementations replaced in Task 4
-  function showStaticIndicator() {}
-  function hideStaticIndicator() {}
+  function showStaticIndicator() {
+    host.classList.add('static-active');
+    startHeartbeat();
+  }
+
+  function hideStaticIndicator() {
+    host.classList.remove('static-active');
+    stopHeartbeat();
+  }
+
+  function startHeartbeat() {
+    stopHeartbeat();
+    heartbeatInterval = setInterval(function () {
+      browser.runtime.sendMessage({ type: 'STATIC_INDICATOR_HEARTBEAT' })
+        .then(function (response) {
+          if (!response || !response.success) hideStaticIndicator();
+        })
+        .catch(function () {
+          // Background page suspended — hide immediately
+          hideStaticIndicator();
+        });
+    }, 5000);
+  }
+
+  function stopHeartbeat() {
+    if (heartbeatInterval !== null) {
+      clearInterval(heartbeatInterval);
+      heartbeatInterval = null;
+    }
+  }
 
   // ── Message listener ──────────────────────────────────────────────────────
 

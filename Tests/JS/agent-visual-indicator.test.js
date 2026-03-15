@@ -112,4 +112,50 @@ describe('agent-visual-indicator content script', function () {
     expect(result.host.classList.contains('agent-active')).toBe(true);
     expect(result.host.classList.contains('no-transition')).toBe(true);
   });
+
+  // T7 - static show: host gains 'static-active'
+  test('T7: CLAUDE_STATIC_INDICATOR show adds static-active class', function () {
+    var result = loadIndicator();
+    messageHandler({ type: 'CLAUDE_STATIC_INDICATOR', action: 'show' });
+    expect(result.host.classList.contains('static-active')).toBe(true);
+  });
+
+  // T8 - static hide: host loses 'static-active'
+  test('T8: CLAUDE_STATIC_INDICATOR hide removes static-active class', function () {
+    var result = loadIndicator();
+    messageHandler({ type: 'CLAUDE_STATIC_INDICATOR', action: 'show' });
+    messageHandler({ type: 'CLAUDE_STATIC_INDICATOR', action: 'hide' });
+    expect(result.host.classList.contains('static-active')).toBe(false);
+  });
+
+  // T13 - heartbeat: success=false hides static indicator
+  test('T13: heartbeat response success=false hides static indicator', async function () {
+    jest.useFakeTimers();
+    var result = loadIndicator({ sendMessageImpl: function () { return Promise.resolve({ success: false }); } });
+    messageHandler({ type: 'CLAUDE_STATIC_INDICATOR', action: 'show' });
+    expect(result.host.classList.contains('static-active')).toBe(true);
+
+    jest.advanceTimersByTime(5000);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(result.host.classList.contains('static-active')).toBe(false);
+    jest.useRealTimers();
+  });
+
+  // T14 - heartbeat: catch (suspended background) hides static indicator
+  test('T14: heartbeat sendMessage rejection hides static indicator', async function () {
+    jest.useFakeTimers();
+    var result = loadIndicator({
+      sendMessageImpl: function () { return Promise.reject(new Error('Background suspended')); },
+    });
+    messageHandler({ type: 'CLAUDE_STATIC_INDICATOR', action: 'show' });
+
+    jest.advanceTimersByTime(5000);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(result.host.classList.contains('static-active')).toBe(false);
+    jest.useRealTimers();
+  });
 });
