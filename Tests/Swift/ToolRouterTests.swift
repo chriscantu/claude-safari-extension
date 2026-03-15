@@ -475,12 +475,13 @@ final class ToolRouterTests: XCTestCase {
                            "Unexpected paths/ref error on happy path: \(msg)")
         }
 
-        // Fix K: Verify the wire payload structure assembled in the success path.
-        // _testLastFileUploadEnrichedArgs is set before forwardToExtension is called,
-        // so it is available even when enqueueToolRequest fails in the test sandbox.
-        let enriched = router._testLastFileUploadEnrichedArgs
-        XCTAssertNotNil(enriched, "enrichedArgs must be captured on the success path")
-        let files = enriched?["files"] as? [[String: Any]]
+        // Fix K: Verify buildEnrichedArgs assembles the correct wire payload.
+        // Tested directly as a pure function — no spy needed.
+        let fileData = Data("hello".utf8)
+        let descriptor = FileService.FileDescriptor(filename: "test.txt", mimeType: "text/plain", data: fileData)
+        let baseArgs: [String: Any] = ["paths": ["/tmp/test.txt"], "ref": "upload-ref"]
+        let enriched = router.buildEnrichedArgs(from: baseArgs, descriptors: [descriptor])
+        let files = enriched["files"] as? [[String: Any]]
         XCTAssertNotNil(files, "'files' key must be present in enrichedArgs")
         XCTAssertEqual(files?.count, 1, "Expected exactly one file descriptor in 'files'")
         if let first = files?.first {
@@ -488,11 +489,11 @@ final class ToolRouterTests: XCTestCase {
             XCTAssertEqual(first["filename"] as? String, "test.txt", "Wire payload 'filename' must match")
             XCTAssertEqual(first["mimeType"] as? String, "text/plain", "Wire payload 'mimeType' must match")
             XCTAssertEqual(first["size"] as? Int, 5, "Wire payload 'size' must equal data.count")
-            let expectedBase64 = Data("hello".utf8).base64EncodedString()
+            let expectedBase64 = fileData.base64EncodedString()
             XCTAssertEqual(first["base64"] as? String, expectedBase64, "Wire payload 'base64' must match data")
         }
         // Verify 'paths' was stripped from enrichedArgs (Fix H)
-        XCTAssertNil(enriched?["paths"], "'paths' key must be removed from enrichedArgs before forwarding")
+        XCTAssertNil(enriched["paths"], "'paths' key must be removed from enrichedArgs before forwarding")
     }
 
     // Fix J: FileService error propagation → ToolRouter sends error to client

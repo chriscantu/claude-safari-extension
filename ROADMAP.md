@@ -128,7 +128,7 @@ Console/network capture, window management, GIF recording, file upload.
 | `resize_window` — AppleScript window management | [016](Specs/016-resize-window.md) | ✅ |
 | `gif_creator` — record, stop, export animated GIFs | [017](Specs/017-gif-creator.md) | ✅ |
 | `upload_image` — screenshot/image to page element | [018](Specs/018-upload-image.md) | ✅ |
-| `file_upload` — local file to file input | [019](Specs/019-file-upload.md) | 📋 |
+| `file_upload` — local file to file input | [019](Specs/019-file-upload.md) | ✅ |
 
 ### Phase 6 Future Items (gif_creator)
 

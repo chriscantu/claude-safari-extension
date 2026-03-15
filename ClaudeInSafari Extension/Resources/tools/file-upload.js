@@ -100,9 +100,10 @@
     if (accept) {
       const acceptList = accept.split(',').map(s => s.trim().toLowerCase());
       const mismatched = files.filter(d => {
-        const ext = '.' + d.filename.split('.').pop().toLowerCase();
+        const dotIdx = d.filename.lastIndexOf('.');
+        const ext = dotIdx !== -1 ? d.filename.slice(dotIdx).toLowerCase() : null;
         const mime = d.mimeType.toLowerCase();
-        return !acceptList.some(a => a === ext || a === mime || a === mime.split('/')[0] + '/*' || a === '*/*');
+        return !acceptList.some(a => (ext && a === ext) || a === mime || a === mime.split('/')[0] + '/*' || a === '*/*');
       });
       if (mismatched.length > 0) {
         const names = mismatched.map(d => d.filename).join(', ');
