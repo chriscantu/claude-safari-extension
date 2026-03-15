@@ -36,7 +36,63 @@
 
   var styleEl = document.createElement('style');
   styleEl.id = 'claude-agent-animation-styles';
-  styleEl.textContent = ''; // filled in Task 3
+  styleEl.textContent = [
+    '@keyframes claude-pulse {',
+    '  0%, 100% { box-shadow:',
+    '    inset 0 0 10px rgba(217,119,87,.5),',
+    '    inset 0 0 20px rgba(217,119,87,.3),',
+    '    inset 0 0 30px rgba(217,119,87,.1); }',
+    '  50% { box-shadow:',
+    '    inset 0 0 15px rgba(217,119,87,.7),',
+    '    inset 0 0 25px rgba(217,119,87,.5),',
+    '    inset 0 0 35px rgba(217,119,87,.2); }',
+    '}',
+    '#claude-agent-glow-border {',
+    '  position: fixed; top: 0; left: 0; right: 0; bottom: 0;',
+    '  pointer-events: none; z-index: 2147483646;',
+    '  opacity: 0; transition: opacity 300ms ease;',
+    '  animation: claude-pulse 2s ease-in-out infinite;',
+    '}',
+    '#claude-agent-stop-container {',
+    '  position: fixed; bottom: 20px; left: 50%;',
+    '  transform: translate(-50%, 100px); opacity: 0;',
+    '  transition: transform 300ms ease, opacity 300ms ease;',
+    '  z-index: 2147483647; pointer-events: auto;',
+    '}',
+    '#claude-agent-stop-button {',
+    '  display: flex; align-items: center; gap: 8px;',
+    '  padding: 10px 20px; background: #1a1a1a; color: #fff;',
+    '  border: 1px solid rgba(255,255,255,.15); border-radius: 100px;',
+    '  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;',
+    '  font-size: 14px; font-weight: 500; cursor: pointer; white-space: nowrap;',
+    '}',
+    '#claude-agent-stop-button:hover { background: #2a2a2a; }',
+    '#claude-static-indicator {',
+    '  position: fixed; bottom: 16px; left: 50%;',
+    '  transform: translate(-50%, 100px); opacity: 0;',
+    '  transition: transform 300ms ease, opacity 300ms ease;',
+    '  z-index: 2147483644; pointer-events: auto;',
+    '  display: flex; align-items: center; gap: 10px; padding: 8px 16px;',
+    '  background: rgba(26,26,26,.9);',
+    '  backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);',
+    '  border: 1px solid rgba(255,255,255,.1); border-radius: 100px;',
+    '  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;',
+    '  font-size: 13px; color: #fff; white-space: nowrap;',
+    '}',
+    '.claude-indicator-btn {',
+    '  background: transparent; border: 1px solid rgba(255,255,255,.2);',
+    '  border-radius: 6px; color: #fff; font-family: inherit;',
+    '  font-size: 12px; padding: 3px 10px; cursor: pointer;',
+    '}',
+    '.claude-indicator-btn:hover { background: rgba(255,255,255,.1); }',
+    ':host(.agent-active) #claude-agent-glow-border { opacity: 1; }',
+    ':host(.agent-active) #claude-agent-stop-container {',
+    '  transform: translate(-50%, 0); opacity: 1; }',
+    ':host(.static-active) #claude-static-indicator {',
+    '  transform: translate(-50%, 0); opacity: 1; }',
+    ':host(.no-transition) #claude-agent-glow-border,',
+    ':host(.no-transition) #claude-agent-stop-container { transition: none !important; }',
+  ].join('\n');
   shadow.appendChild(styleEl);
 
   // Glow border
@@ -100,6 +156,47 @@
 
   var heartbeatInterval = null;
 
-  // ── Show/hide helpers, button handlers, and message listener added in Tasks 3-5 ──
+  // ── Show/hide helpers ─────────────────────────────────────────────────────
+
+  function showAgentIndicator() {
+    host.classList.add('agent-active');
+  }
+
+  function hideAgentIndicator() {
+    host.classList.remove('agent-active');
+  }
+
+  // hide_for_tool / show_after_tool suppress CSS transitions so the glow border
+  // does not appear in ScreenCaptureKit screenshots. The no-transition class is
+  // removed on the next animation frame so subsequent animated transitions work.
+  function hideAgentIndicatorImmediate() {
+    host.classList.add('no-transition');
+    host.classList.remove('agent-active');
+    requestAnimationFrame(function () { host.classList.remove('no-transition'); });
+  }
+
+  function showAgentIndicatorImmediate() {
+    host.classList.add('no-transition');
+    host.classList.add('agent-active');
+    requestAnimationFrame(function () { host.classList.remove('no-transition'); });
+  }
+
+  // Stub implementations replaced in Task 4
+  function showStaticIndicator() {}
+  function hideStaticIndicator() {}
+
+  // ── Message listener ──────────────────────────────────────────────────────
+
+  browser.runtime.onMessage.addListener(function (message) {
+    if (message.type === 'CLAUDE_AGENT_INDICATOR') {
+      if      (message.action === 'show')           showAgentIndicator();
+      else if (message.action === 'hide')            hideAgentIndicator();
+      else if (message.action === 'hide_for_tool')   hideAgentIndicatorImmediate();
+      else if (message.action === 'show_after_tool') showAgentIndicatorImmediate();
+    } else if (message.type === 'CLAUDE_STATIC_INDICATOR') {
+      if      (message.action === 'show') showStaticIndicator();
+      else if (message.action === 'hide') hideStaticIndicator();
+    }
+  });
 
 }());

@@ -80,4 +80,36 @@ describe('agent-visual-indicator content script', function () {
     var hosts = document.querySelectorAll('#claude-agent-indicator-host');
     expect(hosts.length).toBe(1);
   });
+
+  // T3 - show: host gains 'agent-active'
+  test('T3: CLAUDE_AGENT_INDICATOR show adds agent-active class', function () {
+    var result = loadIndicator();
+    messageHandler({ type: 'CLAUDE_AGENT_INDICATOR', action: 'show' });
+    expect(result.host.classList.contains('agent-active')).toBe(true);
+  });
+
+  // T4 - hide: host loses 'agent-active'
+  test('T4: CLAUDE_AGENT_INDICATOR hide removes agent-active class', function () {
+    var result = loadIndicator();
+    messageHandler({ type: 'CLAUDE_AGENT_INDICATOR', action: 'show' });
+    messageHandler({ type: 'CLAUDE_AGENT_INDICATOR', action: 'hide' });
+    expect(result.host.classList.contains('agent-active')).toBe(false);
+  });
+
+  // T5 - hide_for_tool: agent-active removed, no-transition applied synchronously
+  test('T5: hide_for_tool removes agent-active and sets no-transition class', function () {
+    var result = loadIndicator();
+    messageHandler({ type: 'CLAUDE_AGENT_INDICATOR', action: 'show' });
+    messageHandler({ type: 'CLAUDE_AGENT_INDICATOR', action: 'hide_for_tool' });
+    expect(result.host.classList.contains('agent-active')).toBe(false);
+    expect(result.host.classList.contains('no-transition')).toBe(true);
+  });
+
+  // T6 - show_after_tool: agent-active added, no-transition applied
+  test('T6: show_after_tool adds agent-active and sets no-transition class', function () {
+    var result = loadIndicator();
+    messageHandler({ type: 'CLAUDE_AGENT_INDICATOR', action: 'show_after_tool' });
+    expect(result.host.classList.contains('agent-active')).toBe(true);
+    expect(result.host.classList.contains('no-transition')).toBe(true);
+  });
 });
