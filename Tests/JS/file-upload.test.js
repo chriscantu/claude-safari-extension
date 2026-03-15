@@ -12,6 +12,7 @@
  * T10 — successful upload — both change and input events fired with bubbles: true
  * T11 — file with mimeType application/octet-stream (.wasm) — File created with correct type
  * T13 — input with accept=".pdf", uploading .png — success with warning line
+ * T13c — dotfile (.env) uploaded to input with accept=".env" — no warning (dotIdx !== -1 fix)
  * T15 — args.ref missing — isError: ref parameter is required
  * T16 — args.files missing — isError (internal guard)
  * T12 — resolveTab returns null — isError: Cannot access tab
@@ -400,6 +401,25 @@ describe('file_upload tool', () => {
     expect(result.content[0].text).toContain('photo.png');
     expect(result.content[0].text).toContain('video.mp4');
     expect(result.content[0].text).toContain('Warning: file input accepts ".pdf"');
+  });
+
+  // T13c — dotfile (.env) uploaded to input whose accept includes ".env" → no warning
+  test('T13c: dotfile accepted by matching accept attribute → no warning', async () => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.env';
+    input.setAttribute('data-claude-ref', 'env-input');
+    document.body.appendChild(input);
+
+    const browser = makeDomBrowserMock();
+    const handler = loadFileUpload({ browser });
+    const result = await handler({
+      ref: 'env-input',
+      files: [{ base64: TINY_TXT_B64, filename: '.env', mimeType: 'text/plain', size: 5 }],
+    });
+
+    expect(result.isError).toBeFalsy();
+    expect(result.content[0].text).not.toContain('Warning');
   });
 
   // Tool registration assertion

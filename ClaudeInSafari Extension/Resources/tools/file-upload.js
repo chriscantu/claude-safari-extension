@@ -101,7 +101,7 @@
       const acceptList = accept.split(',').map(s => s.trim().toLowerCase());
       const mismatched = files.filter(d => {
         const dotIdx = d.filename.lastIndexOf('.');
-        const ext = dotIdx > 0 ? d.filename.slice(dotIdx).toLowerCase() : null;
+        const ext = dotIdx !== -1 ? d.filename.slice(dotIdx).toLowerCase() : null;
         const mime = d.mimeType.toLowerCase();
         return !acceptList.some(a => (ext && a === ext) || a === mime || a === mime.split('/')[0] + '/*' || a === '*/*');
       });
