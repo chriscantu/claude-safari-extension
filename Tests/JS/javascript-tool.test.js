@@ -474,14 +474,15 @@ describe("javascript_tool", () => {
             await promise; // ensure cleanup
         });
 
-        test(".cancel() before async fallback is a no-op (does not throw)", () => {
+        test(".cancel() before resolveTab resolves sets flag and rejects the chain", async () => {
             const handler = loadJavaScriptTool({
                 browser: makeBrowserMock({ syncResult: null, asyncResult: null }),
                 resolveTab: jest.fn(async () => 1),
             });
             const promise = handler({ action: "javascript_exec", text: "1+1" });
-            // cancel() before resolveTab resolves — cancelFn is null, should not throw
-            expect(() => promise.cancel()).not.toThrow();
+            // cancel() immediately — before resolveTab's microtask has run
+            promise.cancel();
+            await expect(promise).rejects.toThrow(/cancelled/);
         });
 
         test(".cancel() during async fallback rejects with 'cancelled'", async () => {

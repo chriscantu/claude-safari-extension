@@ -85,11 +85,17 @@ function handleJavaScriptTool(args) {
         return Promise.reject(new Error("Code parameter is required"));
     }
 
-    // cancelFn is set once the async fallback Promise is constructed.
-    // Calling promise.cancel() before that point is a safe no-op.
-    let cancelFn = null;
+    // Cancellation token: cancelled is set immediately by promise.cancel() regardless
+    // of which async step the chain is currently in (resolveTab, executeScript, or the
+    // async fallback). Each .then() step checks cancelled first to short-circuit early.
+    // cancelFn is upgraded from a flag-setter to a full settle() call once the async
+    // fallback Promise is constructed and owns listeners/timer.
+    let cancelled = false;
+    let cancelFn = function() { cancelled = true; };
 
     const promise = globalThis.resolveTab(virtualTabId).then(function(realTabId) {
+        if (cancelled) return Promise.reject(new Error("javascript_tool cancelled"));
+
         const correlationId = RESULT_FLAG + "_" + Math.random().toString(36).slice(2);
 
         return browser.tabs.executeScript(realTabId, {
@@ -101,6 +107,8 @@ function handleJavaScriptTool(args) {
                 : err;
             throw classified instanceof Error ? classified : new Error(classified);
         }).then(function(execResults) {
+            if (cancelled) return Promise.reject(new Error("javascript_tool cancelled"));
+
             // Sync path: bridge returned result directly (safety net; with async IIFE this
             // is always null since the attribute is never set synchronously).
             const raw = execResults && execResults[0];
@@ -125,8 +133,12 @@ function handleJavaScriptTool(args) {
                     isError ? reject(value instanceof Error ? value : new Error(value)) : resolve(value);
                 }
 
-                // Expose settle via cancelFn so the outer promise.cancel() can trigger it.
+                // Upgrade cancelFn: now that listeners and timer will be registered,
+                // cancel must call settle() to clean them up properly.
                 cancelFn = function() { settle(new Error("javascript_tool cancelled"), true); };
+
+                // If cancel() was called before we reached this point, settle immediately.
+                if (cancelled) { cancelFn(); return; }
 
                 function onMessage(message) {
                     if (!message || !message[correlationId]) return;
@@ -144,8 +156,10 @@ function handleJavaScriptTool(args) {
         });
     });
 
-    // Attach .cancel() so callers can clean up listeners/timer on early abandonment.
-    promise.cancel = function() { if (cancelFn) cancelFn(); };
+    // Attach .cancel() so callers can abandon the operation at any point.
+    // cancelFn starts as a flag-setter (for early cancel before async fallback is reached)
+    // and is upgraded to a full settle() call once listeners/timer are registered.
+    promise.cancel = function() { cancelFn(); };
 
     return promise;
 }
