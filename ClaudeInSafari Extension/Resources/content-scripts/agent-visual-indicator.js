@@ -212,6 +212,24 @@
     }
   }
 
+  // ── Button click handlers ─────────────────────────────────────────────────
+
+  stopBtn.addEventListener('click', function () {
+    hideAgentIndicator();
+    browser.runtime.sendMessage({ type: 'STOP_AGENT' }).catch(function () {
+      // Background page suspended — indicator already hidden locally above
+    });
+  });
+
+  chatBtn.addEventListener('click', function () {
+    browser.tabs.create({ url: 'https://claude.ai' });
+  });
+
+  dismissBtn.addEventListener('click', function () {
+    hideStaticIndicator();
+    browser.runtime.sendMessage({ type: 'DISMISS_STATIC_INDICATOR_FOR_GROUP' }).catch(function () {});
+  });
+
   // ── Message listener ──────────────────────────────────────────────────────
 
   browser.runtime.onMessage.addListener(function (message) {

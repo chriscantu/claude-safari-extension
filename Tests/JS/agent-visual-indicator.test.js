@@ -128,6 +128,52 @@ describe('agent-visual-indicator content script', function () {
     expect(result.host.classList.contains('static-active')).toBe(false);
   });
 
+  // T9 - stop button click: sendMessage({ type: 'STOP_AGENT' })
+  test('T9: stop button click sends STOP_AGENT message', function () {
+    var result = loadIndicator();
+    var stopButton = result.host.shadowRoot.querySelector('#claude-agent-stop-button');
+    stopButton.click();
+    expect(result.sendMessage).toHaveBeenCalledWith({ type: 'STOP_AGENT' });
+  });
+
+  // T10 - stop button click: agent-active class removed
+  test('T10: stop button click removes agent-active class', function () {
+    var result = loadIndicator();
+    messageHandler({ type: 'CLAUDE_AGENT_INDICATOR', action: 'show' });
+    var stopButton = result.host.shadowRoot.querySelector('#claude-agent-stop-button');
+    stopButton.click();
+    expect(result.host.classList.contains('agent-active')).toBe(false);
+  });
+
+  // T11 - chat button: browser.tabs.create({ url: 'https://claude.ai' })
+  test('T11: chat button click opens claude.ai in a new tab', function () {
+    var result = loadIndicator();
+    var chatButton = result.host.shadowRoot.querySelector('#claude-static-chat-button');
+    chatButton.click();
+    expect(result.tabsCreate).toHaveBeenCalledWith({ url: 'https://claude.ai' });
+  });
+
+  // T12 - dismiss button: sendMessage({ type: 'DISMISS_STATIC_INDICATOR_FOR_GROUP' })
+  test('T12: dismiss button sends DISMISS_STATIC_INDICATOR_FOR_GROUP', function () {
+    var result = loadIndicator();
+    var dismissButton = result.host.shadowRoot.querySelector('#claude-static-dismiss-button');
+    dismissButton.click();
+    expect(result.sendMessage).toHaveBeenCalledWith({ type: 'DISMISS_STATIC_INDICATOR_FOR_GROUP' });
+  });
+
+  // T15 - stop click while background suspended: indicator hidden locally
+  test('T15: stop click when sendMessage rejects still removes agent-active', async function () {
+    var result = loadIndicator({
+      sendMessageImpl: function () { return Promise.reject(new Error('Extension context invalid')); },
+    });
+    messageHandler({ type: 'CLAUDE_AGENT_INDICATOR', action: 'show' });
+    var stopButton = result.host.shadowRoot.querySelector('#claude-agent-stop-button');
+    stopButton.click();
+    // Local hide is synchronous — class removed before the rejection propagates
+    expect(result.host.classList.contains('agent-active')).toBe(false);
+    await Promise.resolve(); // drain rejection microtask (prevent unhandled rejection warning)
+  });
+
   // T13 - heartbeat: success=false hides static indicator
   test('T13: heartbeat response success=false hides static indicator', async function () {
     jest.useFakeTimers();
