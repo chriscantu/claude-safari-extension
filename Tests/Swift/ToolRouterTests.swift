@@ -1,7 +1,7 @@
 import XCTest
 @testable import ClaudeInSafari
 
-private class MockMCPSocketServer: MCPSocketServer {
+class MockMCPSocketServer: MCPSocketServer {
     // MCPSocketServer.init requires a MessageFramer (a zero-arg struct).
     // `send` must use `override` — base class method is `internal`.
     init() { super.init(framer: MessageFramer()) }

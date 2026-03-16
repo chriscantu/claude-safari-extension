@@ -15,19 +15,6 @@ private final class MockNotificationCenter: NotificationCenterProtocol {
     }
 }
 
-// MARK: - Local server mock
-// MockMCPSocketServer in ToolRouterTests.swift is `private` — redefine here.
-
-private class NotifTestMockServer: MCPSocketServer {
-    init() { super.init(framer: MessageFramer()) }
-    private(set) var sentData: [Data] = []
-    override func send(data: Data, to clientId: String) { sentData.append(data) }
-    func lastSentJSON() -> [String: Any]? {
-        guard let last = sentData.last else { return nil }
-        return try? JSONSerialization.jsonObject(with: last) as? [String: Any]
-    }
-}
-
 // MARK: - ToolRouterNotificationTests
 
 final class ToolRouterNotificationTests: XCTestCase {
@@ -89,7 +76,7 @@ final class ToolRouterNotificationTests: XCTestCase {
     // started. postAutomationNotification fires synchronously before that, so
     // the assertion below is safe without any async coordination.
     func testHandleToolCallTriggersNotification() {
-        let server = NotifTestMockServer()
+        let server = MockMCPSocketServer()
         router.setServer(server)
 
         let message: [String: Any] = [
@@ -109,7 +96,7 @@ final class ToolRouterNotificationTests: XCTestCase {
 
     // T_notif6 — missing tool name in tools/call does not post notification
     func testMissingToolNameDoesNotPostNotification() {
-        let server = NotifTestMockServer()
+        let server = MockMCPSocketServer()
         router.setServer(server)
 
         // tools/call with no "name" key — handleToolCall returns after guard, before
@@ -128,7 +115,7 @@ final class ToolRouterNotificationTests: XCTestCase {
 
     // T_cancel1 — cancelCurrentRequest sends error for any in-flight pending request
     func testCancelCurrentRequest_withInFlightRequest_sendsErrorResponse() {
-        let server = NotifTestMockServer()
+        let server = MockMCPSocketServer()
         router.setServer(server)
 
         // Inject a fake in-flight request (simulates a tool waiting for extension response)
@@ -146,7 +133,7 @@ final class ToolRouterNotificationTests: XCTestCase {
 
     // T_cancel2 — cancelCurrentRequest with no in-flight request does nothing
     func testCancelCurrentRequest_noInFlightRequest_doesNotSend() {
-        let server = NotifTestMockServer()
+        let server = MockMCPSocketServer()
         router.setServer(server)
 
         router.cancelCurrentRequest()
@@ -156,8 +143,10 @@ final class ToolRouterNotificationTests: XCTestCase {
         XCTAssertTrue(router.nativeCallCancelled, "nativeCallCancelled should be true after cancelCurrentRequest — flag stays set for any in-flight native handlers")
     }
 
-    // T_cancel_native1 — screenshot completion handler sends error and resets flag when nativeCallCancelled is true
-    func testCancelledFlag_screenshotHandler_sendsErrorAndResetsFlag() {
+    // T_cancel_native1 — handleToolCall resets a stale nativeCallCancelled flag so it
+    // does not poison the next native call. A flag set before dispatch must be cleared
+    // by handleToolCall before the screenshot completion handler fires.
+    func testCancelledFlag_handleToolCallResetsStaleFlagBeforeScreenshot() {
         class SyncCaptureProvider: ScreenCaptureProvider {
             func checkPermission() -> Bool { true }
             func captureWindow(completion: @escaping (Result<(CGImage, Int, Int), ScreenshotError>) -> Void) {
@@ -171,7 +160,7 @@ final class ToolRouterNotificationTests: XCTestCase {
             }
         }
 
-        let server = NotifTestMockServer()
+        let server = MockMCPSocketServer()
         let screenshotSvc = ScreenshotService(captureProvider: SyncCaptureProvider())
         let localRouter = ToolRouter(
             screenshotService: screenshotSvc,
@@ -181,7 +170,8 @@ final class ToolRouterNotificationTests: XCTestCase {
         )
         localRouter.setServer(server)
 
-        // Set the cancellation flag before the tool call dispatches
+        // Simulate a stale flag left over from a previous Stop click with no native tool in-flight.
+        // handleToolCall must reset it before dispatching the screenshot.
         localRouter.nativeCallCancelled = true
 
         let message: [String: Any] = [
@@ -195,17 +185,21 @@ final class ToolRouterNotificationTests: XCTestCase {
         let data = try! JSONSerialization.data(withJSONObject: message)
         localRouter.socketServer(server, didReceiveMessage: data, from: "client-1")
 
-        // captureWindow completes synchronously, so the cancellation guard fires before this line
-        XCTAssertFalse(server.sentData.isEmpty, "Expected an error response from the cancellation guard")
+        // The stale flag is reset at the start of handleToolCall, so the screenshot
+        // completes normally (no "Cancelled" error). captureWindow is synchronous here.
+        XCTAssertFalse(localRouter.nativeCallCancelled,
+                       "handleToolCall must reset nativeCallCancelled before dispatching work")
         let json = server.lastSentJSON()
         let errorMsg = (json?["error"] as? [String: Any])?["message"] as? String ?? ""
-        XCTAssertTrue(errorMsg.contains("Cancelled"), "Expected 'Cancelled' in error: \(errorMsg)")
-        XCTAssertFalse(localRouter.nativeCallCancelled, "nativeCallCancelled must be reset to false by the screenshot completion handler guard")
+        XCTAssertFalse(errorMsg.contains("Cancelled"),
+                       "Stale flag must not cause a Cancelled error for a fresh tool call: \(errorMsg)")
     }
 
-    // T_cancel_native2 — gif export completion handler sends error and resets flag when nativeCallCancelled is true
-    func testCancelledFlag_gifExportHandler_sendsErrorAndResetsFlag() {
-        let server = NotifTestMockServer()
+    // T_cancel_native2 — handleToolCall resets a stale nativeCallCancelled flag so it
+    // does not poison the next gif export call. A flag set before dispatch must be
+    // cleared by handleToolCall before the gif completion handler fires.
+    func testCancelledFlag_handleToolCallResetsStaleFlagBeforeGifExport() {
+        let server = MockMCPSocketServer()
         let localRouter = ToolRouter(
             screenshotService: ScreenshotService(),
             gifService: GifService(),
@@ -214,11 +208,12 @@ final class ToolRouterNotificationTests: XCTestCase {
         )
         localRouter.setServer(server)
 
-        // Set the cancellation flag before the tool call dispatches
+        // Simulate a stale flag left over from a previous Stop click with no native tool in-flight.
+        // handleToolCall must reset it before dispatching the gif export.
         localRouter.nativeCallCancelled = true
 
-        // gif_creator export_gif dispatches to a global queue; we need to wait for completion
-        let exp = expectation(description: "gif export cancellation guard fires")
+        // gif_creator export dispatches to a global queue; wait for completion
+        let exp = expectation(description: "gif export completes without stale cancellation")
 
         let message: [String: Any] = [
             "jsonrpc": "2.0", "id": 51,
@@ -231,15 +226,18 @@ final class ToolRouterNotificationTests: XCTestCase {
         let data = try! JSONSerialization.data(withJSONObject: message)
         localRouter.socketServer(server, didReceiveMessage: data, from: "client-1")
 
-        // Poll for the async response (the global queue runs the cancellation guard)
+        // Poll for the async completion
         DispatchQueue.global().asyncAfter(deadline: .now() + 0.5) { exp.fulfill() }
         waitForExpectations(timeout: 2)
 
-        XCTAssertFalse(server.sentData.isEmpty, "Expected an error response from the gif export cancellation guard")
+        // The stale flag was reset by handleToolCall, so no "Cancelled" error is sent.
+        // The export may send a different error (no frames, etc.) but not a cancellation error.
+        XCTAssertFalse(localRouter.nativeCallCancelled,
+                       "handleToolCall must reset nativeCallCancelled before dispatching work")
         let json = server.lastSentJSON()
         let errorMsg = (json?["error"] as? [String: Any])?["message"] as? String ?? ""
-        XCTAssertTrue(errorMsg.contains("Cancelled"), "Expected 'Cancelled' in gif export error: \(errorMsg)")
-        XCTAssertFalse(localRouter.nativeCallCancelled, "nativeCallCancelled must be reset to false by the gif export completion handler guard")
+        XCTAssertFalse(errorMsg.contains("Cancelled"),
+                       "Stale flag must not cause a Cancelled error for a fresh gif export: \(errorMsg)")
     }
 }
 

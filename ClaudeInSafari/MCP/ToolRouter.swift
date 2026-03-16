@@ -70,6 +70,8 @@ class ToolRouter: MCPSocketServerDelegate {
     /// Worst case for both: the result is delivered instead of an error (acceptable).
     /// Reset to false by whichever completion handler reads it as true.
     /// Internal for testability.
+    /// Also reset to false at the start of each handleToolCall so a Stop click
+    /// with no in-flight native tool does not poison the next native call.
     var nativeCallCancelled = false
 
     func setServer(_ server: MCPSocketServer) {
@@ -206,6 +208,14 @@ class ToolRouter: MCPSocketServerDelegate {
         }
 
         let arguments = (params?["arguments"] as? [String: Any]) ?? [:]
+
+        // Clear any lingering cancellation flag from a previous Stop action before
+        // starting new work. Native completion handlers clear it when they observe
+        // it; this is the fallback for the case where Stop was clicked with no
+        // native tool in-flight (preventing the flag from poisoning this new call).
+        pendingRequestsLock.lock()
+        nativeCallCancelled = false
+        pendingRequestsLock.unlock()
 
         // Post automation notification (debounced 10s; fire-and-forget — never blocks tool execution)
         postAutomationNotification(toolName: toolName)
