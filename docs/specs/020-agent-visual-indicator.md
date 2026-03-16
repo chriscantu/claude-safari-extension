@@ -217,17 +217,23 @@ window.__claudeVisualIndicatorInstalled = true;
 
 ### Shadow DOM Isolation (Required)
 
-The indicator **must** render inside a Shadow DOM root with `mode: "closed"` to:
+The indicator **must** render inside a Shadow DOM root to:
 1. Prevent page CSS from interfering with the indicator's styling (pages with
    `* { all: unset }` or aggressive CSS resets).
 2. Prevent page JavaScript from accessing or removing the indicator elements.
 
+**Mode: `open` (not `closed`).**
+Content scripts run in Safari's isolated world — page JS cannot access extension globals
+regardless of Shadow DOM mode. `open` mode is used so Jest tests can reach shadow children
+via `host.shadowRoot` without needing a `closed`-mode workaround. This does not weaken
+security in production.
+
 ```js
 const host = document.createElement("div");
 host.id = "claude-agent-indicator-host";
-const shadow = host.attachShadow({ mode: "closed" });
+const shadow = host.attachShadow({ mode: "open" });
 // Render glow border, stop button, and static indicator inside shadow
-// CSS animations (@keyframes claude-pulse) go in an adoptedStyleSheet
+// CSS animations (@keyframes claude-pulse) go in an inline <style> element
 document.body.appendChild(host);
 ```
 
