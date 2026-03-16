@@ -8,30 +8,32 @@
 
 /* Begin PBXBuildFile section */
 		020608970AC171717C3AD738 /* MessageFramerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 48CBDB59857AA797155E19CC /* MessageFramerTests.swift */; };
-		023CC86F2F632D9600B613D7 /* GifService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 023CC86E2F632D9600B613D7 /* GifService.swift */; };
-		023CC8712F632DBF00B613D7 /* GifServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 023CC8702F632DBF00B613D7 /* GifServiceTests.swift */; };
-		EE00112233445566778899AA /* FileServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE00112233445566778899BB /* FileServiceTests.swift */; };
 		0E751393E09E0A8E2C5E8AAA /* ToolModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = DCF900FB4B4265BA727FFA21 /* ToolModels.swift */; };
+		257435801FBA70A001BC58B6 /* GifServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 07542CB361F8FE6B0E4A5558 /* GifServiceTests.swift */; };
 		2C8D97C719B2C8ABC14F61DA /* ToolRouter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4B4D8BEC346192E189913F39 /* ToolRouter.swift */; };
+		2E19B15D715BBC43C9DBFF32 /* MCPMessageTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7A729444DE88ABCACE1FBD2 /* MCPMessageTests.swift */; };
 		30EB2D0811612DBB6A50EF32 /* FileService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 658074861C8C0C7933646343 /* FileService.swift */; };
 		3E3A0B200C0A287DA885E7A5 /* Constants.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1D372117A4FF27A236BD5F8 /* Constants.swift */; };
+		50788C66B072DEF05E5A9A64 /* FileServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C557C15A842E784429478650 /* FileServiceTests.swift */; };
+		510D908978BEE48EC9D3DCFA /* ScreenshotServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9BB305C7A1C4A31221830ABC /* ScreenshotServiceTests.swift */; };
+		5BF79D7662D53EA3EE5DECD8 /* ToolRouterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4F410276953CA7D55B48FF36 /* ToolRouterTests.swift */; };
 		6B3A9420892E05CF7DBB9CDE /* SafariWebExtensionHandler.swift in Sources */ = {isa = PBXBuildFile; fileRef = 729FD9AEFD8D3ED0949DE6F3 /* SafariWebExtensionHandler.swift */; };
+		6BFDDA4BC04CB59098274D6D /* ToolRouterNotificationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EFD3A85665B31B76E55FCDE6 /* ToolRouterNotificationTests.swift */; };
+		7BE91EB42C3FB5129C7AC7C8 /* PermissionMonitorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CCED58EC2A9B5A6E2523B951 /* PermissionMonitorTests.swift */; };
+		85E406993AE6C81DD74F1B0E /* main.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9954643B23BF0AF20F074015 /* main.swift */; };
 		921D7ABA46275FD600060ED6 /* Constants.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1D372117A4FF27A236BD5F8 /* Constants.swift */; };
 		9A6E898572D7D10C996C83CC /* MCPMessage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 896C584EA45AB96EAA96797F /* MCPMessage.swift */; };
-		A1B2C3D4E5F60001A1B2C3D4 /* MCPMessageTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60002A1B2C3D4 /* MCPMessageTests.swift */; };
 		A9635C5FE604D747DE0D1D62 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = EAD6A30A647A7F4F5DC5DEA3 /* AppDelegate.swift */; };
 		AE7A3B63E56420BC88227115 /* ScreenshotService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5736A5C7E56CF23B6FF9B13A /* ScreenshotService.swift */; };
 		B0B3DAD82B9C21C2DF890362 /* AppleScriptBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 02B361326E8F2C467CF43011 /* AppleScriptBridge.swift */; };
-		BB112233445566778899AABB /* main.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB998877665544332211AABB /* main.swift */; };
+		B9C04D834A40C22DE8146BBD /* MCPSocketServerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 439B4BEE06832D8A14D92084 /* MCPSocketServerTests.swift */; };
 		C5C31B08E3295067213DE349 /* Constants.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1D372117A4FF27A236BD5F8 /* Constants.swift */; };
-		CC00112233445566778899BB /* ToolRouterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC00112233445566778899AA /* ToolRouterTests.swift */; };
-		CD00112233445566778899BB /* ToolRouterNotificationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD00112233445566778899AA /* ToolRouterNotificationTests.swift */; };
 		D9127E282A5767DAA1C48C5D /* MessageFramer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 652C99F1EAD7FA1BDBF44D9D /* MessageFramer.swift */; };
-		DD00112233445566778899BB /* AppleScriptBridgeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD00112233445566778899AA /* AppleScriptBridgeTests.swift */; };
-		FF00112233445566778899BB /* MCPSocketServerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF00112233445566778899AA /* MCPSocketServerTests.swift */; };
 		E384720735F6190C0755DC2A /* MCPSocketServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = A17192D2205200262959FCF5 /* MCPSocketServer.swift */; };
 		E9ED48328A1F0387B9334B12 /* ClaudeInSafari Extension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = A2BCAFC762E47A469BC702E3 /* ClaudeInSafari Extension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
-		F011223344556677889900AA /* ScreenshotServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F011223344556677889900BB /* ScreenshotServiceTests.swift */; };
+		F8A556A293BA284872539B1F /* AppleScriptBridgeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9C6819CDC28A43E78498350F /* AppleScriptBridgeTests.swift */; };
+		FC4CA75768D2C5FD6249AE6B /* GifService.swift in Sources */ = {isa = PBXBuildFile; fileRef = C53DE74FE809B179A899A57B /* GifService.swift */; };
+		FF56AA2D0EFD16F29AFA30CD /* PermissionMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3C6A1743F9A8F1A1B1BBFDE4 /* PermissionMonitor.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -66,35 +68,37 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
-		023CC86E2F632D9600B613D7 /* GifService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GifService.swift; sourceTree = "<group>"; };
-		023CC8702F632DBF00B613D7 /* GifServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GifServiceTests.swift; sourceTree = "<group>"; };
-		EE00112233445566778899BB /* FileServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileServiceTests.swift; sourceTree = "<group>"; };
+		0133189C5F0296CB11A35A28 /* ClaudeInSafariExtension.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = ClaudeInSafariExtension.entitlements; sourceTree = "<group>"; };
 		02B361326E8F2C467CF43011 /* AppleScriptBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppleScriptBridge.swift; sourceTree = "<group>"; };
+		07542CB361F8FE6B0E4A5558 /* GifServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GifServiceTests.swift; sourceTree = "<group>"; };
 		14596A1FC6A28D35A07C800E /* ClaudeInSafari.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = ClaudeInSafari.entitlements; sourceTree = "<group>"; };
+		3C6A1743F9A8F1A1B1BBFDE4 /* PermissionMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PermissionMonitor.swift; sourceTree = "<group>"; };
+		439B4BEE06832D8A14D92084 /* MCPSocketServerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MCPSocketServerTests.swift; sourceTree = "<group>"; };
 		48CBDB59857AA797155E19CC /* MessageFramerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessageFramerTests.swift; sourceTree = "<group>"; };
 		4B4D8BEC346192E189913F39 /* ToolRouter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolRouter.swift; sourceTree = "<group>"; };
+		4F410276953CA7D55B48FF36 /* ToolRouterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolRouterTests.swift; sourceTree = "<group>"; };
 		5736A5C7E56CF23B6FF9B13A /* ScreenshotService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenshotService.swift; sourceTree = "<group>"; };
 		652C99F1EAD7FA1BDBF44D9D /* MessageFramer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessageFramer.swift; sourceTree = "<group>"; };
 		658074861C8C0C7933646343 /* FileService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileService.swift; sourceTree = "<group>"; };
 		729FD9AEFD8D3ED0949DE6F3 /* SafariWebExtensionHandler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SafariWebExtensionHandler.swift; sourceTree = "<group>"; };
 		7A6086210D19D2B963968546 /* ClaudeInSafariTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ClaudeInSafariTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		896C584EA45AB96EAA96797F /* MCPMessage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MCPMessage.swift; sourceTree = "<group>"; };
+		9954643B23BF0AF20F074015 /* main.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = main.swift; sourceTree = "<group>"; };
+		9BB305C7A1C4A31221830ABC /* ScreenshotServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenshotServiceTests.swift; sourceTree = "<group>"; };
 		9C607E28344D2484CB81B6FD /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		9C6819CDC28A43E78498350F /* AppleScriptBridgeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppleScriptBridgeTests.swift; sourceTree = "<group>"; };
 		A17192D2205200262959FCF5 /* MCPSocketServer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MCPSocketServer.swift; sourceTree = "<group>"; };
-		A1B2C3D4E5F60002A1B2C3D4 /* MCPMessageTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MCPMessageTests.swift; sourceTree = "<group>"; };
 		A2BCAFC762E47A469BC702E3 /* ClaudeInSafari Extension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = "ClaudeInSafari Extension.appex"; sourceTree = BUILT_PRODUCTS_DIR; };
-		B19B82BB58657A6D1B058281 /* Claude in Safari.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Claude in Safari.app"; sourceTree = BUILT_PRODUCTS_DIR; };
-		BB998877665544332211AABB /* main.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = main.swift; sourceTree = "<group>"; };
+		B19B82BB58657A6D1B058281 /* ClaudeInSafari.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ClaudeInSafari.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		C2582CE7621B3778BA974E87 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
-		CC00112233445566778899AA /* ToolRouterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolRouterTests.swift; sourceTree = "<group>"; };
-		CD00112233445566778899AA /* ToolRouterNotificationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolRouterNotificationTests.swift; sourceTree = "<group>"; };
+		C53DE74FE809B179A899A57B /* GifService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GifService.swift; sourceTree = "<group>"; };
+		C557C15A842E784429478650 /* FileServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileServiceTests.swift; sourceTree = "<group>"; };
+		CCED58EC2A9B5A6E2523B951 /* PermissionMonitorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PermissionMonitorTests.swift; sourceTree = "<group>"; };
 		DCF900FB4B4265BA727FFA21 /* ToolModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolModels.swift; sourceTree = "<group>"; };
-		DD00112233445566778899AA /* AppleScriptBridgeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppleScriptBridgeTests.swift; sourceTree = "<group>"; };
 		EAD6A30A647A7F4F5DC5DEA3 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
-		EE112233445566778899AABB /* ClaudeInSafariExtension.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = ClaudeInSafariExtension.entitlements; sourceTree = "<group>"; };
-		F011223344556677889900BB /* ScreenshotServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenshotServiceTests.swift; sourceTree = "<group>"; };
-		FF00112233445566778899AA /* MCPSocketServerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MCPSocketServerTests.swift; sourceTree = "<group>"; };
+		EFD3A85665B31B76E55FCDE6 /* ToolRouterNotificationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolRouterNotificationTests.swift; sourceTree = "<group>"; };
 		F1D372117A4FF27A236BD5F8 /* Constants.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Constants.swift; sourceTree = "<group>"; };
+		F7A729444DE88ABCACE1FBD2 /* MCPMessageTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MCPMessageTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -115,7 +119,8 @@
 			isa = PBXGroup;
 			children = (
 				EAD6A30A647A7F4F5DC5DEA3 /* AppDelegate.swift */,
-				BB998877665544332211AABB /* main.swift */,
+				9954643B23BF0AF20F074015 /* main.swift */,
+				3C6A1743F9A8F1A1B1BBFDE4 /* PermissionMonitor.swift */,
 			);
 			path = App;
 			sourceTree = "<group>";
@@ -123,9 +128,9 @@
 		607F690CCCD242C1E420B4A0 /* Services */ = {
 			isa = PBXGroup;
 			children = (
-				023CC86E2F632D9600B613D7 /* GifService.swift */,
 				02B361326E8F2C467CF43011 /* AppleScriptBridge.swift */,
 				658074861C8C0C7933646343 /* FileService.swift */,
+				C53DE74FE809B179A899A57B /* GifService.swift */,
 				5736A5C7E56CF23B6FF9B13A /* ScreenshotService.swift */,
 			);
 			path = Services;
@@ -145,7 +150,7 @@
 			isa = PBXGroup;
 			children = (
 				A2BCAFC762E47A469BC702E3 /* ClaudeInSafari Extension.appex */,
-				B19B82BB58657A6D1B058281 /* Claude in Safari.app */,
+				B19B82BB58657A6D1B058281 /* ClaudeInSafari.app */,
 				7A6086210D19D2B963968546 /* ClaudeInSafariTests.xctest */,
 			);
 			name = Products;
@@ -173,15 +178,16 @@
 		A80FB5CDD3FAA1D105EE532E /* Swift */ = {
 			isa = PBXGroup;
 			children = (
-				023CC8702F632DBF00B613D7 /* GifServiceTests.swift */,
-				EE00112233445566778899BB /* FileServiceTests.swift */,
+				9C6819CDC28A43E78498350F /* AppleScriptBridgeTests.swift */,
+				C557C15A842E784429478650 /* FileServiceTests.swift */,
+				07542CB361F8FE6B0E4A5558 /* GifServiceTests.swift */,
+				F7A729444DE88ABCACE1FBD2 /* MCPMessageTests.swift */,
+				439B4BEE06832D8A14D92084 /* MCPSocketServerTests.swift */,
 				48CBDB59857AA797155E19CC /* MessageFramerTests.swift */,
-				A1B2C3D4E5F60002A1B2C3D4 /* MCPMessageTests.swift */,
-				F011223344556677889900BB /* ScreenshotServiceTests.swift */,
-				CC00112233445566778899AA /* ToolRouterTests.swift */,
-				CD00112233445566778899AA /* ToolRouterNotificationTests.swift */,
-				DD00112233445566778899AA /* AppleScriptBridgeTests.swift */,
-				FF00112233445566778899AA /* MCPSocketServerTests.swift */,
+				CCED58EC2A9B5A6E2523B951 /* PermissionMonitorTests.swift */,
+				9BB305C7A1C4A31221830ABC /* ScreenshotServiceTests.swift */,
+				EFD3A85665B31B76E55FCDE6 /* ToolRouterNotificationTests.swift */,
+				4F410276953CA7D55B48FF36 /* ToolRouterTests.swift */,
 			);
 			path = Swift;
 			sourceTree = "<group>";
@@ -197,8 +203,8 @@
 		C7717F09845895144C2A0D21 /* ClaudeInSafari Extension */ = {
 			isa = PBXGroup;
 			children = (
+				0133189C5F0296CB11A35A28 /* ClaudeInSafariExtension.entitlements */,
 				9C607E28344D2484CB81B6FD /* Info.plist */,
-				EE112233445566778899AABB /* ClaudeInSafariExtension.entitlements */,
 				729FD9AEFD8D3ED0949DE6F3 /* SafariWebExtensionHandler.swift */,
 			);
 			path = "ClaudeInSafari Extension";
@@ -250,7 +256,7 @@
 			packageProductDependencies = (
 			);
 			productName = ClaudeInSafari;
-			productReference = B19B82BB58657A6D1B058281 /* Claude in Safari.app */;
+			productReference = B19B82BB58657A6D1B058281 /* ClaudeInSafari.app */;
 			productType = "com.apple.product-type.application";
 		};
 		D67D1A069DEEB92CF981094D /* ClaudeInSafariTests */ = {
@@ -278,7 +284,9 @@
 			isa = PBXProject;
 			attributes = {
 				BuildIndependentTargetsInParallel = YES;
-				LastUpgradeCheck = 2630;
+				LastUpgradeCheck = 1600;
+				TargetAttributes = {
+				};
 			};
 			buildConfigurationList = 10FB45AFC181C1A24C53263A /* Build configuration list for PBXProject "ClaudeInSafari" */;
 			developmentRegion = en;
@@ -337,16 +345,17 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				F8A556A293BA284872539B1F /* AppleScriptBridgeTests.swift in Sources */,
 				3E3A0B200C0A287DA885E7A5 /* Constants.swift in Sources */,
-				023CC8712F632DBF00B613D7 /* GifServiceTests.swift in Sources */,
-				EE00112233445566778899AA /* FileServiceTests.swift in Sources */,
+				50788C66B072DEF05E5A9A64 /* FileServiceTests.swift in Sources */,
+				257435801FBA70A001BC58B6 /* GifServiceTests.swift in Sources */,
+				2E19B15D715BBC43C9DBFF32 /* MCPMessageTests.swift in Sources */,
+				B9C04D834A40C22DE8146BBD /* MCPSocketServerTests.swift in Sources */,
 				020608970AC171717C3AD738 /* MessageFramerTests.swift in Sources */,
-				A1B2C3D4E5F60001A1B2C3D4 /* MCPMessageTests.swift in Sources */,
-				F011223344556677889900AA /* ScreenshotServiceTests.swift in Sources */,
-				CC00112233445566778899BB /* ToolRouterTests.swift in Sources */,
-				CD00112233445566778899BB /* ToolRouterNotificationTests.swift in Sources */,
-				DD00112233445566778899BB /* AppleScriptBridgeTests.swift in Sources */,
-				FF00112233445566778899BB /* MCPSocketServerTests.swift in Sources */,
+				7BE91EB42C3FB5129C7AC7C8 /* PermissionMonitorTests.swift in Sources */,
+				510D908978BEE48EC9D3DCFA /* ScreenshotServiceTests.swift in Sources */,
+				6BFDDA4BC04CB59098274D6D /* ToolRouterNotificationTests.swift in Sources */,
+				5BF79D7662D53EA3EE5DECD8 /* ToolRouterTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -355,17 +364,18 @@
 			buildActionMask = 2147483647;
 			files = (
 				A9635C5FE604D747DE0D1D62 /* AppDelegate.swift in Sources */,
-				BB112233445566778899AABB /* main.swift in Sources */,
 				B0B3DAD82B9C21C2DF890362 /* AppleScriptBridge.swift in Sources */,
 				921D7ABA46275FD600060ED6 /* Constants.swift in Sources */,
 				30EB2D0811612DBB6A50EF32 /* FileService.swift in Sources */,
+				FC4CA75768D2C5FD6249AE6B /* GifService.swift in Sources */,
 				9A6E898572D7D10C996C83CC /* MCPMessage.swift in Sources */,
 				E384720735F6190C0755DC2A /* MCPSocketServer.swift in Sources */,
 				D9127E282A5767DAA1C48C5D /* MessageFramer.swift in Sources */,
+				FF56AA2D0EFD16F29AFA30CD /* PermissionMonitor.swift in Sources */,
 				AE7A3B63E56420BC88227115 /* ScreenshotService.swift in Sources */,
 				0E751393E09E0A8E2C5E8AAA /* ToolModels.swift in Sources */,
-				023CC86F2F632D9600B613D7 /* GifService.swift in Sources */,
 				2C8D97C719B2C8ABC14F61DA /* ToolRouter.swift in Sources */,
+				85E406993AE6C81DD74F1B0E /* main.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -390,12 +400,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = ClaudeInSafari/ClaudeInSafari.entitlements;
-				CODE_SIGN_IDENTITY = "Apple Development";
-				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				DEAD_CODE_STRIPPING = YES;
-				DEVELOPMENT_TEAM = 4AKSB2RDBU;
-				ENABLE_HARDENED_RUNTIME = YES;
 				INFOPLIST_FILE = ClaudeInSafari/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -404,8 +409,6 @@
 				PRODUCT_BUNDLE_IDENTIFIER = com.chriscantu.claudeinsafari;
 				PRODUCT_MODULE_NAME = ClaudeInSafari;
 				PRODUCT_NAME = "Claude in Safari";
-				PROVISIONING_PROFILE_SPECIFIER = "";
-				REGISTER_APP_GROUPS = YES;
 				SDKROOT = macosx;
 			};
 			name = Debug;
@@ -444,11 +447,9 @@
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
-				DEAD_CODE_STRIPPING = YES;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
-				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GCC_C_LANGUAGE_STANDARD = gnu11;
 				GCC_DYNAMIC_NO_PIC = NO;
 				GCC_NO_COMMON_BLOCKS = YES;
@@ -469,7 +470,6 @@
 				ONLY_ACTIVE_ARCH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = macosx;
-				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 				SWIFT_VERSION = 5.9;
@@ -510,11 +510,9 @@
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
-				DEAD_CODE_STRIPPING = YES;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
-				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GCC_C_LANGUAGE_STANDARD = gnu11;
 				GCC_NO_COMMON_BLOCKS = YES;
 				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
@@ -528,7 +526,6 @@
 				MTL_FAST_MATH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = macosx;
-				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_COMPILATION_MODE = wholemodule;
 				SWIFT_OPTIMIZATION_LEVEL = "-O";
 				SWIFT_VERSION = 5.9;
@@ -538,13 +535,7 @@
 		5190CE0397B2F2491993CF2F /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				CODE_SIGN_ENTITLEMENTS = "ClaudeInSafari Extension/ClaudeInSafariExtension.entitlements";
-				CODE_SIGN_IDENTITY = "Apple Development";
-				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				DEAD_CODE_STRIPPING = YES;
-				DEVELOPMENT_TEAM = 4AKSB2RDBU;
-				ENABLE_HARDENED_RUNTIME = YES;
 				INFOPLIST_FILE = "ClaudeInSafari Extension/Info.plist";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -557,8 +548,6 @@
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.chriscantu.claudeinsafari.extension;
 				PRODUCT_NAME = "ClaudeInSafari Extension";
-				PROVISIONING_PROFILE_SPECIFIER = "";
-				REGISTER_APP_GROUPS = YES;
 				SDKROOT = macosx;
 			};
 			name = Debug;
@@ -566,13 +555,7 @@
 		778C896E216A918F7F3B3110 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				CODE_SIGN_ENTITLEMENTS = "ClaudeInSafari Extension/ClaudeInSafariExtension.entitlements";
-				CODE_SIGN_IDENTITY = "Apple Development";
-				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				DEAD_CODE_STRIPPING = YES;
-				DEVELOPMENT_TEAM = 4AKSB2RDBU;
-				ENABLE_HARDENED_RUNTIME = YES;
 				INFOPLIST_FILE = "ClaudeInSafari Extension/Info.plist";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -585,8 +568,6 @@
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.chriscantu.claudeinsafari.extension;
 				PRODUCT_NAME = "ClaudeInSafari Extension";
-				PROVISIONING_PROFILE_SPECIFIER = "";
-				REGISTER_APP_GROUPS = YES;
 				SDKROOT = macosx;
 			};
 			name = Release;
@@ -596,7 +577,6 @@
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				COMBINE_HIDPI_IMAGES = YES;
-				DEAD_CODE_STRIPPING = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -614,7 +594,6 @@
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				COMBINE_HIDPI_IMAGES = YES;
-				DEAD_CODE_STRIPPING = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -632,12 +611,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = ClaudeInSafari/ClaudeInSafari.entitlements;
-				CODE_SIGN_IDENTITY = "Apple Development";
-				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				DEAD_CODE_STRIPPING = YES;
-				DEVELOPMENT_TEAM = 4AKSB2RDBU;
-				ENABLE_HARDENED_RUNTIME = YES;
 				INFOPLIST_FILE = ClaudeInSafari/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -646,8 +620,6 @@
 				PRODUCT_BUNDLE_IDENTIFIER = com.chriscantu.claudeinsafari;
 				PRODUCT_MODULE_NAME = ClaudeInSafari;
 				PRODUCT_NAME = "Claude in Safari";
-				PROVISIONING_PROFILE_SPECIFIER = "";
-				REGISTER_APP_GROUPS = YES;
 				SDKROOT = macosx;
 			};
 			name = Release;
