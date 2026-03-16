@@ -525,36 +525,30 @@ final class OnboardingWindowController: NSWindowController {
     // MARK: - Icon images (white bezier paths on transparent background, placed on orange container)
 
     private func robotIconImage(size: CGFloat) -> NSImage {
-        NSImage(size: NSSize(width: size, height: size), flipped: false) { rect in
-            let w = rect.width
-            let h = rect.height
-
+        // Use SF Symbol "robot" (available macOS 14+) — matches the design mockup exactly.
+        let config = NSImage.SymbolConfiguration(pointSize: size * 0.58, weight: .regular)
+            .applying(NSImage.SymbolConfiguration(paletteColors: [.white]))
+        if let symbol = NSImage(systemSymbolName: "robot", accessibilityDescription: nil)?
+            .withSymbolConfiguration(config) {
+            return symbol
+        }
+        // Fallback: hand-drawn bezier robot (should never be reached on macOS 14+)
+        return NSImage(size: NSSize(width: size, height: size), flipped: false) { rect in
+            let w = rect.width; let h = rect.height
             NSColor.white.setFill()
-
-            // Head — large, takes up most of icon (matches design)
-            NSBezierPath(roundedRect: NSRect(x: w*0.16, y: h*0.30, width: w*0.68, height: h*0.46),
-                         xRadius: w*0.11, yRadius: w*0.11).fill()
-
-            // Antenna stem
-            NSBezierPath(roundedRect: NSRect(x: w*0.46, y: h*0.76, width: w*0.08, height: h*0.10),
-                         xRadius: 2, yRadius: 2).fill()
-
-            // Antenna tip — small circle, within bounds
-            NSBezierPath(ovalIn: NSRect(x: w*0.40, y: h*0.84, width: w*0.20, height: h*0.12)).fill()
-
-            // Body — small, narrower than head
-            NSBezierPath(roundedRect: NSRect(x: w*0.30, y: h*0.05, width: w*0.40, height: h*0.21),
-                         xRadius: w*0.07, yRadius: w*0.07).fill()
-
-            // Eyes — erase to transparent so orange container shows through
+            NSBezierPath(roundedRect: NSRect(x: w*0.14, y: h*0.36, width: w*0.72, height: h*0.42), xRadius: w*0.10, yRadius: w*0.10).fill()
+            NSBezierPath(roundedRect: NSRect(x: w*0.46, y: h*0.78, width: w*0.08, height: h*0.10), xRadius: 2, yRadius: 2).fill()
+            NSBezierPath(ovalIn: NSRect(x: w*0.38, y: h*0.86, width: w*0.24, height: h*0.14)).fill()
+            NSBezierPath(roundedRect: NSRect(x: w*0.32, y: h*0.08, width: w*0.36, height: h*0.24), xRadius: w*0.06, yRadius: w*0.06).fill()
+            NSBezierPath(roundedRect: NSRect(x: w*0.20, y: h*0.155, width: w*0.14, height: h*0.09), xRadius: w*0.03, yRadius: w*0.03).fill()
+            NSBezierPath(roundedRect: NSRect(x: w*0.66, y: h*0.155, width: w*0.14, height: h*0.09), xRadius: w*0.03, yRadius: w*0.03).fill()
             if let ctx = NSGraphicsContext.current?.cgContext {
                 ctx.setBlendMode(.clear)
-                NSColor.white.setFill() // color irrelevant; .clear blend erases alpha
-                NSBezierPath(ovalIn: NSRect(x: w*0.27, y: h*0.48, width: w*0.15, height: h*0.15)).fill()
-                NSBezierPath(ovalIn: NSRect(x: w*0.58, y: h*0.48, width: w*0.15, height: h*0.15)).fill()
+                NSColor.white.setFill()
+                NSBezierPath(roundedRect: NSRect(x: w*0.27, y: h*0.53, width: w*0.13, height: h*0.13), xRadius: w*0.02, yRadius: w*0.02).fill()
+                NSBezierPath(roundedRect: NSRect(x: w*0.60, y: h*0.53, width: w*0.13, height: h*0.13), xRadius: w*0.02, yRadius: w*0.02).fill()
                 ctx.setBlendMode(.normal)
             }
-
             return true
         }
     }
