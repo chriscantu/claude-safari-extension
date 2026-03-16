@@ -67,7 +67,7 @@ All critical and medium bugs from [REVIEW.md](REVIEW.md) resolved. Ready to comp
 | H4 | ~~🟠 High~~ | `tool-registry.js` | ~~Core dispatch layer has zero tests~~ | ✅ Fixed (tests added in Phase 4) |
 | M1 | 🟡 Medium | `background.js`, `popup.js` | Bundle ID hardcoded in two files (DRY) | ✅ Fixed (`constants.js` loaded in both contexts) |
 | M2 | 🟡 Medium | `ToolModels.swift` | `NativeMessage` should be a Swift enum, not stringly-typed struct | ✅ Fixed |
-| M3 | 🟡 Medium | `manifest.json` | `persistent: false` + `setTimeout` polling fragile under suspension | Deferred to Phase 7 |
+| M3 | 🟡 Medium | `manifest.json` | `persistent: false` + `setTimeout` polling fragile under suspension | ✅ Fixed (`"persistent": true` required on Safari 26+ — background page never bootstraps with `false`) |
 | M8 | 🟡 Medium | `tool-registry.js` | All results force-coerced to `text`; blocks image content type | ✅ Fixed (content arrays pass through as-is) |
 
 ### Build & Install Checklist
@@ -149,7 +149,7 @@ App Store or notarized DMG distribution, onboarding UX, documentation.
 | App Store submission (or notarized DMG) | ⬜ |
 | Setup wizard / onboarding UI | ⬜ |
 | `agent-visual-indicator` refinement ([020](docs/specs/020-agent-visual-indicator.md)) | 📋 |
-| Remaining medium/low REVIEW.md findings (M3–M7, L1–L5) | ⬜ |
+| Remaining medium/low REVIEW.md findings (M3–M7, L1–L5) | ✅ All resolved (M3/M4/M7 fixed as side-effects of subsystem rewrites; L2/L3/L4/L5 fixed in #23–#24) |
 | Full test coverage for all Swift classes | ⬜ |
 
 ---
@@ -160,13 +160,13 @@ Issues from REVIEW.md deferred past the First Build milestone:
 
 | ID | Issue |
 |----|-------|
-| M4 | Empty `PerformanceObserver` callback in `network-monitor.js` |
-| M5 | Payload normalisation inline in poll loop (SRP) |
-| M6 | Test hook `__captureResolveTab` leaking into production code |
-| M7 | Unnecessary `NSObject` inheritance on `ToolRouter` |
+| ~~M4~~ | ✅ Resolved — `network-monitor.js` rewritten to patch main-world fetch/XHR via `<script>` injection; `PerformanceObserver` approach abandoned entirely. |
+| ~~M5~~ | ✅ Resolved in #23 — `normalizePayload()` extracted from poll loop. |
+| ~~M6~~ | ✅ Resolved in #23 — `__captureResolveTab` test hook removed; tests read `globalThis.resolveTab` directly. |
+| ~~M7~~ | ✅ Resolved — `ToolRouter` conforms to `MCPSocketServerDelegate` directly; `NSObject` inheritance was never present in the current implementation. |
 | ~~L1~~ | ✅ Resolved — all 10 spec files written (010–012 Phase 5, 014–019 Phase 6, 020 Phase 7). Each spec includes Safari Considerations documenting degradations and enhancements vs Chrome. |
-| L2 | 6 Swift classes lack test coverage |
-| L3 | Hand-rolled `AnyCodable` edge cases — consider Flight-School/AnyCodable |
-| L4 | Magic number read buffer size in `MCPSocketServer` |
-| L5 | `clientId` duplicated at payload and socket level |
+| ~~L2~~ | ✅ Resolved in #24 — `MCPSocketServer` integration tests added. |
+| ~~L3~~ | ✅ Resolved in #23 — `AnyCodable` edge case tests added (null, String, nested Array, nested Dict). |
+| ~~L4~~ | ✅ Resolved — `MCPSocketServer.readBufferSize` is a named `private static let` constant; no magic numbers present. |
+| ~~L5~~ | ✅ Resolved in #23 — dead `ToolRequest`/`ToolRequestParams` structs deleted from `MCPMessage.swift`. |
 | ~~L6~~ | ✅ Resolved in `fix/js-test-infrastructure` — `@jest-environment jsdom` docblock added to `get-page-text.test.js`; T1–T8 now eval the IIFE via `vm.runInNewContext` against a real jsdom DOM. |
