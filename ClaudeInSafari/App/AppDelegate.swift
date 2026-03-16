@@ -19,22 +19,28 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
     private func requestNotificationAuthorization() {
         let center = UNUserNotificationCenter.current()
         center.delegate = self
+
+        // Register the category unconditionally BEFORE requesting authorization.
+        // Categories do not require authorization — they must be registered before
+        // any notification fires so the "Stop Claude" action button appears even on
+        // the very first notification (before the user has responded to the auth dialog).
+        let stopAction = UNNotificationAction(
+            identifier: "stop-automation",
+            title: "Stop Claude",
+            options: .destructive
+        )
+        let category = UNNotificationCategory(
+            identifier: "claude-automation",
+            actions: [stopAction],
+            intentIdentifiers: [],
+            options: []
+        )
+        center.setNotificationCategories([category])
+
         center.requestAuthorization(options: [.alert, .sound]) { _, error in
             if let error = error {
                 NSLog("Notification authorization error: \(error.localizedDescription)")
             }
-            let stopAction = UNNotificationAction(
-                identifier: "stop-automation",
-                title: "Stop Claude",
-                options: .destructive
-            )
-            let category = UNNotificationCategory(
-                identifier: "claude-automation",
-                actions: [stopAction],
-                intentIdentifiers: [],
-                options: []
-            )
-            center.setNotificationCategories([category])
         }
     }
 
