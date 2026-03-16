@@ -30,3 +30,4 @@ node_modules/
 # Runtime / build artifacts
 *.sock
 *.profraw
+.worktrees/
