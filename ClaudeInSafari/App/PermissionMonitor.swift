@@ -38,6 +38,7 @@ struct PermissionStatus {
 protocol PermissionChecking {
     func isAccessibilityGranted() -> Bool
     func isScreenRecordingGranted() -> Bool
+    /// Completion is called on an unspecified queue. Callers must dispatch to main if needed.
     func getExtensionEnabled(completion: @escaping (Bool) -> Void)
 }
 
@@ -59,16 +60,14 @@ struct SystemPermissionChecker: PermissionChecking {
         SFSafariExtensionManager.getStateOfSafariExtension(
             withIdentifier: Self.extensionBundleID
         ) { state, _ in
-            DispatchQueue.main.async {
-                completion(state?.isEnabled ?? false)
-            }
+            completion(state?.isEnabled ?? false)
         }
     }
 }
 
 // MARK: - PermissionMonitor
 
-/// Polls permission state and delivers `PermissionStatus` on the main queue.
+/// Checks permission state and delivers `PermissionStatus` on the main queue.
 final class PermissionMonitor {
     private let checker: PermissionChecking
 
@@ -76,7 +75,7 @@ final class PermissionMonitor {
         self.checker = checker
     }
 
-    /// One-shot check of all three permissions. Calls `completion` on main queue.
+    /// One-shot check of all three permissions. Delivers `PermissionStatus` on the main queue.
     func checkAll(completion: @escaping (PermissionStatus) -> Void) {
         let accessibility = checker.isAccessibilityGranted()
         let screenRecording = checker.isScreenRecordingGranted()
