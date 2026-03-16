@@ -439,7 +439,11 @@ final class OnboardingWindowController: NSWindowController {
         numLabel.font = NSFont.systemFont(ofSize: 11, weight: .bold)
         numLabel.textColor = .white
         numLabel.alignment = .center
-        numLabel.frame = circle.bounds
+        let labelHeight = numLabel.intrinsicContentSize.height
+        numLabel.frame = NSRect(x: 0,
+                                y: (circle.bounds.height - labelHeight) / 2,
+                                width: circle.bounds.width,
+                                height: labelHeight)
         circle.addSubview(numLabel)
         row.addSubview(circle)
 
@@ -554,90 +558,27 @@ final class OnboardingWindowController: NSWindowController {
     }
 
     private func puzzleIconImage(size: CGFloat) -> NSImage {
-        NSImage(size: NSSize(width: size, height: size), flipped: false) { rect in
-            NSColor.white.setFill()
-            // Simplified puzzle shape via bezier
-            let path = NSBezierPath()
-            let s = rect.width
-            // Top piece notch
-            path.move(to: CGPoint(x: s*0.08, y: s*0.50))
-            path.line(to: CGPoint(x: s*0.08, y: s*0.70))
-            path.appendArc(withCenter: CGPoint(x: s*0.22, y: s*0.70), radius: s*0.12,
-                           startAngle: 180, endAngle: 0, clockwise: true)
-            path.line(to: CGPoint(x: s*0.34, y: s*0.92))
-            path.line(to: CGPoint(x: s*0.92, y: s*0.92))
-            path.line(to: CGPoint(x: s*0.92, y: s*0.34))
-            path.appendArc(withCenter: CGPoint(x: s*0.92, y: s*0.22), radius: s*0.12,
-                           startAngle: 270, endAngle: 90, clockwise: true)
-            path.line(to: CGPoint(x: s*0.70, y: s*0.08))
-            path.line(to: CGPoint(x: s*0.50, y: s*0.08))
-            path.appendArc(withCenter: CGPoint(x: s*0.50, y: s*0.22), radius: s*0.12,
-                           startAngle: 270, endAngle: 90, clockwise: false)
-            path.line(to: CGPoint(x: s*0.34, y: s*0.50))
-            path.appendArc(withCenter: CGPoint(x: s*0.22, y: s*0.50), radius: s*0.12,
-                           startAngle: 0, endAngle: 180, clockwise: false)
-            path.close()
-            path.fill()
-            return true
-        }
+        sfSymbolImage("puzzlepiece.extension.fill", size: size)
     }
 
     private func cameraIconImage(size: CGFloat) -> NSImage {
-        NSImage(size: NSSize(width: size, height: size), flipped: false) { rect in
-            let s = rect.width
-            // Camera body (white)
-            NSColor.white.setFill()
-            let body = NSBezierPath(roundedRect: NSRect(x: 0, y: 0, width: s, height: s * 0.75),
-                                    xRadius: s * 0.12, yRadius: s * 0.12)
-            body.fill()
-            // Viewfinder bump
-            NSBezierPath(roundedRect: NSRect(x: s*0.30, y: s*0.70, width: s*0.40, height: s*0.26),
-                         xRadius: s*0.08, yRadius: s*0.08).fill()
-            // Lens ring (orange = cutout revealing container bg)
-            NSColor.claudeOrange.setFill()
-            NSBezierPath(ovalIn: NSRect(x: s*0.28, y: s*0.10, width: s*0.44, height: s*0.44)).fill()
-            // Lens glass (white)
-            NSColor.white.setFill()
-            NSBezierPath(ovalIn: NSRect(x: s*0.38, y: s*0.20, width: s*0.24, height: s*0.24)).fill()
-            return true
-        }
+        sfSymbolImage("camera.fill", size: size)
     }
 
     private func accessibilityIconImage(size: CGFloat) -> NSImage {
-        NSImage(size: NSSize(width: size, height: size), flipped: false) { rect in
-            NSColor.white.setFill()
-            let s = rect.width
-            // Head
-            NSBezierPath(ovalIn: NSRect(x: s*0.38, y: s*0.78, width: s*0.24, height: s*0.24)).fill()
-            // Arms
-            let arms = NSBezierPath(roundedRect: NSRect(x: s*0.04, y: s*0.54, width: s*0.92, height: s*0.12),
-                                    xRadius: s*0.06, yRadius: s*0.06)
-            arms.fill()
-            // Legs (two paths)
-            let legL = NSBezierPath(roundedRect: NSRect(x: s*0.16, y: s*0.04, width: s*0.22, height: s*0.50),
-                                    xRadius: s*0.08, yRadius: s*0.08)
-            legL.fill()
-            let legR = NSBezierPath(roundedRect: NSRect(x: s*0.62, y: s*0.04, width: s*0.22, height: s*0.50),
-                                    xRadius: s*0.08, yRadius: s*0.08)
-            legR.fill()
-            return true
-        }
+        sfSymbolImage("accessibility", size: size)
     }
 
     private func checkmarkIconImage(size: CGFloat) -> NSImage {
-        NSImage(size: NSSize(width: size, height: size), flipped: false) { rect in
-            let s = rect.width
-            let path = NSBezierPath()
-            path.lineWidth = s * 0.12
-            path.lineCapStyle = .round
-            path.lineJoinStyle = .round
-            path.move(to: CGPoint(x: s * 0.15, y: s * 0.50))
-            path.line(to: CGPoint(x: s * 0.40, y: s * 0.25))
-            path.line(to: CGPoint(x: s * 0.85, y: s * 0.75))
-            NSColor.white.setStroke()
-            path.stroke()
-            return true
-        }
+        sfSymbolImage("checkmark", size: size, weight: .bold)
+    }
+
+    /// Returns a white SF Symbol image sized to fit within `size` points.
+    private func sfSymbolImage(_ name: String, size: CGFloat, weight: NSFont.Weight = .regular) -> NSImage {
+        let config = NSImage.SymbolConfiguration(pointSize: size * 0.65, weight: weight)
+            .applying(NSImage.SymbolConfiguration(paletteColors: [.white]))
+        return NSImage(systemSymbolName: name, accessibilityDescription: nil)?
+            .withSymbolConfiguration(config) ?? NSImage()
     }
 }
 
