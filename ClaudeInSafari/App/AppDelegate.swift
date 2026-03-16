@@ -74,6 +74,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
     // MARK: - Continuous Monitoring
 
     private func startContinuousMonitoring() {
+        // Guard is idempotent — safe to call from both onDismiss and checkAndShowOnboardingIfNeeded.
         guard monitorTimer == nil else { return }
         monitorTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { [weak self] _ in
             self?.updateMenuBarState()
