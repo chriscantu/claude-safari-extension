@@ -39,11 +39,27 @@ All icons use **white on Claude orange (`#d97757`)** exclusively — no other co
 | Needs Attention | White robot + yellow dot |
 | Not Connected | White robot (dimmed) + red dot |
 
+The "white + orange only" rule applies to the robot icon and all step icon containers. The status dots (green / yellow / red) are explicitly exempted — they are system semantic colors that users recognize across all macOS apps to mean "good / warning / error." Using brand orange for all three would destroy their meaning.
+
 ---
 
 ## Onboarding Flow
 
-Shown automatically on first launch. Dismissed after all steps complete or via "I'll set this up later." Can be reopened from the menu.
+### First-Launch Detection
+
+On every app launch, check whether all three permissions are already granted and the extension is enabled. If all pass, skip onboarding entirely (reinstall / update path). If any fail, show onboarding starting at the first incomplete step. Detection uses the same APIs as the polling table below.
+
+First-launch state is **not** stored in `UserDefaults` — permission state is ground truth. This means onboarding re-appears after a reinstall only if permissions were actually revoked, which is the correct behavior.
+
+### "I'll Set This Up Later" Behavior
+
+Tapping this on the Welcome screen dismisses the window immediately. The menu bar icon appears in **Not Connected** (dimmed) state. The menu offers **"Open Setup"** as the primary action. On subsequent launches, onboarding re-appears automatically until all permissions are granted (same first-launch detection logic above).
+
+### Timeline: 3 Segments, 5 Screens
+
+The timeline strip shows 3 segments (one per permission step). It is **not shown** on the Welcome screen or the Done screen — those are entry and exit states, not steps. Segment states: pending (gray) → active (orange) → done (green ✓).
+
+Shown automatically on first launch. Dismissed after all steps complete or via "I'll set this up later." Can be reopened from the menu via "Open Setup Again."
 
 ### Structure: Focused Step + Mini Timeline (Option C)
 
@@ -193,14 +209,18 @@ Triggered when a previously-granted permission is revoked (detected via the same
 | `NSStatusItem` setup | `AppDelegate.swift` | Menu bar icon + menu construction |
 | `OnboardingWindowController` | New Swift file | Manages the 5-screen flow |
 | Permission polling | New Swift file or `AppDelegate` extension | `AXIsProcessTrusted`, `CGPreflightScreenCaptureAccess`, `SFSafariExtensionManager` |
-| Continuous permission monitoring | `AppDelegate` | Same APIs, polled on a timer post-setup to detect revocation |
-| `SFSafariExtensionManager` import | Target entitlements | Requires `com.apple.developer.safari-extension` entitlement |
+| Continuous permission monitoring | `AppDelegate` | Same APIs on a `Timer` with 5s interval (post-setup only — not during active onboarding which uses 500ms). Timer starts after Done screen is dismissed. Invalidated only on app quit. On state change → update `NSStatusItem` image and menu immediately. |
+| `SFSafariExtensionManager` import | Target entitlements | Requires `com.apple.developer.safari-extension` entitlement — already present for the extension target; confirm it is also on the main app target before using `SFSafariExtensionManager` from `AppDelegate`. If unavailable (unsigned dev build), fall back to treating extension state as "unknown" and rely on the "I already did this →" manual path for step 1. |
 
 ---
 
 ## Out of Scope
 
 - App Store / notarization (separate Phase 7 item)
-- Notification permission onboarding (already requested at launch via existing `requestNotificationAuthorization()`)
+- Notification permission onboarding (already requested at launch via existing `requestNotificationAuthorization()`; notification permission is not surfaced in the Needs Attention state — it is advisory-only and non-blocking)
 - Claude Code CLI detection or version checking
 - In-app help or documentation beyond the setup flow
+
+## LSUIElement & Quit Path
+
+Changing `LSUIElement` to `true` removes the app from `Cmd-Tab` and the Dock. The only quit path becomes **Quit** in the menu bar menu. This is intentional and consistent with other macOS menu bar utilities. The Quit item must always be visible in all menu states (Connected, Needs Attention, Not Connected).
