@@ -420,6 +420,17 @@ class ToolRouter: MCPSocketServerDelegate {
                 }
                 self.sendError(id: id, code: -32000, message: msg, to: clientId)
             case .success(let (data, encodedCount)):
+                // Second cancellation check: Stop may have fired during encoding.
+                // exportGIF can take seconds; the pre-operation check above only guards
+                // against Stop clicks that arrive before encoding starts.
+                self.pendingRequestsLock.lock()
+                let cancelledAfter = self.nativeCallCancelled
+                if cancelledAfter { self.nativeCallCancelled = false }
+                self.pendingRequestsLock.unlock()
+                guard !cancelledAfter else {
+                    self.sendError(id: id, code: -32000, message: "Cancelled by user", to: clientId)
+                    return
+                }
                 let base64 = data.base64EncodedString()
                 let desktopURL = FileManager.default.homeDirectoryForCurrentUser
                     .appendingPathComponent("Desktop")
