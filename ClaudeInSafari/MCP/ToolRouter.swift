@@ -55,11 +55,17 @@ class ToolRouter: MCPSocketServerDelegate {
     var lastNotificationDate: Date? = nil
 
     /// Set when a Stop action fires while a native tool is in-flight.
-    /// Completion handlers check this flag and send an error response instead of the result.
-    /// Best-effort: a race between flag set and completion-handler read is acceptable —
-    /// worst case is the result is delivered instead of an error (PR A behavior).
-    /// Reset to false at the end of cancelCurrentRequest() to prevent a sticky-true state
-    /// when no native tool was in-flight at the time Stop was clicked.
+    /// Completion handlers check this flag and return a "Cancelled by user" error instead of
+    /// the result.
+    /// Protected by `pendingRequestsLock` on all reads and writes.
+    /// Best-effort: two races remain possible even with locking:
+    ///   1. cancelCurrentRequest() sets the flag after the completion handler already read false
+    ///      (handler was already past the guard when Stop fired) — result is delivered normally.
+    ///   2. The completion handler fires and reads the flag before cancelCurrentRequest() sets it
+    ///      (handler was fast) — result is delivered normally.
+    /// Worst case for both: the result is delivered instead of an error (acceptable; matches
+    /// behaviour before this PR). The flag is reset to false by whichever completion handler
+    /// reads it as true.
     /// Internal for testability.
     var nativeCallCancelled = false
 
@@ -115,21 +121,20 @@ class ToolRouter: MCPSocketServerDelegate {
     ///   with a "Cancelled by user" error response.
     /// • Native calls (screenshot, gif, resize_window): sets `nativeCallCancelled` so
     ///   each completion handler sends an error instead of the result (best-effort).
-    ///   The flag is reset to false after the loop so a Stop click with no in-flight
-    ///   native tool does not poison the next call.
+    ///   The flag is NOT reset here — each native completion handler resets it to false
+    ///   when it fires, ensuring the flag stays true long enough for an in-flight handler
+    ///   to observe it.
     func cancelCurrentRequest() {
-        nativeCallCancelled = true
-
         pendingRequestsLock.lock()
+        nativeCallCancelled = true
         let toCancel = Array(pendingRequests.keys)
         pendingRequestsLock.unlock()
 
         for requestId in toCancel {
             failPendingRequest(requestId: requestId, message: "Cancelled by user")
         }
-
-        // Reset: prevents sticky-true when no native tool was in-flight.
-        nativeCallCancelled = false
+        // NOTE: nativeCallCancelled is NOT reset here — each native completion handler
+        // resets it to false after reading it (lines in screenshot/zoom/gif/resize guards).
     }
 
     // MARK: - MCPSocketServerDelegate
@@ -232,8 +237,11 @@ class ToolRouter: MCPSocketServerDelegate {
         if action == "screenshot" {
             screenshotService.captureScreenshot(tabId: tabIdOpt) { [weak self] result in
                 guard let self else { return }
-                guard !self.nativeCallCancelled else {
-                    self.nativeCallCancelled = false
+                self.pendingRequestsLock.lock()
+                let cancelled = self.nativeCallCancelled
+                if cancelled { self.nativeCallCancelled = false }
+                self.pendingRequestsLock.unlock()
+                guard !cancelled else {
                     self.sendError(id: id, code: -32000, message: "Cancelled by user", to: clientId)
                     return
                 }
@@ -260,8 +268,11 @@ class ToolRouter: MCPSocketServerDelegate {
             }()
             screenshotService.captureZoom(tabId: tabIdOpt, region: region) { [weak self] result in
                 guard let self else { return }
-                guard !self.nativeCallCancelled else {
-                    self.nativeCallCancelled = false
+                self.pendingRequestsLock.lock()
+                let cancelled = self.nativeCallCancelled
+                if cancelled { self.nativeCallCancelled = false }
+                self.pendingRequestsLock.unlock()
+                guard !cancelled else {
                     self.sendError(id: id, code: -32000, message: "Cancelled by user", to: clientId)
                     return
                 }
@@ -357,8 +368,11 @@ class ToolRouter: MCPSocketServerDelegate {
                 }
                 return
             }
-            guard !self.nativeCallCancelled else {
-                self.nativeCallCancelled = false
+            self.pendingRequestsLock.lock()
+            let cancelled = self.nativeCallCancelled
+            if cancelled { self.nativeCallCancelled = false }
+            self.pendingRequestsLock.unlock()
+            guard !cancelled else {
                 self.sendError(id: id, code: -32000, message: "Cancelled by user", to: clientId)
                 return
             }
@@ -448,8 +462,11 @@ class ToolRouter: MCPSocketServerDelegate {
         // requires extension routing which is not yet implemented (Spec 016 §Window Resolution).
         appleScriptBridge.resizeWindow(width: Int(w), height: Int(h)) { [weak self] result in
             guard let self else { return }
-            guard !self.nativeCallCancelled else {
-                self.nativeCallCancelled = false
+            self.pendingRequestsLock.lock()
+            let cancelled = self.nativeCallCancelled
+            if cancelled { self.nativeCallCancelled = false }
+            self.pendingRequestsLock.unlock()
+            guard !cancelled else {
                 self.sendError(id: id, code: -32000, message: "Cancelled by user", to: clientId)
                 return
             }
