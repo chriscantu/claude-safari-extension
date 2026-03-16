@@ -54,8 +54,26 @@ class ToolRouter: MCPSocketServerDelegate {
     /// Date of the last automation notification. Internal for testability (manipulated in tests).
     var lastNotificationDate: Date? = nil
 
+    /// Set when a Stop action fires while a native tool is in-flight.
+    /// Completion handlers check this flag and send an error response instead of the result.
+    /// Best-effort: a race between flag set and completion-handler read is acceptable —
+    /// worst case is the result is delivered instead of an error (PR A behavior).
+    /// Reset to false at the end of cancelCurrentRequest() to prevent a sticky-true state
+    /// when no native tool was in-flight at the time Stop was clicked.
+    /// Internal for testability.
+    var nativeCallCancelled = false
+
     func setServer(_ server: MCPSocketServer) {
         self.server = server
+    }
+
+    /// Test hook — injects a pending request entry so cancelCurrentRequest can be
+    /// tested without standing up a real extension IPC channel.
+    /// Internal (not private) for @testable access; has no effect in production.
+    func injectPendingRequest(requestId: String, clientId: String, jsonrpcId: Any?) {
+        pendingRequestsLock.lock()
+        pendingRequests[requestId] = (clientId: clientId, jsonrpcId: jsonrpcId)
+        pendingRequestsLock.unlock()
     }
 
     // MARK: - Notifications
@@ -89,6 +107,29 @@ class ToolRouter: MCPSocketServerDelegate {
             trigger: nil  // deliver immediately
         )
         notificationCenter.add(request, withCompletionHandler: nil)
+    }
+
+    /// Cancel all in-flight requests — called by AppDelegate when the "Stop Claude"
+    /// notification action fires.
+    /// • Extension-forwarded calls: immediately fails all entries in `pendingRequests`
+    ///   with a "Cancelled by user" error response.
+    /// • Native calls (screenshot, gif, resize_window): sets `nativeCallCancelled` so
+    ///   each completion handler sends an error instead of the result (best-effort).
+    ///   The flag is reset to false after the loop so a Stop click with no in-flight
+    ///   native tool does not poison the next call.
+    func cancelCurrentRequest() {
+        nativeCallCancelled = true
+
+        pendingRequestsLock.lock()
+        let toCancel = Array(pendingRequests.keys)
+        pendingRequestsLock.unlock()
+
+        for requestId in toCancel {
+            failPendingRequest(requestId: requestId, message: "Cancelled by user")
+        }
+
+        // Reset: prevents sticky-true when no native tool was in-flight.
+        nativeCallCancelled = false
     }
 
     // MARK: - MCPSocketServerDelegate
@@ -191,6 +232,11 @@ class ToolRouter: MCPSocketServerDelegate {
         if action == "screenshot" {
             screenshotService.captureScreenshot(tabId: tabIdOpt) { [weak self] result in
                 guard let self else { return }
+                guard !self.nativeCallCancelled else {
+                    self.nativeCallCancelled = false
+                    self.sendError(id: id, code: -32000, message: "Cancelled by user", to: clientId)
+                    return
+                }
                 sendScreenshotResult(result, id: id, to: clientId)
                 if case .success(_) = result {
                     maybeAddGifFrame(tabId: tabId, action: "screenshot", coordinate: nil)
@@ -214,6 +260,11 @@ class ToolRouter: MCPSocketServerDelegate {
             }()
             screenshotService.captureZoom(tabId: tabIdOpt, region: region) { [weak self] result in
                 guard let self else { return }
+                guard !self.nativeCallCancelled else {
+                    self.nativeCallCancelled = false
+                    self.sendError(id: id, code: -32000, message: "Cancelled by user", to: clientId)
+                    return
+                }
                 sendScreenshotResult(result, region: region, id: id, to: clientId)
                 if case .success(_) = result {
                     maybeAddGifFrame(tabId: tabId, action: "zoom", coordinate: nil)
@@ -306,6 +357,11 @@ class ToolRouter: MCPSocketServerDelegate {
                 }
                 return
             }
+            guard !self.nativeCallCancelled else {
+                self.nativeCallCancelled = false
+                self.sendError(id: id, code: -32000, message: "Cancelled by user", to: clientId)
+                return
+            }
             switch self.gifService.exportGIF(tabId: tabId, options: options) {
             case .failure(let error):
                 let msg: String
@@ -392,6 +448,11 @@ class ToolRouter: MCPSocketServerDelegate {
         // requires extension routing which is not yet implemented (Spec 016 §Window Resolution).
         appleScriptBridge.resizeWindow(width: Int(w), height: Int(h)) { [weak self] result in
             guard let self else { return }
+            guard !self.nativeCallCancelled else {
+                self.nativeCallCancelled = false
+                self.sendError(id: id, code: -32000, message: "Cancelled by user", to: clientId)
+                return
+            }
             switch result {
             case .success(var message):
                 if tabIdSupplied {

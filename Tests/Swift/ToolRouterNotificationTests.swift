@@ -117,4 +117,32 @@ final class ToolRouterNotificationTests: XCTestCase {
         XCTAssertEqual(mockCenter.addedRequests.count, 0,
                        "No notification should be posted when tool name is missing")
     }
+
+    // T_cancel1 — cancelCurrentRequest sends error for any in-flight pending request
+    func testCancelCurrentRequest_withInFlightRequest_sendsErrorResponse() {
+        let server = NotifTestMockServer()
+        router.setServer(server)
+
+        // Inject a fake in-flight request (simulates a tool waiting for extension response)
+        router.injectPendingRequest(requestId: "req-cancel-1", clientId: "client-1", jsonrpcId: 99)
+
+        router.cancelCurrentRequest()
+
+        XCTAssertFalse(server.sentData.isEmpty, "Expected an error response to be sent")
+        let json = server.lastSentJSON()
+        let error = json?["error"] as? [String: Any]
+        let message = error?["message"] as? String ?? ""
+        XCTAssertTrue(message.contains("Cancelled"), "Expected 'Cancelled' in: \(message)")
+    }
+
+    // T_cancel2 — cancelCurrentRequest with no in-flight request does nothing
+    func testCancelCurrentRequest_noInFlightRequest_doesNotSend() {
+        let server = NotifTestMockServer()
+        router.setServer(server)
+
+        router.cancelCurrentRequest()
+
+        // No tool response should be sent — there is nothing to cancel
+        XCTAssertTrue(server.sentData.isEmpty)
+    }
 }
