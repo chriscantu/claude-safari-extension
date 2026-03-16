@@ -81,6 +81,7 @@ claude-safari-extension/
 │       │   ├── MessageFramerTests.swift
 │       │   ├── SafariWebExtensionHandlerTests.swift
 │       │   ├── ScreenshotServiceTests.swift
+│       │   ├── ToolRouterNotificationTests.swift
 │       │   └── ToolRouterTests.swift
 │       └── JS/                              # JavaScript test suites
 │           ├── tool-registry.test.js
