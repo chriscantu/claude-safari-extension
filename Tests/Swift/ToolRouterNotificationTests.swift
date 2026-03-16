@@ -81,25 +81,22 @@ final class ToolRouterNotificationTests: XCTestCase {
     // started. postAutomationNotification fires synchronously before that, so
     // the assertion below is safe without any async coordination.
     func testHandleToolCallTriggersNotification() {
-        XCTExpectFailure("postAutomationNotification not yet wired into handleToolCall — Task 3 will fix this") {
-            let server = NotifTestMockServer()
-            router.setServer(server)
+        let server = NotifTestMockServer()
+        router.setServer(server)
 
-            let message: [String: Any] = [
-                "jsonrpc": "2.0", "id": 1,
-                "method": "tools/call",
-                "params": [
-                    "name": "navigate",
-                    "arguments": ["url": "https://example.com", "tabId": 1]
-                ]
+        let message: [String: Any] = [
+            "jsonrpc": "2.0", "id": 1,
+            "method": "tools/call",
+            "params": [
+                "name": "navigate",
+                "arguments": ["url": "https://example.com", "tabId": 1]
             ]
-            let data = try! JSONSerialization.data(withJSONObject: message)
-            router.socketServer(server, didReceiveMessage: data, from: "client-1")
+        ]
+        let data = try! JSONSerialization.data(withJSONObject: message)
+        router.socketServer(server, didReceiveMessage: data, from: "client-1")
 
-            XCTAssertEqual(mockCenter.addedRequests.count, 1)
-            guard !mockCenter.addedRequests.isEmpty else { return }
-            XCTAssertTrue(mockCenter.addedRequests[0].content.body.contains("navigate"))
-        }
+        XCTAssertEqual(mockCenter.addedRequests.count, 1)
+        XCTAssertTrue(mockCenter.addedRequests[0].content.body.contains("navigate"))
     }
 
     // T_notif6 — missing tool name in tools/call does not post notification

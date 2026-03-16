@@ -155,6 +155,9 @@ class ToolRouter: MCPSocketServerDelegate {
 
         let arguments = (params?["arguments"] as? [String: Any]) ?? [:]
 
+        // Post automation notification (debounced 10s; fire-and-forget — never blocks tool execution)
+        postAutomationNotification(toolName: toolName)
+
         if toolName == "computer",
            let action = arguments["action"] as? String,
            action == "screenshot" || action == "zoom" {
