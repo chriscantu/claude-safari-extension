@@ -23,20 +23,19 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
             if let error = error {
                 NSLog("Notification authorization error: \(error.localizedDescription)")
             }
+            let stopAction = UNNotificationAction(
+                identifier: "stop-automation",
+                title: "Stop Claude",
+                options: .destructive
+            )
+            let category = UNNotificationCategory(
+                identifier: "claude-automation",
+                actions: [stopAction],
+                intentIdentifiers: [],
+                options: []
+            )
+            center.setNotificationCategories([category])
         }
-
-        let stopAction = UNNotificationAction(
-            identifier: "stop-automation",
-            title: "Stop Claude",
-            options: .destructive
-        )
-        let category = UNNotificationCategory(
-            identifier: "claude-automation",
-            actions: [stopAction],
-            intentIdentifiers: [],
-            options: []
-        )
-        center.setNotificationCategories([category])
     }
 
     // MARK: - UNUserNotificationCenterDelegate
@@ -48,7 +47,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
         withCompletionHandler completionHandler: @escaping () -> Void
     ) {
         if response.actionIdentifier == "stop-automation" {
-            toolRouter?.cancelCurrentRequest()
+            if let router = toolRouter {
+                router.cancelCurrentRequest()
+            } else {
+                NSLog("AppDelegate: received stop-automation action but toolRouter is nil — cancellation ignored")
+            }
         }
         completionHandler()
     }
