@@ -1,20 +1,106 @@
+// ClaudeInSafari/App/AppDelegate.swift
 import Cocoa
 import UserNotifications
 
 class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate {
+
+    // MARK: - Private state
+
     private var mcpServer: MCPSocketServer?
     private var toolRouter: ToolRouter?
+    private var menuBarController: MenuBarController?
+    private var onboardingWindowController: OnboardingWindowController?
+    private var monitorTimer: Timer?
+    private let permissionMonitor = PermissionMonitor()
+
+    // MARK: - Lifecycle
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         requestNotificationAuthorization()
+        setupMenuBar()
         startMCPServer()
+        checkAndShowOnboardingIfNeeded()
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        monitorTimer?.invalidate()
         mcpServer?.stop()
     }
 
-    // MARK: - Notification Authorization + Category
+    // MARK: - Menu Bar
+
+    private func setupMenuBar() {
+        let controller = MenuBarController()
+        controller.onOpenSetup = { [weak self] in self?.showOnboarding() }
+        controller.onCheckConnection = { [weak self] in self?.checkConnection() }
+        menuBarController = controller
+    }
+
+    private func updateMenuBarState() {
+        permissionMonitor.checkAll { [weak self] status in
+            guard let self else { return }
+            let state = MenuBarController.menuBarState(from: status)
+            self.menuBarController?.setState(state)
+        }
+    }
+
+    // MARK: - Onboarding
+
+    private func checkAndShowOnboardingIfNeeded() {
+        permissionMonitor.checkAll { [weak self] status in
+            guard let self else { return }
+            if !status.allGranted {
+                self.showOnboarding(startingAt: status.firstIncompleteStep)
+            } else {
+                self.startContinuousMonitoring()
+                self.menuBarController?.setState(.connected)
+            }
+        }
+    }
+
+    private func showOnboarding(startingAt step: OnboardingStep? = nil) {
+        if onboardingWindowController == nil {
+            let wc = OnboardingWindowController(monitor: permissionMonitor)
+            wc.onDismiss = { [weak self] in
+                self?.onboardingWindowController = nil
+                self?.startContinuousMonitoring()
+                self?.updateMenuBarState()
+            }
+            onboardingWindowController = wc
+        }
+        onboardingWindowController?.showOnboarding(startingAt: step)
+    }
+
+    // MARK: - Continuous Monitoring
+
+    private func startContinuousMonitoring() {
+        guard monitorTimer == nil else { return }
+        monitorTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { [weak self] _ in
+            self?.updateMenuBarState()
+        }
+    }
+
+    // MARK: - Connection Check
+
+    private func checkConnection() {
+        permissionMonitor.checkAll { [weak self] status in
+            guard let self else { return }
+            self.menuBarController?.setState(MenuBarController.menuBarState(from: status))
+            let alert = NSAlert()
+            if status.allGranted {
+                alert.messageText = "Claude in Safari is connected"
+                alert.informativeText = "All permissions are granted. Claude Code can use Safari."
+                alert.alertStyle = .informational
+            } else {
+                alert.messageText = "Claude in Safari needs attention"
+                alert.informativeText = "One or more permissions are missing. Use 'Open Setup Again' to fix them."
+                alert.alertStyle = .warning
+            }
+            alert.runModal()
+        }
+    }
+
+    // MARK: - Notification Authorization
 
     private func requestNotificationAuthorization() {
         let center = UNUserNotificationCenter.current()
@@ -41,14 +127,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
             if let error = error {
                 NSLog("Notification authorization error: \(error.localizedDescription)")
             } else if !granted {
-                NSLog("Notification authorization denied — automation notifications and Stop action will be suppressed")
+                NSLog("Notification authorization denied")
             }
         }
     }
 
     // MARK: - UNUserNotificationCenterDelegate
 
-    /// Called when the user taps a notification action (e.g. "Stop Claude").
     func userNotificationCenter(
         _ center: UNUserNotificationCenter,
         didReceive response: UNNotificationResponse,
@@ -58,15 +143,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
             if let router = toolRouter {
                 router.cancelCurrentRequest()
             } else {
-                NSLog("AppDelegate: received stop-automation action but toolRouter is nil — cancellation ignored")
+                NSLog("AppDelegate: received stop-automation but toolRouter is nil")
             }
-        } else if response.actionIdentifier != UNNotificationDefaultActionIdentifier {
-            NSLog("AppDelegate: unhandled notification action identifier '%@'", response.actionIdentifier)
         }
         completionHandler()
     }
 
-    /// Show notification banners even when the app is in the foreground.
     func userNotificationCenter(
         _ center: UNUserNotificationCenter,
         willPresent notification: UNNotification,
