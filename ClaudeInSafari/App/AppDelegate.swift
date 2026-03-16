@@ -1,16 +1,68 @@
 import Cocoa
+import UserNotifications
 
-class AppDelegate: NSObject, NSApplicationDelegate {
+class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate {
     private var mcpServer: MCPSocketServer?
     private var toolRouter: ToolRouter?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        requestNotificationAuthorization()
         startMCPServer()
     }
 
     func applicationWillTerminate(_ notification: Notification) {
         mcpServer?.stop()
     }
+
+    // MARK: - Notification Authorization + Category
+
+    private func requestNotificationAuthorization() {
+        let center = UNUserNotificationCenter.current()
+        center.delegate = self
+        center.requestAuthorization(options: [.alert, .sound]) { _, error in
+            if let error = error {
+                NSLog("Notification authorization error: \(error.localizedDescription)")
+            }
+        }
+
+        let stopAction = UNNotificationAction(
+            identifier: "stop-automation",
+            title: "Stop Claude",
+            options: .destructive
+        )
+        let category = UNNotificationCategory(
+            identifier: "claude-automation",
+            actions: [stopAction],
+            intentIdentifiers: [],
+            options: []
+        )
+        center.setNotificationCategories([category])
+    }
+
+    // MARK: - UNUserNotificationCenterDelegate
+
+    /// Called when the user taps a notification action (e.g. "Stop Claude").
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        didReceive response: UNNotificationResponse,
+        withCompletionHandler completionHandler: @escaping () -> Void
+    ) {
+        if response.actionIdentifier == "stop-automation" {
+            toolRouter?.cancelCurrentRequest()
+        }
+        completionHandler()
+    }
+
+    /// Show notification banners even when the app is in the foreground.
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        willPresent notification: UNNotification,
+        withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
+    ) {
+        completionHandler([.banner])
+    }
+
+    // MARK: - MCP Server
 
     private func startMCPServer() {
         let framer = MessageFramer()
