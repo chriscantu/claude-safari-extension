@@ -148,7 +148,7 @@ App Store or notarized DMG distribution, onboarding UX, documentation.
 |------|--------|
 | App Store submission (or notarized DMG) | ⬜ |
 | Setup wizard / onboarding UI | ⬜ |
-| `agent-visual-indicator` refinement ([020](docs/specs/020-agent-visual-indicator.md)) | 📋 |
+| `agent-visual-indicator` refinement ([020](docs/specs/020-agent-visual-indicator.md)) | ✅ |
 | Remaining medium/low REVIEW.md findings (M3–M7, L1–L5) | ✅ All resolved (M3/M4/M7 fixed as side-effects of subsystem rewrites; L2/L3/L4/L5 fixed in #23–#24) |
 | Full test coverage for all Swift classes | ⬜ |
 
