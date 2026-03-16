@@ -146,7 +146,7 @@ final class MenuBarController {
                 string: "🔧  Fix This →",
                 attributes: [
                     .foregroundColor: NSColor(red: 0.851, green: 0.467, blue: 0.341, alpha: 1),
-                    .font: NSFont.systemFont(ofSize: 13, weight: .semibold)
+                    .font: NSFont.systemFont(ofSize: 13, weight: .bold)
                 ]
             )
             menu.addItem(fixItem)
