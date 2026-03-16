@@ -207,14 +207,22 @@ final class MCPSocketServerTests: XCTestCase {
         wait(for: [connectExp], timeout: 2)
 
         let payload = "hello client".data(using: .utf8)!
+        let recvExp = expectation(description: "data received by client")
+        var received = Data()
+
+        // Read on a background thread with an expectation so that the test
+        // fails cleanly after 2 s instead of blocking the process indefinitely.
+        let fd = clientFD
+        DispatchQueue.global().async {
+            var buf = [UInt8](repeating: 0, count: 256)
+            let n = Darwin.read(fd, &buf, buf.count)
+            if n > 0 { received = Data(buf[0..<n]) }
+            recvExp.fulfill()
+        }
+
         server.send(data: payload, to: connectedClientId)
+        wait(for: [recvExp], timeout: 2)
 
-        // Read the framed response on the client side
-        var buf = [UInt8](repeating: 0, count: 256)
-        let n = Darwin.read(clientFD, &buf, buf.count)
-        XCTAssertGreaterThan(n, 0)
-
-        let received = Data(buf[0..<n])
         let expected = MessageFramer().frame(payload)
         XCTAssertEqual(received, expected)
     }
