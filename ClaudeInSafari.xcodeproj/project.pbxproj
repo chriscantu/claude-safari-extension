@@ -14,6 +14,7 @@
 		2E19B15D715BBC43C9DBFF32 /* MCPMessageTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7A729444DE88ABCACE1FBD2 /* MCPMessageTests.swift */; };
 		30EB2D0811612DBB6A50EF32 /* FileService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 658074861C8C0C7933646343 /* FileService.swift */; };
 		3E3A0B200C0A287DA885E7A5 /* Constants.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1D372117A4FF27A236BD5F8 /* Constants.swift */; };
+		426CF3A158FF421539D89FA8 /* MenuBarControllerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 52B4B49AEA85FF580ED042AE /* MenuBarControllerTests.swift */; };
 		50788C66B072DEF05E5A9A64 /* FileServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C557C15A842E784429478650 /* FileServiceTests.swift */; };
 		510D908978BEE48EC9D3DCFA /* ScreenshotServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9BB305C7A1C4A31221830ABC /* ScreenshotServiceTests.swift */; };
 		5BF79D7662D53EA3EE5DECD8 /* ToolRouterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4F410276953CA7D55B48FF36 /* ToolRouterTests.swift */; };
@@ -32,6 +33,7 @@
 		E384720735F6190C0755DC2A /* MCPSocketServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = A17192D2205200262959FCF5 /* MCPSocketServer.swift */; };
 		E9ED48328A1F0387B9334B12 /* ClaudeInSafari Extension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = A2BCAFC762E47A469BC702E3 /* ClaudeInSafari Extension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		F8A556A293BA284872539B1F /* AppleScriptBridgeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9C6819CDC28A43E78498350F /* AppleScriptBridgeTests.swift */; };
+		FA97D65DA63E1D2123E0014F /* MenuBarController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 96906F7FF10A8AF6F6E0CB2B /* MenuBarController.swift */; };
 		FC4CA75768D2C5FD6249AE6B /* GifService.swift in Sources */ = {isa = PBXBuildFile; fileRef = C53DE74FE809B179A899A57B /* GifService.swift */; };
 		FF56AA2D0EFD16F29AFA30CD /* PermissionMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3C6A1743F9A8F1A1B1BBFDE4 /* PermissionMonitor.swift */; };
 /* End PBXBuildFile section */
@@ -77,12 +79,14 @@
 		48CBDB59857AA797155E19CC /* MessageFramerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessageFramerTests.swift; sourceTree = "<group>"; };
 		4B4D8BEC346192E189913F39 /* ToolRouter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolRouter.swift; sourceTree = "<group>"; };
 		4F410276953CA7D55B48FF36 /* ToolRouterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolRouterTests.swift; sourceTree = "<group>"; };
+		52B4B49AEA85FF580ED042AE /* MenuBarControllerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuBarControllerTests.swift; sourceTree = "<group>"; };
 		5736A5C7E56CF23B6FF9B13A /* ScreenshotService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenshotService.swift; sourceTree = "<group>"; };
 		652C99F1EAD7FA1BDBF44D9D /* MessageFramer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessageFramer.swift; sourceTree = "<group>"; };
 		658074861C8C0C7933646343 /* FileService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileService.swift; sourceTree = "<group>"; };
 		729FD9AEFD8D3ED0949DE6F3 /* SafariWebExtensionHandler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SafariWebExtensionHandler.swift; sourceTree = "<group>"; };
 		7A6086210D19D2B963968546 /* ClaudeInSafariTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ClaudeInSafariTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		896C584EA45AB96EAA96797F /* MCPMessage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MCPMessage.swift; sourceTree = "<group>"; };
+		96906F7FF10A8AF6F6E0CB2B /* MenuBarController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuBarController.swift; sourceTree = "<group>"; };
 		9954643B23BF0AF20F074015 /* main.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = main.swift; sourceTree = "<group>"; };
 		9BB305C7A1C4A31221830ABC /* ScreenshotServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenshotServiceTests.swift; sourceTree = "<group>"; };
 		9C607E28344D2484CB81B6FD /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
@@ -120,6 +124,7 @@
 			children = (
 				EAD6A30A647A7F4F5DC5DEA3 /* AppDelegate.swift */,
 				9954643B23BF0AF20F074015 /* main.swift */,
+				96906F7FF10A8AF6F6E0CB2B /* MenuBarController.swift */,
 				3C6A1743F9A8F1A1B1BBFDE4 /* PermissionMonitor.swift */,
 			);
 			path = App;
@@ -183,6 +188,7 @@
 				07542CB361F8FE6B0E4A5558 /* GifServiceTests.swift */,
 				F7A729444DE88ABCACE1FBD2 /* MCPMessageTests.swift */,
 				439B4BEE06832D8A14D92084 /* MCPSocketServerTests.swift */,
+				52B4B49AEA85FF580ED042AE /* MenuBarControllerTests.swift */,
 				48CBDB59857AA797155E19CC /* MessageFramerTests.swift */,
 				CCED58EC2A9B5A6E2523B951 /* PermissionMonitorTests.swift */,
 				9BB305C7A1C4A31221830ABC /* ScreenshotServiceTests.swift */,
@@ -351,6 +357,7 @@
 				257435801FBA70A001BC58B6 /* GifServiceTests.swift in Sources */,
 				2E19B15D715BBC43C9DBFF32 /* MCPMessageTests.swift in Sources */,
 				B9C04D834A40C22DE8146BBD /* MCPSocketServerTests.swift in Sources */,
+				426CF3A158FF421539D89FA8 /* MenuBarControllerTests.swift in Sources */,
 				020608970AC171717C3AD738 /* MessageFramerTests.swift in Sources */,
 				7BE91EB42C3FB5129C7AC7C8 /* PermissionMonitorTests.swift in Sources */,
 				510D908978BEE48EC9D3DCFA /* ScreenshotServiceTests.swift in Sources */,
@@ -370,6 +377,7 @@
 				FC4CA75768D2C5FD6249AE6B /* GifService.swift in Sources */,
 				9A6E898572D7D10C996C83CC /* MCPMessage.swift in Sources */,
 				E384720735F6190C0755DC2A /* MCPSocketServer.swift in Sources */,
+				FA97D65DA63E1D2123E0014F /* MenuBarController.swift in Sources */,
 				D9127E282A5767DAA1C48C5D /* MessageFramer.swift in Sources */,
 				FF56AA2D0EFD16F29AFA30CD /* PermissionMonitor.swift in Sources */,
 				AE7A3B63E56420BC88227115 /* ScreenshotService.swift in Sources */,
