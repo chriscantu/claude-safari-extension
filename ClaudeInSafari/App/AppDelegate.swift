@@ -31,7 +31,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
 
     private func setupMenuBar() {
         let controller = MenuBarController()
-        controller.onOpenSetup = { [weak self] in self?.showOnboarding() }
+        controller.onOpenSetup = { [weak self] in
+            guard let self else { return }
+            self.permissionMonitor.checkAll { status in
+                self.showOnboarding(startingAt: status.firstIncompleteStep)
+            }
+        }
         controller.onCheckConnection = { [weak self] in self?.checkConnection() }
         menuBarController = controller
     }

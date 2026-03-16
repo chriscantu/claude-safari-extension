@@ -131,6 +131,8 @@ final class OnboardingWindowController: NSWindowController {
         // checkAll delivers on the main queue — no extra dispatch needed.
         monitor.checkAll { [weak self] status in
             guard let self else { return }
+            // Guard against in-flight callbacks arriving after screen has already changed.
+            guard case .step(let currentStep) = self.currentScreen, currentStep == step else { return }
             switch step {
             case .safariExtension where status.extensionEnabled: self.advance()
             case .screenRecording where status.screenRecording:  self.advance()

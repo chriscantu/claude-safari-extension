@@ -73,7 +73,8 @@ final class MenuBarController {
     /// Returns a composited image: robot silhouette + status dot.
     private func robotImage(for state: MenuBarState) -> NSImage {
         let size = NSSize(width: 22, height: 18)
-        let image = NSImage(size: size, flipped: false) { rect in
+        let image = NSImage(size: size, flipped: false) { [weak self] rect in
+            guard let self else { return false }
             self.drawRobot(in: rect, dimmed: state == .notConnected)
             self.drawStatusDot(in: rect, state: state)
             return true
