@@ -1,6 +1,5 @@
 // ClaudeInSafari/App/OnboardingWindowController.swift
 import Cocoa
-import ApplicationServices
 
 // MARK: - Color + layout constants
 
@@ -129,15 +128,14 @@ final class OnboardingWindowController: NSWindowController {
     }
 
     private func checkStepCompletion(_ step: OnboardingStep) {
+        // checkAll delivers on the main queue — no extra dispatch needed.
         monitor.checkAll { [weak self] status in
-            DispatchQueue.main.async {
-                guard let self else { return }
-                switch step {
-                case .safariExtension where status.extensionEnabled: self.advance()
-                case .screenRecording where status.screenRecording:  self.advance()
-                case .accessibility   where status.accessibility:    self.advance()
-                default: break
-                }
+            guard let self else { return }
+            switch step {
+            case .safariExtension where status.extensionEnabled: self.advance()
+            case .screenRecording where status.screenRecording:  self.advance()
+            case .accessibility   where status.accessibility:    self.advance()
+            default: break
             }
         }
     }
@@ -474,7 +472,6 @@ final class OnboardingWindowController: NSWindowController {
         let label = NSTextField(labelWithString: text)
         label.font = NSFont.systemFont(ofSize: 12)
         label.textColor = NSColor(red: 0.478, green: 0.231, blue: 0.118, alpha: 1)
-        label.frame = NSRect(x: 32, y: 8, width: Layout.windowWidth - Layout.padding * 2 - 40, height: 16)
         row.addSubview(label)
 
         let spinner = NSProgressIndicator(frame: NSRect(x: 8, y: 6, width: 18, height: 18))
@@ -503,7 +500,7 @@ final class OnboardingWindowController: NSWindowController {
             let bar = NSView(frame: NSRect(x: x, y: barY, width: segWidth, height: 3))
             bar.wantsLayer = true
             if i < activeIndex {
-                bar.layer?.backgroundColor = NSColor(red: 0.204, green: 0.780, blue: 0.349, alpha: 1).cgColor  // green
+                bar.layer?.backgroundColor = NSColor.systemGreen.cgColor  // green
             } else if i == activeIndex {
                 bar.layer?.backgroundColor = NSColor.claudeOrange.cgColor
             } else {
@@ -515,7 +512,7 @@ final class OnboardingWindowController: NSWindowController {
             // Label
             let lbl = NSTextField(labelWithString: i < activeIndex ? "✓ \(labels[i])" : labels[i])
             lbl.font = NSFont.systemFont(ofSize: 9, weight: i == activeIndex ? .semibold : .regular)
-            lbl.textColor = i < activeIndex ? NSColor(red: 0.204, green: 0.780, blue: 0.349, alpha: 1)
+            lbl.textColor = i < activeIndex ? NSColor.systemGreen
                           : i == activeIndex ? .claudeOrange
                           : .tertiaryLabelColor
             lbl.frame = NSRect(x: x, y: labelY, width: segWidth, height: 11)
