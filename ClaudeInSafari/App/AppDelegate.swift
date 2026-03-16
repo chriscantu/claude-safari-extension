@@ -33,8 +33,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
         let controller = MenuBarController()
         controller.onOpenSetup = { [weak self] in
             guard let self else { return }
-            self.permissionMonitor.checkAll { status in
-                self.showOnboarding(startingAt: status.firstIncompleteStep)
+            self.permissionMonitor.checkAll { [weak self] status in
+                self?.showOnboarding(startingAt: status.firstIncompleteStep)
             }
         }
         controller.onCheckConnection = { [weak self] in self?.checkConnection() }
@@ -64,6 +64,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
     }
 
     private func showOnboarding(startingAt step: OnboardingStep? = nil) {
+        // Pause background monitoring while onboarding is active; it restarts on dismiss.
+        monitorTimer?.invalidate()
+        monitorTimer = nil
         if onboardingWindowController == nil {
             let wc = OnboardingWindowController(monitor: permissionMonitor)
             wc.onDismiss = { [weak self] in
@@ -133,7 +136,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
             if let error = error {
                 NSLog("Notification authorization error: \(error.localizedDescription)")
             } else if !granted {
-                NSLog("Notification authorization denied")
+                NSLog("AppDelegate: notification authorization denied — automation notifications and Stop action will be suppressed")
             }
         }
     }
@@ -151,6 +154,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
             } else {
                 NSLog("AppDelegate: received stop-automation but toolRouter is nil")
             }
+        } else if response.actionIdentifier != UNNotificationDefaultActionIdentifier {
+            NSLog("AppDelegate: unhandled notification action identifier '%@'", response.actionIdentifier)
         }
         completionHandler()
     }

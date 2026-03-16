@@ -38,7 +38,10 @@ struct PermissionStatus {
 protocol PermissionChecking {
     func isAccessibilityGranted() -> Bool
     func isScreenRecordingGranted() -> Bool
-    /// Completion is called on an unspecified queue. Callers must dispatch to main if needed.
+    /// Completion may be called on any queue.
+    /// `PermissionMonitor.checkAll` re-dispatches to the main queue before invoking its own
+    /// completion, so callers of `checkAll` do not need to add their own dispatch.
+    /// Direct callers of this protocol method are responsible for their own queue management.
     func getExtensionEnabled(completion: @escaping (Bool) -> Void)
 }
 
@@ -59,7 +62,10 @@ struct SystemPermissionChecker: PermissionChecking {
     func getExtensionEnabled(completion: @escaping (Bool) -> Void) {
         SFSafariExtensionManager.getStateOfSafariExtension(
             withIdentifier: Self.extensionBundleID
-        ) { state, _ in
+        ) { state, error in
+            if let error = error {
+                NSLog("PermissionMonitor: SFSafariExtensionManager query failed: %@", error.localizedDescription)
+            }
             completion(state?.isEnabled ?? false)
         }
     }
@@ -68,6 +74,7 @@ struct SystemPermissionChecker: PermissionChecking {
 // MARK: - PermissionMonitor
 
 /// Checks permission state and delivers `PermissionStatus` on the main queue.
+/// Must be called from the main thread. Not thread-safe for concurrent callers.
 final class PermissionMonitor {
     private let checker: PermissionChecking
 

@@ -15,6 +15,7 @@
 		30EB2D0811612DBB6A50EF32 /* FileService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 658074861C8C0C7933646343 /* FileService.swift */; };
 		3E3A0B200C0A287DA885E7A5 /* Constants.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1D372117A4FF27A236BD5F8 /* Constants.swift */; };
 		426CF3A158FF421539D89FA8 /* MenuBarControllerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 52B4B49AEA85FF580ED042AE /* MenuBarControllerTests.swift */; };
+		A3F1C2D4E5B6A7089C1D2E3F /* OnboardingWindowControllerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B4E5F6A7089C1D2E3FA3F1C2 /* OnboardingWindowControllerTests.swift */; };
 		50788C66B072DEF05E5A9A64 /* FileServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C557C15A842E784429478650 /* FileServiceTests.swift */; };
 		510D908978BEE48EC9D3DCFA /* ScreenshotServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9BB305C7A1C4A31221830ABC /* ScreenshotServiceTests.swift */; };
 		5BF79D7662D53EA3EE5DECD8 /* ToolRouterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4F410276953CA7D55B48FF36 /* ToolRouterTests.swift */; };
@@ -82,6 +83,7 @@
 		4E5E2B99CB3C4EDAEB877794 /* OnboardingWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingWindowController.swift; sourceTree = "<group>"; };
 		4F410276953CA7D55B48FF36 /* ToolRouterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolRouterTests.swift; sourceTree = "<group>"; };
 		52B4B49AEA85FF580ED042AE /* MenuBarControllerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuBarControllerTests.swift; sourceTree = "<group>"; };
+		B4E5F6A7089C1D2E3FA3F1C2 /* OnboardingWindowControllerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingWindowControllerTests.swift; sourceTree = "<group>"; };
 		5736A5C7E56CF23B6FF9B13A /* ScreenshotService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenshotService.swift; sourceTree = "<group>"; };
 		652C99F1EAD7FA1BDBF44D9D /* MessageFramer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessageFramer.swift; sourceTree = "<group>"; };
 		658074861C8C0C7933646343 /* FileService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileService.swift; sourceTree = "<group>"; };
@@ -193,6 +195,7 @@
 				439B4BEE06832D8A14D92084 /* MCPSocketServerTests.swift */,
 				52B4B49AEA85FF580ED042AE /* MenuBarControllerTests.swift */,
 				48CBDB59857AA797155E19CC /* MessageFramerTests.swift */,
+				B4E5F6A7089C1D2E3FA3F1C2 /* OnboardingWindowControllerTests.swift */,
 				CCED58EC2A9B5A6E2523B951 /* PermissionMonitorTests.swift */,
 				9BB305C7A1C4A31221830ABC /* ScreenshotServiceTests.swift */,
 				EFD3A85665B31B76E55FCDE6 /* ToolRouterNotificationTests.swift */,
@@ -362,6 +365,7 @@
 				B9C04D834A40C22DE8146BBD /* MCPSocketServerTests.swift in Sources */,
 				426CF3A158FF421539D89FA8 /* MenuBarControllerTests.swift in Sources */,
 				020608970AC171717C3AD738 /* MessageFramerTests.swift in Sources */,
+				A3F1C2D4E5B6A7089C1D2E3F /* OnboardingWindowControllerTests.swift in Sources */,
 				7BE91EB42C3FB5129C7AC7C8 /* PermissionMonitorTests.swift in Sources */,
 				510D908978BEE48EC9D3DCFA /* ScreenshotServiceTests.swift in Sources */,
 				6BFDDA4BC04CB59098274D6D /* ToolRouterNotificationTests.swift in Sources */,

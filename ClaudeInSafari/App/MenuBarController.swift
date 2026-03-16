@@ -20,10 +20,13 @@ final class MenuBarController {
         didSet { updateStatusItem() }
     }
 
-    /// Callback invoked when user taps "Open Setup Again" or "Fix This →".
+    /// Callback invoked when user taps "Open Setup" (.notConnected state),
+    /// "Open Setup Again" (.connected state), or "Fix This →" (.needsAttention state).
+    // Called on the main thread (invoked from @objc action methods).
     var onOpenSetup: (() -> Void)?
 
     /// Callback invoked when user taps "Check Connection".
+    // Called on the main thread (invoked from @objc action methods).
     var onCheckConnection: (() -> Void)?
 
     // MARK: Private
@@ -83,7 +86,9 @@ final class MenuBarController {
     }
 
     /// Draws a minimal robot silhouette using bezier paths.
-    /// White paths — macOS renders the menu bar button tinted appropriately.
+    /// Uses white (or dimmed white) bezier paths designed for dark menu bar backgrounds.
+    /// `isTemplate` is set to `false` on the parent image, so macOS does NOT apply
+    /// automatic tinting — coloring is handled entirely by the fill colors below.
     private func drawRobot(in rect: NSRect, dimmed: Bool) {
         let color = dimmed ? NSColor.white.withAlphaComponent(0.35) : NSColor.white
         color.setFill()
@@ -177,7 +182,8 @@ final class MenuBarController {
     private func buildMenuHeader() -> NSView {
         let view = NSView(frame: NSRect(x: 0, y: 0, width: 240, height: 52))
 
-        // Robot avatar (small orange rounded rect)
+        // Plain NSView (not NSImageView) so we can drive the background color via CALayer
+        // without needing a separate image asset for the avatar swatch.
         let avatarSize: CGFloat = 32
         let avatar = NSView(frame: NSRect(x: 12, y: 10, width: avatarSize, height: avatarSize))
         avatar.wantsLayer = true
@@ -227,6 +233,14 @@ final class MenuBarController {
 
     @objc private func checkConnection() { onCheckConnection?() }
     @objc private func openSetup()       { onOpenSetup?() }
-    @objc private func openSafari()      { NSWorkspace.shared.open(URL(string: "safari://")!) }
+    @objc private func openSafari() {
+        if let url = URL(string: "safari://") {
+            if !NSWorkspace.shared.open(url) {
+                NSLog("MenuBarController: failed to open safari://")
+            }
+        } else {
+            NSLog("MenuBarController: malformed URL literal safari://")
+        }
+    }
     @objc private func quitApp()         { NSApplication.shared.terminate(nil) }
 }

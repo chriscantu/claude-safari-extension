@@ -30,6 +30,7 @@ final class PermissionMonitorTests: XCTestCase {
 
         let exp = expectation(description: "allGranted")
         monitor.checkAll { status in
+            XCTAssertTrue(Thread.isMainThread, "checkAll must deliver on the main thread")
             XCTAssertTrue(status.allGranted)
             exp.fulfill()
         }
@@ -45,6 +46,7 @@ final class PermissionMonitorTests: XCTestCase {
 
         let exp = expectation(description: "notAllGranted")
         monitor.checkAll { status in
+            XCTAssertTrue(Thread.isMainThread, "checkAll must deliver on the main thread")
             XCTAssertFalse(status.allGranted)
             XCTAssertFalse(status.accessibility)
             exp.fulfill()
@@ -60,6 +62,7 @@ final class PermissionMonitorTests: XCTestCase {
 
         let exp = expectation(description: "firstStep")
         monitor.checkAll { status in
+            XCTAssertTrue(Thread.isMainThread, "checkAll must deliver on the main thread")
             XCTAssertEqual(status.firstIncompleteStep, .safariExtension)
             exp.fulfill()
         }
@@ -76,6 +79,7 @@ final class PermissionMonitorTests: XCTestCase {
 
         let exp = expectation(description: "screenRecording")
         monitor.checkAll { status in
+            XCTAssertTrue(Thread.isMainThread, "checkAll must deliver on the main thread")
             XCTAssertEqual(status.firstIncompleteStep, .screenRecording)
             exp.fulfill()
         }
@@ -92,6 +96,7 @@ final class PermissionMonitorTests: XCTestCase {
 
         let exp = expectation(description: "accessibility")
         monitor.checkAll { status in
+            XCTAssertTrue(Thread.isMainThread, "checkAll must deliver on the main thread")
             XCTAssertEqual(status.firstIncompleteStep, .accessibility)
             exp.fulfill()
         }
@@ -108,6 +113,7 @@ final class PermissionMonitorTests: XCTestCase {
 
         let exp = expectation(description: "noIncomplete")
         monitor.checkAll { status in
+            XCTAssertTrue(Thread.isMainThread, "checkAll must deliver on the main thread")
             XCTAssertNil(status.firstIncompleteStep)
             exp.fulfill()
         }

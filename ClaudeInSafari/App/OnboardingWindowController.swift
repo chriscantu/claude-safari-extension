@@ -66,9 +66,20 @@ final class OnboardingWindowController: NSWindowController {
 
     // MARK: - Public API
 
-    /// Show onboarding starting from the first incomplete step (or welcome if none
-    /// have been attempted). Pass `startingAt: nil` to always show welcome first.
+    /// Shows the onboarding window. If `step` is non-nil, opens directly to that step's screen.
+    /// If `step` is nil (the default), opens to the Welcome screen.
     func showOnboarding(startingAt step: OnboardingStep? = nil) {
+        // If the window is already visible and mid-flow, just bring it to front
+        // without resetting state, to avoid interrupting the user mid-step.
+        if let existingWindow = window, existingWindow.isVisible {
+            if case .welcome = currentScreen {
+                // Still on welcome — allow re-navigation to the requested step.
+            } else {
+                existingWindow.makeKeyAndOrderFront(nil)
+                NSApp.activate(ignoringOtherApps: true)
+                return
+            }
+        }
         if let step = step {
             show(screen: .step(step))
         } else {
@@ -83,6 +94,10 @@ final class OnboardingWindowController: NSWindowController {
 
     private func show(screen: OnboardingScreen) {
         stopPolling()
+        guard window != nil else {
+            NSLog("OnboardingWindowController: show(screen:) called with nil window — content view not updated")
+            return
+        }
         currentScreen = screen
         window?.contentView = buildView(for: screen)
         if case .step(let step) = screen {
@@ -114,6 +129,9 @@ final class OnboardingWindowController: NSWindowController {
         onDismiss?()
     }
 
+    // NOTE: close() is called above in dismiss(). windowWillClose(_:) will fire as a
+    // result, but the dismissed flag prevents double-firing of onDismiss.
+
     // MARK: - Polling
 
     private func startPolling(for step: OnboardingStep) {
@@ -135,9 +153,11 @@ final class OnboardingWindowController: NSWindowController {
             guard case .step(let currentStep) = self.currentScreen, currentStep == step else { return }
             switch step {
             case .safariExtension where status.extensionEnabled: self.advance()
+            case .safariExtension:  break   // permission not yet granted; keep polling
             case .screenRecording where status.screenRecording:  self.advance()
+            case .screenRecording:  break   // permission not yet granted; keep polling
             case .accessibility   where status.accessibility:    self.advance()
-            default: break
+            case .accessibility:    break   // permission not yet granted; keep polling
             }
         }
     }
@@ -248,8 +268,13 @@ final class OnboardingWindowController: NSWindowController {
 
     @objc private func openSafariSettings() {
         // Opens Safari's Extensions pref tab directly. Falls back to launching Safari.app.
-        if !NSWorkspace.shared.open(URL(string: "safari-settings://")!) {
-            NSWorkspace.shared.open(URL(fileURLWithPath: "/Applications/Safari.app"))
+        if let url = URL(string: "safari-settings://") {
+            if !NSWorkspace.shared.open(url) {
+                NSLog("OnboardingWindowController: failed to open safari-settings://, trying Safari.app fallback")
+                NSWorkspace.shared.open(URL(fileURLWithPath: "/Applications/Safari.app"))
+            }
+        } else {
+            NSLog("OnboardingWindowController: malformed URL literal safari-settings://")
         }
     }
 
@@ -291,7 +316,13 @@ final class OnboardingWindowController: NSWindowController {
     }
 
     @objc private func openScreenRecordingSettings() {
-        NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")!)
+        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture") {
+            if !NSWorkspace.shared.open(url) {
+                NSLog("OnboardingWindowController: failed to open Screen Recording system preferences URL")
+            }
+        } else {
+            NSLog("OnboardingWindowController: malformed URL literal for Screen Recording preferences")
+        }
     }
 
     // MARK: Accessibility Step
@@ -332,7 +363,13 @@ final class OnboardingWindowController: NSWindowController {
     }
 
     @objc private func openAccessibilitySettings() {
-        NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!)
+        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
+            if !NSWorkspace.shared.open(url) {
+                NSLog("OnboardingWindowController: failed to open Accessibility system preferences URL")
+            }
+        } else {
+            NSLog("OnboardingWindowController: malformed URL literal for Accessibility preferences")
+        }
     }
 
     @objc private func manualAdvance() { advance() }
@@ -506,7 +543,7 @@ final class OnboardingWindowController: NSWindowController {
             let bar = NSView(frame: NSRect(x: x, y: barY, width: segWidth, height: 3))
             bar.wantsLayer = true
             if i < activeIndex {
-                bar.layer?.backgroundColor = NSColor.systemGreen.cgColor  // green
+                bar.layer?.backgroundColor = NSColor.systemGreen.cgColor
             } else if i == activeIndex {
                 bar.layer?.backgroundColor = NSColor.claudeOrange.cgColor
             } else {
@@ -529,14 +566,14 @@ final class OnboardingWindowController: NSWindowController {
     // MARK: - Icon images (white bezier paths on transparent background, placed on orange container)
 
     private func robotIconImage(size: CGFloat) -> NSImage {
-        // Use SF Symbol "robot" (available macOS 14+) — matches the design mockup exactly.
+        // Use SF Symbol "robot" — matches the design mockup exactly.
         let config = NSImage.SymbolConfiguration(pointSize: size * 0.58, weight: .regular)
             .applying(NSImage.SymbolConfiguration(paletteColors: [.white]))
         if let symbol = NSImage(systemSymbolName: "robot", accessibilityDescription: nil)?
             .withSymbolConfiguration(config) {
             return symbol
         }
-        // Fallback: hand-drawn bezier robot (should never be reached on macOS 14+)
+        // Fallback: hand-drawn bezier robot (safety net in case the SF Symbol is unavailable)
         return NSImage(size: NSSize(width: size, height: size), flipped: false) { rect in
             let w = rect.width; let h = rect.height
             NSColor.white.setFill()
@@ -577,8 +614,11 @@ final class OnboardingWindowController: NSWindowController {
     private func sfSymbolImage(_ name: String, size: CGFloat, weight: NSFont.Weight = .regular) -> NSImage {
         let config = NSImage.SymbolConfiguration(pointSize: size * 0.65, weight: weight)
             .applying(NSImage.SymbolConfiguration(paletteColors: [.white]))
-        return NSImage(systemSymbolName: name, accessibilityDescription: nil)?
-            .withSymbolConfiguration(config) ?? NSImage()
+        guard let image = NSImage(systemSymbolName: name, accessibilityDescription: nil) else {
+            NSLog("OnboardingWindowController: SF Symbol '%@' not found", name)
+            return NSImage()
+        }
+        return image.withSymbolConfiguration(config) ?? NSImage()
     }
 }
 
@@ -586,10 +626,13 @@ final class OnboardingWindowController: NSWindowController {
 
 extension OnboardingWindowController: NSWindowDelegate {
     func windowWillClose(_ notification: Notification) {
-        // `dismiss()` already called `onDismiss` and the settled flag prevents double-fire.
-        // Stop polling here to handle the case where the user closes the window via the
-        // title bar red button (which bypasses `dismiss()`).
+        // Always stop polling first (idempotent) so in-flight timer callbacks
+        // are cancelled before onDismiss fires.
         stopPolling()
-        if !dismissed { dismiss() }
+        // Only fire onDismiss if not already dismissed via the normal path
+        // (Done button / laterTapped). The dismissed flag prevents double-fire.
+        guard !dismissed else { return }
+        dismissed = true
+        onDismiss?()
     }
 }
