@@ -13,7 +13,10 @@ claude-safari-extension/
 │   │
 │   ├── ClaudeInSafari/                      # macOS App Target
 │   │   ├── App/
-│   │   │   └── AppDelegate.swift            # App lifecycle, menu bar status item, setup wizard
+│   │   │   ├── AppDelegate.swift            # App lifecycle — wires menu bar, onboarding, MCP server, notifications
+│   │   │   ├── MenuBarController.swift      # NSStatusItem, MenuBarState enum, icon compositing, menu construction
+│   │   │   ├── OnboardingWindowController.swift  # 5-screen setup wizard: Welcome → 3 permission steps → Done
+│   │   │   └── PermissionMonitor.swift      # PermissionChecking protocol, SystemPermissionChecker, polling
 │   │   ├── MCP/
 │   │   │   ├── MCPSocketServer.swift        # Unix domain socket server (GCD-based)
 │   │   │   ├── MessageFramer.swift          # Newline-delimited JSON framing (MCP stdio transport)
@@ -78,6 +81,8 @@ claude-safari-extension/
 │       │   ├── GifServiceTests.swift
 │       │   ├── MCPMessageTests.swift
 │       │   ├── MCPSocketServerTests.swift
+│       │   ├── MenuBarControllerTests.swift
+│       │   ├── PermissionMonitorTests.swift
 │       │   ├── MessageFramerTests.swift
 │       │   ├── SafariWebExtensionHandlerTests.swift
 │       │   ├── ScreenshotServiceTests.swift
