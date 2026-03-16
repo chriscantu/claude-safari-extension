@@ -526,35 +526,41 @@ final class OnboardingWindowController: NSWindowController {
 
     private func robotIconImage(size: CGFloat) -> NSImage {
         NSImage(size: NSSize(width: size, height: size), flipped: false) { rect in
+            let w = rect.width
+            let h = rect.height
+
             NSColor.white.setFill()
-            // Head
-            NSBezierPath(roundedRect: NSRect(x: rect.width * 0.14, y: rect.height * 0.38,
-                                             width: rect.width * 0.72, height: rect.height * 0.38),
-                         xRadius: rect.width * 0.1, yRadius: rect.width * 0.1).fill()
-            // Antenna stem
-            NSBezierPath(roundedRect: NSRect(x: rect.width * 0.44, y: rect.height * 0.76,
-                                             width: rect.width * 0.12, height: rect.height * 0.16),
+
+            // Head — proportioned to match menu bar robot (≈60% wide, 36% tall)
+            NSBezierPath(roundedRect: NSRect(x: w*0.20, y: h*0.36, width: w*0.60, height: h*0.36),
+                         xRadius: w*0.09, yRadius: w*0.09).fill()
+
+            // Antenna stem — thin, centered above head
+            NSBezierPath(roundedRect: NSRect(x: w*0.45, y: h*0.72, width: w*0.10, height: h*0.12),
                          xRadius: 2, yRadius: 2).fill()
-            // Antenna tip
-            NSBezierPath(ovalIn: NSRect(x: rect.width * 0.40, y: rect.height * 0.88,
-                                        width: rect.width * 0.20, height: rect.height * 0.14)).fill()
-            // Body
-            NSBezierPath(roundedRect: NSRect(x: rect.width * 0.20, y: rect.height * 0.06,
-                                             width: rect.width * 0.60, height: rect.height * 0.28),
-                         xRadius: rect.width * 0.08, yRadius: rect.width * 0.08).fill()
-            // Arms
-            NSBezierPath(roundedRect: NSRect(x: rect.width * 0.02, y: rect.height * 0.08,
-                                             width: rect.width * 0.14, height: rect.height * 0.22),
-                         xRadius: rect.width * 0.06, yRadius: rect.width * 0.06).fill()
-            NSBezierPath(roundedRect: NSRect(x: rect.width * 0.84, y: rect.height * 0.08,
-                                             width: rect.width * 0.14, height: rect.height * 0.22),
-                         xRadius: rect.width * 0.06, yRadius: rect.width * 0.06).fill()
-            // Eyes (orange = transparent reveal of container bg)
-            NSColor.claudeOrange.setFill()
-            NSBezierPath(ovalIn: NSRect(x: rect.width * 0.24, y: rect.height * 0.48,
-                                        width: rect.width * 0.18, height: rect.height * 0.18)).fill()
-            NSBezierPath(ovalIn: NSRect(x: rect.width * 0.58, y: rect.height * 0.48,
-                                        width: rect.width * 0.18, height: rect.height * 0.18)).fill()
+
+            // Antenna tip — kept within bounds (top at 94%)
+            NSBezierPath(ovalIn: NSRect(x: w*0.41, y: h*0.82, width: w*0.18, height: h*0.12)).fill()
+
+            // Body — slightly narrower than head, directly below
+            NSBezierPath(roundedRect: NSRect(x: w*0.25, y: h*0.04, width: w*0.50, height: h*0.28),
+                         xRadius: w*0.07, yRadius: w*0.07).fill()
+
+            // Arms — flanking the body
+            NSBezierPath(roundedRect: NSRect(x: w*0.08, y: h*0.06, width: w*0.13, height: h*0.22),
+                         xRadius: w*0.05, yRadius: w*0.05).fill()
+            NSBezierPath(roundedRect: NSRect(x: w*0.79, y: h*0.06, width: w*0.13, height: h*0.22),
+                         xRadius: w*0.05, yRadius: w*0.05).fill()
+
+            // Eyes — erase to transparent so orange container shows through
+            if let ctx = NSGraphicsContext.current?.cgContext {
+                ctx.setBlendMode(.clear)
+                NSColor.white.setFill() // color irrelevant; .clear blend erases alpha
+                NSBezierPath(ovalIn: NSRect(x: w*0.28, y: h*0.50, width: w*0.13, height: h*0.13)).fill()
+                NSBezierPath(ovalIn: NSRect(x: w*0.59, y: h*0.50, width: w*0.13, height: h*0.13)).fill()
+                ctx.setBlendMode(.normal)
+            }
+
             return true
         }
     }
