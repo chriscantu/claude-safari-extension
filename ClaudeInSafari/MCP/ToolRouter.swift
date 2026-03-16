@@ -51,6 +51,9 @@ class ToolRouter: MCPSocketServerDelegate {
     private let pendingRequestsLock = NSLock()
 
     // MARK: - Notification state
+    /// Minimum interval (seconds) between successive automation notifications.
+    private static let notificationDebounceInterval: TimeInterval = 10
+
     /// Date of the last automation notification. Internal for testability (manipulated in tests).
     var lastNotificationDate: Date? = nil
 
@@ -58,14 +61,14 @@ class ToolRouter: MCPSocketServerDelegate {
     /// Completion handlers check this flag and return a "Cancelled by user" error instead of
     /// the result.
     /// Protected by `pendingRequestsLock` on all reads and writes.
-    /// Best-effort: two races remain possible even with locking:
-    ///   1. cancelCurrentRequest() sets the flag after the completion handler already read false
-    ///      (handler was already past the guard when Stop fired) — result is delivered normally.
-    ///   2. The completion handler fires and reads the flag before cancelCurrentRequest() sets it
-    ///      (handler was fast) — result is delivered normally.
-    /// Worst case for both: the result is delivered instead of an error (acceptable; matches
-    /// behaviour before this PR). The flag is reset to false by whichever completion handler
-    /// reads it as true.
+    /// Best-effort: two races are still possible:
+    ///   1. The completion handler fires and reads the flag before cancelCurrentRequest() sets it
+    ///      — result is delivered normally.
+    ///   2. cancelCurrentRequest() sets the flag but then a completion handler that was already
+    ///      dispatched completes after the next call's handler has already started — extremely
+    ///      unlikely given serial dispatch patterns.
+    /// Worst case for both: the result is delivered instead of an error (acceptable).
+    /// Reset to false by whichever completion handler reads it as true.
     /// Internal for testability.
     var nativeCallCancelled = false
 
@@ -91,7 +94,7 @@ class ToolRouter: MCPSocketServerDelegate {
     func postAutomationNotification(toolName: String) {
         pendingRequestsLock.lock()
         let shouldSkip: Bool
-        if let last = lastNotificationDate, Date().timeIntervalSince(last) < 10 {
+        if let last = lastNotificationDate, Date().timeIntervalSince(last) < Self.notificationDebounceInterval {
             shouldSkip = true
         } else {
             lastNotificationDate = Date()
@@ -108,11 +111,16 @@ class ToolRouter: MCPSocketServerDelegate {
         content.categoryIdentifier = "claude-automation"
 
         let request = UNNotificationRequest(
-            identifier: "claude-automation-active", // stable: replaces previous notification
+            identifier: "claude-automation-active",
             content: content,
-            trigger: nil  // deliver immediately
+            trigger: nil
         )
-        notificationCenter.add(request, withCompletionHandler: nil)
+        notificationCenter.add(request) { error in
+            if let error = error {
+                NSLog("postAutomationNotification: failed to deliver notification for tool '%@': %@ (code %d)",
+                      toolName, (error as NSError).domain, (error as NSError).code)
+            }
+        }
     }
 
     /// Cancel all in-flight requests — called by AppDelegate when the "Stop Claude"
@@ -121,9 +129,9 @@ class ToolRouter: MCPSocketServerDelegate {
     ///   with a "Cancelled by user" error response.
     /// • Native calls (screenshot, gif, resize_window): sets `nativeCallCancelled` so
     ///   each completion handler sends an error instead of the result (best-effort).
-    ///   The flag is NOT reset here — each native completion handler resets it to false
-    ///   when it fires, ensuring the flag stays true long enough for an in-flight handler
-    ///   to observe it.
+    /// The flag is NOT reset here — each native completion handler resets it to false
+    /// when it fires, ensuring it remains true long enough for any in-flight handler
+    /// to observe it.
     func cancelCurrentRequest() {
         pendingRequestsLock.lock()
         nativeCallCancelled = true
@@ -133,8 +141,6 @@ class ToolRouter: MCPSocketServerDelegate {
         for requestId in toCancel {
             failPendingRequest(requestId: requestId, message: "Cancelled by user")
         }
-        // NOTE: nativeCallCancelled is NOT reset here — each native completion handler
-        // resets it to false after reading it (lines in screenshot/zoom/gif/resize guards).
     }
 
     // MARK: - MCPSocketServerDelegate
@@ -800,7 +806,11 @@ class ToolRouter: MCPSocketServerDelegate {
             NSLog("ToolRouter: failed to serialize JSON response")
             return
         }
-        server?.send(data: data, to: clientId)
+        guard let server = server else {
+            NSLog("ToolRouter: sendJSON — server is nil, dropping response to client '%@'", clientId)
+            return
+        }
+        server.send(data: data, to: clientId)
     }
 
     // MARK: - Tool Definitions
