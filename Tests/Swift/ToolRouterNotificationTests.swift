@@ -7,11 +7,13 @@ import CoreGraphics
 
 private final class MockNotificationCenter: NotificationCenterProtocol {
     private(set) var addedRequests: [UNNotificationRequest] = []
+    /// When non-nil, `add` calls the completion handler with this error instead of nil.
+    var addError: Error? = nil
 
     func add(_ request: UNNotificationRequest,
              withCompletionHandler completionHandler: ((Error?) -> Void)? = nil) {
         addedRequests.append(request)
-        completionHandler?(nil)
+        completionHandler?(addError)
     }
 }
 
@@ -123,7 +125,7 @@ final class ToolRouterNotificationTests: XCTestCase {
 
         router.cancelCurrentRequest()
 
-        XCTAssertFalse(server.sentData.isEmpty, "Expected an error response to be sent")
+        XCTAssertEqual(server.sentData.count, 1, "Expected exactly one error response to be sent")
         let json = server.lastSentJSON()
         let error = json?["error"] as? [String: Any]
         let message = error?["message"] as? String ?? ""
@@ -212,8 +214,12 @@ final class ToolRouterNotificationTests: XCTestCase {
         // handleToolCall must reset it before dispatching the gif export.
         localRouter.nativeCallCancelled = true
 
-        // gif_creator export dispatches to a global queue; wait for completion
-        let exp = expectation(description: "gif export completes without stale cancellation")
+        // gif_creator export dispatches to a global queue; use a semaphore to wait
+        // for the response rather than a fixed wall-clock delay (avoids CI flakiness).
+        let sem = DispatchSemaphore(value: 0)
+        // Observe sentData growth instead of time — signal as soon as the router sends anything.
+        let observer = DispatchQueue.global()
+        var done = false
 
         let message: [String: Any] = [
             "jsonrpc": "2.0", "id": 51,
@@ -226,9 +232,14 @@ final class ToolRouterNotificationTests: XCTestCase {
         let data = try! JSONSerialization.data(withJSONObject: message)
         localRouter.socketServer(server, didReceiveMessage: data, from: "client-1")
 
-        // Poll for the async completion
-        DispatchQueue.global().asyncAfter(deadline: .now() + 0.5) { exp.fulfill() }
-        waitForExpectations(timeout: 2)
+        // Poll until the server has sent a response (export is async but fast in tests).
+        observer.async {
+            while !done {
+                if !server.sentData.isEmpty { done = true; sem.signal() }
+                Thread.sleep(forTimeInterval: 0.01)
+            }
+        }
+        _ = sem.wait(timeout: .now() + 5)
 
         // The stale flag was reset by handleToolCall, so no "Cancelled" error is sent.
         // The export may send a different error (no frames, etc.) but not a cancellation error.
@@ -238,6 +249,90 @@ final class ToolRouterNotificationTests: XCTestCase {
         let errorMsg = (json?["error"] as? [String: Any])?["message"] as? String ?? ""
         XCTAssertFalse(errorMsg.contains("Cancelled"),
                        "Stale flag must not cause a Cancelled error for a fresh gif export: \(errorMsg)")
+    }
+
+    // T_cancel_all — cancelCurrentRequest cancels ALL pending requests, not just one
+    func testCancelCurrentRequest_multipleInFlightRequests_cancelsAll() {
+        let server = MockMCPSocketServer()
+        router.setServer(server)
+
+        router.injectPendingRequest(requestId: "req-1", clientId: "client-1", jsonrpcId: 10)
+        router.injectPendingRequest(requestId: "req-2", clientId: "client-1", jsonrpcId: 11)
+
+        router.cancelCurrentRequest()
+
+        XCTAssertEqual(server.sentData.count, 2, "cancelCurrentRequest must cancel all pending requests, not just one")
+        for data in server.sentData {
+            let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+            let msg = (json?["error"] as? [String: Any])?["message"] as? String ?? ""
+            XCTAssertTrue(msg.contains("Cancelled"), "Each pending request must receive a Cancelled error: \(msg)")
+        }
+    }
+
+    // T_notif_boundary — second call at exactly the debounce boundary (10.0s) is NOT suppressed
+    // (the comparison is strict less-than: timeIntervalSince < 10, so 10.0s is not debounced)
+    func testDebounce_atExactBoundary_postsAgain() {
+        router.postAutomationNotification(toolName: "navigate")
+        router.lastNotificationDate = Date().addingTimeInterval(-10)
+        router.postAutomationNotification(toolName: "find")
+        XCTAssertEqual(mockCenter.addedRequests.count, 2,
+                       "A call at exactly 10s should not be debounced (strict less-than comparison)")
+    }
+
+    // T_cancel_native3 — handleToolCall resets a stale nativeCallCancelled flag before zoom dispatch
+    func testCancelledFlag_handleToolCallResetsStaleFlagBeforeZoom() {
+        class SyncCaptureProvider: ScreenCaptureProvider {
+            func checkPermission() -> Bool { true }
+            func captureWindow(completion: @escaping (Result<(CGImage, Int, Int), ScreenshotError>) -> Void) {
+                let ctx = CGContext(
+                    data: nil, width: 10, height: 10,
+                    bitsPerComponent: 8, bytesPerRow: 0,
+                    space: CGColorSpaceCreateDeviceRGB(),
+                    bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+                )!
+                completion(.success((ctx.makeImage()!, 10, 10)))
+            }
+        }
+
+        let server = MockMCPSocketServer()
+        let screenshotSvc = ScreenshotService(captureProvider: SyncCaptureProvider())
+        let localRouter = ToolRouter(
+            screenshotService: screenshotSvc,
+            gifService: GifService(),
+            fileService: FileService(),
+            notificationCenter: mockCenter
+        )
+        localRouter.setServer(server)
+        localRouter.nativeCallCancelled = true
+
+        let message: [String: Any] = [
+            "jsonrpc": "2.0", "id": 52,
+            "method": "tools/call",
+            "params": [
+                "name": "computer",
+                "arguments": ["action": "zoom", "tabId": 1, "region": [0, 0, 100, 100]]
+            ]
+        ]
+        let data = try! JSONSerialization.data(withJSONObject: message)
+        localRouter.socketServer(server, didReceiveMessage: data, from: "client-1")
+
+        XCTAssertFalse(localRouter.nativeCallCancelled,
+                       "handleToolCall must reset nativeCallCancelled before dispatching zoom")
+        let json = server.lastSentJSON()
+        let errorMsg = (json?["error"] as? [String: Any])?["message"] as? String ?? ""
+        XCTAssertFalse(errorMsg.contains("Cancelled"),
+                       "Stale flag must not cause a Cancelled error for a fresh zoom call: \(errorMsg)")
+    }
+
+    // T_notif_error1 — postAutomationNotification does not crash and does not retry when add fails
+    func testPostAutomationNotification_addError_doesNotCrashOrRetry() {
+        mockCenter.addError = NSError(domain: "UNErrorDomain", code: 1,
+                                      userInfo: [NSLocalizedDescriptionKey: "Notifications not authorized"])
+        router.postAutomationNotification(toolName: "navigate")
+
+        // The request was still submitted (add was called); no retry or second request
+        XCTAssertEqual(mockCenter.addedRequests.count, 1,
+                       "add should be called exactly once even when it fails")
     }
 }
 

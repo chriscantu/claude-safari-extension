@@ -55,6 +55,7 @@ class ToolRouter: MCPSocketServerDelegate {
     private static let notificationDebounceInterval: TimeInterval = 10
 
     /// Date of the last automation notification. Internal for testability (manipulated in tests).
+    /// All reads and writes — including in test code — must be performed under `pendingRequestsLock`.
     var lastNotificationDate: Date? = nil
 
     /// Set when a Stop action fires while a native tool is in-flight.
@@ -104,7 +105,10 @@ class ToolRouter: MCPSocketServerDelegate {
         }
         pendingRequestsLock.unlock()
 
-        if shouldSkip { return }
+        if shouldSkip {
+            NSLog("postAutomationNotification: suppressed for tool '%@' (debounce — last notification was < 10s ago)", toolName)
+            return
+        }
 
         let content = UNMutableNotificationContent()
         content.title = "Claude is automating Safari"
@@ -119,8 +123,10 @@ class ToolRouter: MCPSocketServerDelegate {
         )
         notificationCenter.add(request) { error in
             if let error = error {
-                NSLog("postAutomationNotification: failed to deliver notification for tool '%@': %@ (code %d)",
-                      toolName, (error as NSError).domain, (error as NSError).code)
+                let ns = error as NSError
+                let hint = ns.code == 1 ? " (notifications not authorized — did the user deny permission?)" : ""
+                NSLog("postAutomationNotification: failed to deliver notification for tool '%@': %@ (code %d) — %@%@",
+                      toolName, ns.domain, ns.code, ns.localizedDescription, hint)
             }
         }
     }
@@ -140,6 +146,7 @@ class ToolRouter: MCPSocketServerDelegate {
         let toCancel = Array(pendingRequests.keys)
         pendingRequestsLock.unlock()
 
+        NSLog("cancelCurrentRequest: cancelling %d extension request(s); nativeCallCancelled=true", toCancel.count)
         for requestId in toCancel {
             failPendingRequest(requestId: requestId, message: "Cancelled by user")
         }
@@ -213,6 +220,11 @@ class ToolRouter: MCPSocketServerDelegate {
         // starting new work. Native completion handlers clear it when they observe
         // it; this is the fallback for the case where Stop was clicked with no
         // native tool in-flight (preventing the flag from poisoning this new call).
+        // Third race (undocumented above): if cancelCurrentRequest() sets the flag
+        // while this handleToolCall is in flight (before the native dispatch), this
+        // reset will clear it and the Stop click will be silently swallowed. Worst
+        // case: the tool runs normally instead of cancelling (acceptable — same
+        // as the two races above).
         pendingRequestsLock.lock()
         nativeCallCancelled = false
         pendingRequestsLock.unlock()
@@ -384,6 +396,12 @@ class ToolRouter: MCPSocketServerDelegate {
                 }
                 return
             }
+            // Note: the async dispatch to DispatchQueue.global adds a scheduling delay between
+            // handleToolCall's flag reset (above) and this check. If cancelCurrentRequest() fires
+            // during that window and a new handleToolCall immediately follows and resets the flag,
+            // this check will see false and proceed — the Stop click is silently swallowed.
+            // This is a variant of the third race documented in handleToolCall; acceptable per
+            // the same best-effort contract.
             self.pendingRequestsLock.lock()
             let cancelled = self.nativeCallCancelled
             if cancelled { self.nativeCallCancelled = false }

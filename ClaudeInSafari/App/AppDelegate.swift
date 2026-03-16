@@ -37,9 +37,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
         )
         center.setNotificationCategories([category])
 
-        center.requestAuthorization(options: [.alert, .sound]) { _, error in
+        center.requestAuthorization(options: [.alert, .sound]) { granted, error in
             if let error = error {
                 NSLog("Notification authorization error: \(error.localizedDescription)")
+            } else if !granted {
+                NSLog("Notification authorization denied — automation notifications and Stop action will be suppressed")
             }
         }
     }
@@ -58,6 +60,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
             } else {
                 NSLog("AppDelegate: received stop-automation action but toolRouter is nil — cancellation ignored")
             }
+        } else if response.actionIdentifier != UNNotificationDefaultActionIdentifier {
+            NSLog("AppDelegate: unhandled notification action identifier '%@'", response.actionIdentifier)
         }
         completionHandler()
     }
