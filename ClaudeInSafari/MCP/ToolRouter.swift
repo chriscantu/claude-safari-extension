@@ -65,10 +65,17 @@ class ToolRouter: MCPSocketServerDelegate {
     /// so rapid back-to-back tool calls only show one notification per sequence.
     /// Internal for testability (called from handleToolCall).
     func postAutomationNotification(toolName: String) {
+        pendingRequestsLock.lock()
+        let shouldSkip: Bool
         if let last = lastNotificationDate, Date().timeIntervalSince(last) < 10 {
-            return // debounce: within the 10-second window
+            shouldSkip = true
+        } else {
+            lastNotificationDate = Date()
+            shouldSkip = false
         }
-        lastNotificationDate = Date()
+        pendingRequestsLock.unlock()
+
+        if shouldSkip { return }
 
         let content = UNMutableNotificationContent()
         content.title = "Claude is automating Safari"
