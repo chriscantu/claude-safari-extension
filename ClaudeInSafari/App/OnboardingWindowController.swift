@@ -531,33 +531,27 @@ final class OnboardingWindowController: NSWindowController {
 
             NSColor.white.setFill()
 
-            // Head — proportioned to match menu bar robot (≈60% wide, 36% tall)
-            NSBezierPath(roundedRect: NSRect(x: w*0.20, y: h*0.36, width: w*0.60, height: h*0.36),
-                         xRadius: w*0.09, yRadius: w*0.09).fill()
+            // Head — large, takes up most of icon (matches design)
+            NSBezierPath(roundedRect: NSRect(x: w*0.16, y: h*0.30, width: w*0.68, height: h*0.46),
+                         xRadius: w*0.11, yRadius: w*0.11).fill()
 
-            // Antenna stem — thin, centered above head
-            NSBezierPath(roundedRect: NSRect(x: w*0.45, y: h*0.72, width: w*0.10, height: h*0.12),
+            // Antenna stem
+            NSBezierPath(roundedRect: NSRect(x: w*0.46, y: h*0.76, width: w*0.08, height: h*0.10),
                          xRadius: 2, yRadius: 2).fill()
 
-            // Antenna tip — kept within bounds (top at 94%)
-            NSBezierPath(ovalIn: NSRect(x: w*0.41, y: h*0.82, width: w*0.18, height: h*0.12)).fill()
+            // Antenna tip — small circle, within bounds
+            NSBezierPath(ovalIn: NSRect(x: w*0.40, y: h*0.84, width: w*0.20, height: h*0.12)).fill()
 
-            // Body — slightly narrower than head, directly below
-            NSBezierPath(roundedRect: NSRect(x: w*0.25, y: h*0.04, width: w*0.50, height: h*0.28),
+            // Body — small, narrower than head
+            NSBezierPath(roundedRect: NSRect(x: w*0.30, y: h*0.05, width: w*0.40, height: h*0.21),
                          xRadius: w*0.07, yRadius: w*0.07).fill()
-
-            // Arms — flanking the body
-            NSBezierPath(roundedRect: NSRect(x: w*0.08, y: h*0.06, width: w*0.13, height: h*0.22),
-                         xRadius: w*0.05, yRadius: w*0.05).fill()
-            NSBezierPath(roundedRect: NSRect(x: w*0.79, y: h*0.06, width: w*0.13, height: h*0.22),
-                         xRadius: w*0.05, yRadius: w*0.05).fill()
 
             // Eyes — erase to transparent so orange container shows through
             if let ctx = NSGraphicsContext.current?.cgContext {
                 ctx.setBlendMode(.clear)
                 NSColor.white.setFill() // color irrelevant; .clear blend erases alpha
-                NSBezierPath(ovalIn: NSRect(x: w*0.28, y: h*0.50, width: w*0.13, height: h*0.13)).fill()
-                NSBezierPath(ovalIn: NSRect(x: w*0.59, y: h*0.50, width: w*0.13, height: h*0.13)).fill()
+                NSBezierPath(ovalIn: NSRect(x: w*0.27, y: h*0.48, width: w*0.15, height: h*0.15)).fill()
+                NSBezierPath(ovalIn: NSRect(x: w*0.58, y: h*0.48, width: w*0.15, height: h*0.15)).fill()
                 ctx.setBlendMode(.normal)
             }
 
