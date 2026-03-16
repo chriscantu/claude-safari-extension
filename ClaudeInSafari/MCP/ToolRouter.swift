@@ -1,4 +1,13 @@
 import Foundation
+import UserNotifications
+
+/// Abstraction over UNUserNotificationCenter for notification posting.
+/// Enables injection of a mock in unit tests without hitting the real system.
+protocol NotificationCenterProtocol: AnyObject {
+    func add(_ request: UNNotificationRequest, withCompletionHandler completionHandler: ((Error?) -> Void)?)
+}
+
+extension UNUserNotificationCenter: NotificationCenterProtocol {}
 
 /// Routes incoming MCP JSON-RPC 2.0 requests to the appropriate handler.
 /// Implements the MCP stdio transport protocol: initialize handshake, tools/list, and tools/call.
@@ -8,6 +17,7 @@ class ToolRouter: MCPSocketServerDelegate {
     private let appleScriptBridge = AppleScriptBridge()
     private let gifService: GifService
     private let fileService: FileService
+    private let notificationCenter: NotificationCenterProtocol
 
     // Production init — all services created fresh
     convenience init() {
@@ -18,11 +28,13 @@ class ToolRouter: MCPSocketServerDelegate {
         )
     }
 
-    // Testable init — inject mock services for unit tests
-    init(screenshotService: ScreenshotService, gifService: GifService, fileService: FileService) {
+    // Testable init — inject mock services and notification center for unit tests
+    init(screenshotService: ScreenshotService, gifService: GifService, fileService: FileService,
+         notificationCenter: NotificationCenterProtocol = UNUserNotificationCenter.current()) {
         self.screenshotService = screenshotService
         self.gifService = gifService
         self.fileService = fileService
+        self.notificationCenter = notificationCenter
     }
 
     /// Staging set for native tools whose handler branch is not yet wired up in handleToolCall().
@@ -38,8 +50,38 @@ class ToolRouter: MCPSocketServerDelegate {
     private var pendingToolContext = [String: (toolName: String, arguments: [String: Any])]()
     private let pendingRequestsLock = NSLock()
 
+    // MARK: - Notification state
+    /// Date of the last automation notification. Internal for testability (manipulated in tests).
+    var lastNotificationDate: Date? = nil
+
     func setServer(_ server: MCPSocketServer) {
         self.server = server
+    }
+
+    // MARK: - Notifications
+
+    /// Post a macOS Notification Center alert announcing that automation is active.
+    /// Debounced: silently skipped if a notification was posted in the last 10 seconds
+    /// so rapid back-to-back tool calls only show one notification per sequence.
+    /// Internal for testability (called from handleToolCall).
+    func postAutomationNotification(toolName: String) {
+        if let last = lastNotificationDate, Date().timeIntervalSince(last) < 10 {
+            return // debounce: within the 10-second window
+        }
+        lastNotificationDate = Date()
+
+        let content = UNMutableNotificationContent()
+        content.title = "Claude is automating Safari"
+        content.body = "Running: \(toolName)"
+        content.sound = nil
+        content.categoryIdentifier = "claude-automation"
+
+        let request = UNNotificationRequest(
+            identifier: "claude-automation-active", // stable: replaces previous notification
+            content: content,
+            trigger: nil  // deliver immediately
+        )
+        notificationCenter.add(request, withCompletionHandler: nil)
     }
 
     // MARK: - MCPSocketServerDelegate

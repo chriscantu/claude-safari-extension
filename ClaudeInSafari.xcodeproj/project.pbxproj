@@ -25,6 +25,7 @@
 		BB112233445566778899AABB /* main.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB998877665544332211AABB /* main.swift */; };
 		C5C31B08E3295067213DE349 /* Constants.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1D372117A4FF27A236BD5F8 /* Constants.swift */; };
 		CC00112233445566778899BB /* ToolRouterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC00112233445566778899AA /* ToolRouterTests.swift */; };
+		CD00112233445566778899BB /* ToolRouterNotificationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD00112233445566778899AA /* ToolRouterNotificationTests.swift */; };
 		D9127E282A5767DAA1C48C5D /* MessageFramer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 652C99F1EAD7FA1BDBF44D9D /* MessageFramer.swift */; };
 		DD00112233445566778899BB /* AppleScriptBridgeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD00112233445566778899AA /* AppleScriptBridgeTests.swift */; };
 		FF00112233445566778899BB /* MCPSocketServerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF00112233445566778899AA /* MCPSocketServerTests.swift */; };
@@ -86,6 +87,7 @@
 		BB998877665544332211AABB /* main.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = main.swift; sourceTree = "<group>"; };
 		C2582CE7621B3778BA974E87 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		CC00112233445566778899AA /* ToolRouterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolRouterTests.swift; sourceTree = "<group>"; };
+		CD00112233445566778899AA /* ToolRouterNotificationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolRouterNotificationTests.swift; sourceTree = "<group>"; };
 		DCF900FB4B4265BA727FFA21 /* ToolModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolModels.swift; sourceTree = "<group>"; };
 		DD00112233445566778899AA /* AppleScriptBridgeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppleScriptBridgeTests.swift; sourceTree = "<group>"; };
 		EAD6A30A647A7F4F5DC5DEA3 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
@@ -177,6 +179,7 @@
 				A1B2C3D4E5F60002A1B2C3D4 /* MCPMessageTests.swift */,
 				F011223344556677889900BB /* ScreenshotServiceTests.swift */,
 				CC00112233445566778899AA /* ToolRouterTests.swift */,
+				CD00112233445566778899AA /* ToolRouterNotificationTests.swift */,
 				DD00112233445566778899AA /* AppleScriptBridgeTests.swift */,
 				FF00112233445566778899AA /* MCPSocketServerTests.swift */,
 			);
@@ -341,6 +344,7 @@
 				A1B2C3D4E5F60001A1B2C3D4 /* MCPMessageTests.swift in Sources */,
 				F011223344556677889900AA /* ScreenshotServiceTests.swift in Sources */,
 				CC00112233445566778899BB /* ToolRouterTests.swift in Sources */,
+				CD00112233445566778899BB /* ToolRouterNotificationTests.swift in Sources */,
 				DD00112233445566778899BB /* AppleScriptBridgeTests.swift in Sources */,
 				FF00112233445566778899BB /* MCPSocketServerTests.swift in Sources */,
 			);
