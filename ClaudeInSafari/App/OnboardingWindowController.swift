@@ -270,7 +270,7 @@ final class OnboardingWindowController: NSWindowController {
         detecting.frame = NSRect(x: Layout.padding, y: y - 36, width: Layout.windowWidth - Layout.padding * 2, height: 32)
         root.addSubview(detecting)
 
-        let primary = makeButton("Open Safari Settings", action: #selector(openSafariSettings), primary: true)
+        let primary = makeButton("Open Safari", action: #selector(openSafariSettings), primary: true)
         primary.frame = NSRect(x: Layout.padding, y: 60, width: Layout.windowWidth - Layout.padding * 2, height: 36)
         root.addSubview(primary)
 
@@ -283,21 +283,11 @@ final class OnboardingWindowController: NSWindowController {
     }
 
     @objc private func openSafariSettings() {
-        // SFSafariApplication.showPreferencesForExtension opens Safari and navigates
-        // directly to the Extensions pane for this extension — more reliable than
-        // the safari-settings:// URL scheme which is not supported on all macOS versions.
-        SFSafariApplication.showPreferencesForExtension(
-            withIdentifier: "com.chriscantu.claudeinsafari.extension"
-        ) { error in
-            if let error {
-                NSLog("OnboardingWindowController: showPreferencesForExtension failed: %@", error.localizedDescription)
-                // Fallback: open Safari.app and let the user navigate to Extensions manually.
-                DispatchQueue.main.async {
-                    if !NSWorkspace.shared.open(URL(fileURLWithPath: "/Applications/Safari.app")) {
-                        NSLog("OnboardingWindowController: Safari.app fallback also failed")
-                    }
-                }
-            }
+        // Open Safari so the user can navigate to Settings → Extensions.
+        // safari-settings:// and SFSafariApplication.showPreferencesForExtension both
+        // rely on URL schemes that are unavailable on macOS 26+.
+        if !NSWorkspace.shared.open(URL(fileURLWithPath: "/Applications/Safari.app")) {
+            NSLog("OnboardingWindowController: failed to open Safari.app")
         }
     }
 
