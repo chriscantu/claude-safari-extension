@@ -1,5 +1,6 @@
 // ClaudeInSafari/App/OnboardingWindowController.swift
 import Cocoa
+import SafariServices
 
 // MARK: - Color + layout constants
 
@@ -282,16 +283,21 @@ final class OnboardingWindowController: NSWindowController {
     }
 
     @objc private func openSafariSettings() {
-        // Opens Safari's Extensions pref tab directly. Falls back to launching Safari.app.
-        if let url = URL(string: "safari-settings://") {
-            if !NSWorkspace.shared.open(url) {
-                NSLog("OnboardingWindowController: failed to open safari-settings://, trying Safari.app fallback")
-                if !NSWorkspace.shared.open(URL(fileURLWithPath: "/Applications/Safari.app")) {
-                    NSLog("OnboardingWindowController: Safari.app fallback also failed")
+        // SFSafariApplication.showPreferencesForExtension opens Safari and navigates
+        // directly to the Extensions pane for this extension — more reliable than
+        // the safari-settings:// URL scheme which is not supported on all macOS versions.
+        SFSafariApplication.showPreferencesForExtension(
+            withIdentifier: "com.chriscantu.claudeinsafari.extension"
+        ) { error in
+            if let error {
+                NSLog("OnboardingWindowController: showPreferencesForExtension failed: %@", error.localizedDescription)
+                // Fallback: open Safari.app and let the user navigate to Extensions manually.
+                DispatchQueue.main.async {
+                    if !NSWorkspace.shared.open(URL(fileURLWithPath: "/Applications/Safari.app")) {
+                        NSLog("OnboardingWindowController: Safari.app fallback also failed")
+                    }
                 }
             }
-        } else {
-            NSLog("OnboardingWindowController: malformed URL literal safari-settings://")
         }
     }
 
