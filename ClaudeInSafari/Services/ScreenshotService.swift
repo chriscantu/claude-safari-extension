@@ -242,20 +242,19 @@ class ScreenshotService {
 
 /// Production implementation using ScreenCaptureKit.
 /// Requires Screen Recording permission.
-/// Uses CGRequestScreenCaptureAccess() which presents the system prompt if not yet granted.
+/// Permission acquisition is handled by the onboarding wizard; this provider
+/// performs a silent preflight check only and never presents a system dialog.
 @available(macOS 13.0, *)
 class DefaultScreenCaptureProvider: ScreenCaptureProvider {
 
     func checkPermission() -> Bool {
-        // CGRequestScreenCaptureAccess must run on the main thread.
-        // It presents the system dialog if the app hasn't been authorized yet,
-        // and returns immediately (true/false) if authorization was already decided.
-        if Thread.isMainThread {
-            return CGRequestScreenCaptureAccess()
-        }
-        var result = false
-        DispatchQueue.main.sync { result = CGRequestScreenCaptureAccess() }
-        return result
+        // Silent check — no system dialog, no side effects.
+        // CGRequestScreenCaptureAccess() auto-opens System Settings on macOS 15+ when
+        // permission is denied, which conflicts with the onboarding wizard that owns
+        // permission acquisition. Use CGPreflightScreenCaptureAccess() here so that
+        // tool calls simply fail with permissionDenied when the user hasn't granted
+        // access yet, rather than fighting the onboarding flow with competing prompts.
+        CGPreflightScreenCaptureAccess()
     }
 
     func captureWindow(completion: @escaping (Result<(CGImage, Int, Int), ScreenshotError>) -> Void) {
