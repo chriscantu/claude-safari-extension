@@ -141,9 +141,8 @@ final class MenuBarController {
 
         switch state {
         case .connected:
-            menu.addItem(makeItem("Check Connection", action: #selector(checkConnection), symbol: "🔍"))
-            menu.addItem(makeItem("Open Safari", action: #selector(openSafari), symbol: "🧭"))
             menu.addItem(makeItem("Open Setup Again", action: #selector(openSetup), symbol: "⚙️"))
+            menu.addItem(makeItem("Open Safari", action: #selector(openSafari), symbol: "🧭"))
 
         case .needsAttention:
             let fixItem = makeItem("Fix This →", action: #selector(openSetup), symbol: "🔧")
@@ -163,6 +162,8 @@ final class MenuBarController {
         }
 
         menu.addItem(.separator())
+        menu.addItem(makeItem("Check Connection", action: #selector(checkConnection), symbol: "🔍"))
+
         menu.addItem(makeItem("Quit", action: #selector(quitApp), symbol: nil))
 
         // Wire target
