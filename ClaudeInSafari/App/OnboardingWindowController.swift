@@ -270,7 +270,7 @@ final class OnboardingWindowController: NSWindowController {
         detecting.frame = NSRect(x: Layout.padding, y: y - 36, width: Layout.windowWidth - Layout.padding * 2, height: 32)
         root.addSubview(detecting)
 
-        let primary = makeButton("Open Safari", action: #selector(openSafariSettings), primary: true)
+        let primary = makeButton("Open Safari Settings", action: #selector(openSafariSettings), primary: true)
         primary.frame = NSRect(x: Layout.padding, y: 60, width: Layout.windowWidth - Layout.padding * 2, height: 36)
         root.addSubview(primary)
 
@@ -283,11 +283,47 @@ final class OnboardingWindowController: NSWindowController {
     }
 
     @objc private func openSafariSettings() {
-        // Open Safari so the user can navigate to Settings → Extensions.
-        // safari-settings:// and SFSafariApplication.showPreferencesForExtension both
-        // rely on URL schemes that are unavailable on macOS 26+.
+        // safari-settings:// and SFSafariApplication.showPreferencesForExtension both fail on macOS 26+.
+        // Use AppleScript (via osascript subprocess, same pattern as AppleScriptBridge) to activate
+        // Safari and navigate to Settings → Extensions. Falls back to opening Safari.app on error.
+        let script = """
+            tell application "Safari" to activate
+            delay 0.3
+            tell application "System Events"
+                tell process "Safari"
+                    try
+                        click menu item "Settings\u{2026}" of menu "Safari" of menu bar 1
+                    on error
+                        click menu item "Preferences\u{2026}" of menu "Safari" of menu bar 1
+                    end try
+                    delay 0.4
+                    tell window 1
+                        click button "Extensions" of tool bar 1
+                    end tell
+                end tell
+            end tell
+            """
+        DispatchQueue.global(qos: .userInitiated).async {
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+            process.arguments = ["-e", script]
+            do {
+                try process.run()
+                process.waitUntilExit()
+                if process.terminationStatus != 0 {
+                    NSLog("OnboardingWindowController: osascript exited %d — falling back to Safari.app", process.terminationStatus)
+                    DispatchQueue.main.async { self.openSafariFallback() }
+                }
+            } catch {
+                NSLog("OnboardingWindowController: failed to launch osascript: %@ — falling back", error.localizedDescription)
+                DispatchQueue.main.async { self.openSafariFallback() }
+            }
+        }
+    }
+
+    private func openSafariFallback() {
         if !NSWorkspace.shared.open(URL(fileURLWithPath: "/Applications/Safari.app")) {
-            NSLog("OnboardingWindowController: failed to open Safari.app")
+            NSLog("OnboardingWindowController: Safari.app fallback also failed")
         }
     }
 
