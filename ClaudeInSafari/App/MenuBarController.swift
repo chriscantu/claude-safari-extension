@@ -86,11 +86,11 @@ final class MenuBarController {
     }
 
     /// Draws a minimal robot silhouette using bezier paths.
-    /// Uses white (or dimmed white) bezier paths designed for dark menu bar backgrounds.
-    /// `isTemplate` is set to `false` on the parent image, so macOS does NOT apply
-    /// automatic tinting — coloring is handled entirely by the fill colors below.
+    /// Uses NSColor.labelColor (black in Light mode, white in Dark mode) so the icon
+    /// adapts automatically to light and dark menu bars. `isTemplate` is set to `false`
+    /// on the parent image so the colored status dot is preserved.
     private func drawRobot(in rect: NSRect, dimmed: Bool) {
-        let color = dimmed ? NSColor.white.withAlphaComponent(0.35) : NSColor.white
+        let color = dimmed ? NSColor.labelColor.withAlphaComponent(0.35) : NSColor.labelColor
         color.setFill()
 
         // Head
@@ -109,11 +109,10 @@ final class MenuBarController {
         let body = NSBezierPath(roundedRect: NSRect(x: 4, y: 1, width: 11, height: 5.5), xRadius: 1.5, yRadius: 1.5)
         body.fill()
 
-        // Eyes — punch out using clear (reveals menu bar background = dark on dark = no visible eyes, which is correct)
-        NSColor.clear.setFill()
-        // Left eye
+        // Eyes — windowBackgroundColor is light in Light mode (punches holes in dark head)
+        // and dark in Dark mode (punches holes in white head), making eyes visible in both.
+        NSColor.windowBackgroundColor.setFill()
         NSBezierPath(ovalIn: NSRect(x: 5.5, y: 9.5, width: 2.5, height: 2.5)).fill()
-        // Right eye
         NSBezierPath(ovalIn: NSRect(x: 10.5, y: 9.5, width: 2.5, height: 2.5)).fill()
     }
 
