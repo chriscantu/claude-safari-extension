@@ -101,6 +101,12 @@ final class OnboardingWindowController: NSWindowController {
         currentScreen = screen
         window?.contentView = buildView(for: screen)
         if case .step(let step) = screen {
+            if step == .screenRecording {
+                // Trigger the system prompt so the app appears in System Settings → Screen Recording.
+                // CGPreflightScreenCaptureAccess (used in PermissionMonitor) is a silent read;
+                // only CGRequestScreenCaptureAccess registers the app in the TCC list.
+                CGRequestScreenCaptureAccess()
+            }
             startPolling(for: step)
         }
     }
