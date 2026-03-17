@@ -3,7 +3,6 @@ import Foundation
 import ApplicationServices
 import CoreGraphics
 import SafariServices
-import ScreenCaptureKit
 
 // MARK: - OnboardingStep
 
@@ -57,19 +56,11 @@ struct SystemPermissionChecker: PermissionChecking {
     }
 
     func isScreenRecordingGranted() -> Bool {
-        // CGPreflightScreenCaptureAccess reads a per-process cached TCC value set at launch.
-        // If the user grants permission in System Settings after the process starts, the cache
-        // is not updated and CGPreflightScreenCaptureAccess keeps returning false until restart.
-        // SCShareableContent performs a live kernel-level TCC check on every call, so it
-        // correctly reflects the current System Settings value without requiring a restart.
-        var granted = false
-        let semaphore = DispatchSemaphore(value: 0)
-        SCShareableContent.getExcludingDesktopWindows(false, onScreenWindowsOnly: false) { _, error in
-            granted = (error == nil)
-            semaphore.signal()
-        }
-        semaphore.wait()
-        return granted
+        // Silent check — no UI, no side effects. Used for the 0.5 s polling loop.
+        // CGRequestScreenCaptureAccess() is called separately (once on step entry and
+        // once on app-did-become-active) to refresh the per-process TCC cache after the
+        // user grants permission in System Settings.
+        CGPreflightScreenCaptureAccess()
     }
 
     func getExtensionEnabled(completion: @escaping (Bool) -> Void) {

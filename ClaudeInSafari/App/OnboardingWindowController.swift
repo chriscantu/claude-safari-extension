@@ -129,6 +129,7 @@ final class OnboardingWindowController: NSWindowController {
 
     private var dismissed = false
     private var checkInFlight = false
+    private var appActiveObserver: Any?
     private func dismiss() {
         guard !dismissed else { return }
         dismissed = true
@@ -146,12 +147,33 @@ final class OnboardingWindowController: NSWindowController {
         pollTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
             self?.checkStepCompletion(step)
         }
+        if step == .screenRecording {
+            // CGPreflightScreenCaptureAccess (used in polling) reads a per-process TCC cache
+            // that is only refreshed when CGRequestScreenCaptureAccess() is called. Observe
+            // app-did-become-active so that when the user returns from System Settings we call
+            // CGRequestScreenCaptureAccess() once — if permission was just granted it returns
+            // true immediately with no UI and refreshes the cache for subsequent polls.
+            appActiveObserver = NotificationCenter.default.addObserver(
+                forName: NSApplication.didBecomeActiveNotification,
+                object: nil,
+                queue: .main
+            ) { [weak self] _ in
+                guard let self, !self.dismissed else { return }
+                if CGRequestScreenCaptureAccess() {
+                    self.checkStepCompletion(.screenRecording)
+                }
+            }
+        }
     }
 
     private func stopPolling() {
         pollTimer?.invalidate()
         pollTimer = nil
         checkInFlight = false
+        if let observer = appActiveObserver {
+            NotificationCenter.default.removeObserver(observer)
+            appActiveObserver = nil
+        }
     }
 
     private func checkStepCompletion(_ step: OnboardingStep) {
