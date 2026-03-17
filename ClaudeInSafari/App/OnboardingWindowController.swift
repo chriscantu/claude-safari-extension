@@ -121,6 +121,7 @@ final class OnboardingWindowController: NSWindowController {
     }
 
     private var dismissed = false
+    private var checkInFlight = false
     private func dismiss() {
         guard !dismissed else { return }
         dismissed = true
@@ -143,12 +144,18 @@ final class OnboardingWindowController: NSWindowController {
     private func stopPolling() {
         pollTimer?.invalidate()
         pollTimer = nil
+        checkInFlight = false
     }
 
     private func checkStepCompletion(_ step: OnboardingStep) {
+        // Skip if a checkAll is already in-flight; avoids stacking concurrent calls to
+        // SFSafariExtensionManager when Safari is slow or restarting.
+        guard !checkInFlight else { return }
+        checkInFlight = true
         // checkAll delivers on the main queue — no extra dispatch needed.
         monitor.checkAll { [weak self] status in
             guard let self else { return }
+            self.checkInFlight = false
             // Guard against callbacks arriving after the controller has already been dismissed.
             guard !self.dismissed else { return }
             // Guard against in-flight callbacks arriving after screen has already changed.
