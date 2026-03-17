@@ -149,6 +149,8 @@ final class OnboardingWindowController: NSWindowController {
         // checkAll delivers on the main queue — no extra dispatch needed.
         monitor.checkAll { [weak self] status in
             guard let self else { return }
+            // Guard against callbacks arriving after the controller has already been dismissed.
+            guard !self.dismissed else { return }
             // Guard against in-flight callbacks arriving after screen has already changed.
             guard case .step(let currentStep) = self.currentScreen, currentStep == step else { return }
             switch step {
@@ -271,7 +273,9 @@ final class OnboardingWindowController: NSWindowController {
         if let url = URL(string: "safari-settings://") {
             if !NSWorkspace.shared.open(url) {
                 NSLog("OnboardingWindowController: failed to open safari-settings://, trying Safari.app fallback")
-                NSWorkspace.shared.open(URL(fileURLWithPath: "/Applications/Safari.app"))
+                if !NSWorkspace.shared.open(URL(fileURLWithPath: "/Applications/Safari.app")) {
+                    NSLog("OnboardingWindowController: Safari.app fallback also failed")
+                }
             }
         } else {
             NSLog("OnboardingWindowController: malformed URL literal safari-settings://")
@@ -618,7 +622,11 @@ final class OnboardingWindowController: NSWindowController {
             NSLog("OnboardingWindowController: SF Symbol '%@' not found", name)
             return NSImage()
         }
-        return image.withSymbolConfiguration(config) ?? NSImage()
+        let configured = image.withSymbolConfiguration(config)
+        if configured == nil {
+            NSLog("OnboardingWindowController: withSymbolConfiguration returned nil for SF Symbol '%@'", name)
+        }
+        return configured ?? NSImage()
     }
 }
 

@@ -82,8 +82,9 @@ claude-safari-extension/
 │       │   ├── MCPMessageTests.swift
 │       │   ├── MCPSocketServerTests.swift
 │       │   ├── MenuBarControllerTests.swift
-│       │   ├── PermissionMonitorTests.swift
 │       │   ├── MessageFramerTests.swift
+│       │   ├── OnboardingWindowControllerTests.swift
+│       │   ├── PermissionMonitorTests.swift
 │       │   ├── SafariWebExtensionHandlerTests.swift
 │       │   ├── ScreenshotServiceTests.swift
 │       │   ├── ToolRouterNotificationTests.swift
