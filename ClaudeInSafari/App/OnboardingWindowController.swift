@@ -159,8 +159,11 @@ final class OnboardingWindowController: NSWindowController {
                 queue: .main
             ) { [weak self] _ in
                 guard let self, !self.dismissed else { return }
+                // CGRequestScreenCaptureAccess() forces a live TCC read. If it returns
+                // true the permission is confirmed — advance directly rather than going
+                // through CGPreflightScreenCaptureAccess() which may still be stale.
                 if CGRequestScreenCaptureAccess() {
-                    self.checkStepCompletion(.screenRecording)
+                    self.advance()
                 }
             }
         }
