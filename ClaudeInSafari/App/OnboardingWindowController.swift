@@ -102,12 +102,6 @@ final class OnboardingWindowController: NSWindowController {
         currentScreen = screen
         window?.contentView = buildView(for: screen)
         if case .step(let step) = screen {
-            if step == .screenRecording {
-                // Trigger the system prompt so the app appears in System Settings → Screen Recording.
-                // CGPreflightScreenCaptureAccess (used in PermissionMonitor) is a silent read;
-                // only CGRequestScreenCaptureAccess registers the app in the TCC list.
-                CGRequestScreenCaptureAccess()
-            }
             startPolling(for: step)
         }
     }
@@ -129,7 +123,6 @@ final class OnboardingWindowController: NSWindowController {
 
     private var dismissed = false
     private var checkInFlight = false
-    private var appActiveObserver: Any?
     private func dismiss() {
         guard !dismissed else { return }
         dismissed = true
@@ -147,36 +140,12 @@ final class OnboardingWindowController: NSWindowController {
         pollTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
             self?.checkStepCompletion(step)
         }
-        if step == .screenRecording {
-            // CGPreflightScreenCaptureAccess (used in polling) reads a per-process TCC cache
-            // that is only refreshed when CGRequestScreenCaptureAccess() is called. Observe
-            // app-did-become-active so that when the user returns from System Settings we call
-            // CGRequestScreenCaptureAccess() once — if permission was just granted it returns
-            // true immediately with no UI and refreshes the cache for subsequent polls.
-            appActiveObserver = NotificationCenter.default.addObserver(
-                forName: NSApplication.didBecomeActiveNotification,
-                object: nil,
-                queue: .main
-            ) { [weak self] _ in
-                guard let self, !self.dismissed else { return }
-                // CGRequestScreenCaptureAccess() forces a live TCC read. If it returns
-                // true the permission is confirmed — advance directly rather than going
-                // through CGPreflightScreenCaptureAccess() which may still be stale.
-                if CGRequestScreenCaptureAccess() {
-                    self.advance()
-                }
-            }
-        }
     }
 
     private func stopPolling() {
         pollTimer?.invalidate()
         pollTimer = nil
         checkInFlight = false
-        if let observer = appActiveObserver {
-            NotificationCenter.default.removeObserver(observer)
-            appActiveObserver = nil
-        }
     }
 
     private func checkStepCompletion(_ step: OnboardingStep) {
