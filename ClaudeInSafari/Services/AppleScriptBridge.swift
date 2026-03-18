@@ -143,6 +143,30 @@ class AppleScriptBridge {
         """
     }
 
+    /// Classifies an osascript failure into a typed ResizeError.
+    /// Extracted from runAppleScript() for testability — the matching logic
+    /// is the most fragile part (depends on macOS error code formats).
+    func classifyScriptError(terminationReason: Process.TerminationReason,
+                             exitCode: Int32, stderr: String) -> ResizeError {
+        if terminationReason == .uncaughtSignal {
+            return .executionFailed("osascript was killed by signal \(exitCode)")
+        }
+
+        let message = stderr.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        if message.contains("(9001)") { return .noWindowFound }
+        if message.contains("(9002)") { return .fullscreen }
+
+        if message.contains("-1743") || message.contains("-25212")
+            || message.lowercased().contains("not authorized") {
+            return .permissionDenied
+        }
+
+        return .executionFailed(
+            message.isEmpty ? "osascript exited with status \(exitCode)" : message
+        )
+    }
+
     private func runAppleScript(_ source: String) throws {
         // Use osascript subprocess rather than NSAppleScript so the Apple Events
         // call runs under osascript's own TCC entry, avoiding Hardened Runtime
@@ -177,33 +201,12 @@ class AppleScriptBridge {
         process.waitUntilExit()
         group.wait()
 
-        // A signal-killed process has a different termination reason from a normal exit.
-        if process.terminationReason == .uncaughtSignal {
-            NSLog("AppleScriptBridge: osascript killed by signal %d", process.terminationStatus)
-            throw ResizeError.executionFailed("osascript was killed by signal \(process.terminationStatus)")
-        }
-
         guard process.terminationStatus == 0 else {
-            let message = String(data: stderrData, encoding: .utf8)?
-                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-
-            // Match on numeric sentinel codes injected by the AppleScript for reliable
-            // classification — avoids fragile substring matching on localised error text.
-            if message.contains("(9001)") { throw ResizeError.noWindowFound }
-            if message.contains("(9002)") { throw ResizeError.fullscreen }
-
-            // -1743 (errAEEventNotPermitted): Automation TCC denial — osascript not
-            // authorised to send Apple Events to Safari.
-            // -25212 (errAXError): Accessibility TCC denial — osascript not authorised
-            // to use System Events assistive APIs.
-            // Both are checked against osascript's own TCC entry (not the native app's).
-            if message.contains("-1743") || message.contains("-25212")
-                || message.lowercased().contains("not authorized") {
-                throw ResizeError.permissionDenied
-            }
-
-            throw ResizeError.executionFailed(
-                message.isEmpty ? "osascript exited with status \(process.terminationStatus)" : message
+            let message = String(data: stderrData, encoding: .utf8) ?? ""
+            throw classifyScriptError(
+                terminationReason: process.terminationReason,
+                exitCode: process.terminationStatus,
+                stderr: message
             )
         }
     }

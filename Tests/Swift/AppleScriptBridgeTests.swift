@@ -211,6 +211,103 @@ final class AppleScriptBridgeTests: XCTestCase {
         XCTAssertEqual(AppleScriptBridge.maxHeight, 4320)
     }
 
+    // MARK: - classifyScriptError
+
+    func testClassifyScriptError_sentinel9001_returnsNoWindowFound() {
+        let error = bridge.classifyScriptError(
+            terminationReason: .exit, exitCode: 1,
+            stderr: "execution error: RESIZE_NO_WINDOW (9001)")
+        guard case .noWindowFound = error else {
+            XCTFail("Expected .noWindowFound, got \(error)")
+            return
+        }
+    }
+
+    func testClassifyScriptError_sentinel9002_returnsFullscreen() {
+        let error = bridge.classifyScriptError(
+            terminationReason: .exit, exitCode: 1,
+            stderr: "execution error: RESIZE_FULLSCREEN (9002)")
+        guard case .fullscreen = error else {
+            XCTFail("Expected .fullscreen, got \(error)")
+            return
+        }
+    }
+
+    func testClassifyScriptError_tcc1743_returnsPermissionDenied() {
+        let error = bridge.classifyScriptError(
+            terminationReason: .exit, exitCode: 1,
+            stderr: "execution error: Not authorized to send Apple events (-1743)")
+        guard case .permissionDenied = error else {
+            XCTFail("Expected .permissionDenied, got \(error)")
+            return
+        }
+    }
+
+    func testClassifyScriptError_tcc25212_returnsPermissionDenied() {
+        let error = bridge.classifyScriptError(
+            terminationReason: .exit, exitCode: 1,
+            stderr: "System Events got an error: osascript is not allowed (-25212)")
+        guard case .permissionDenied = error else {
+            XCTFail("Expected .permissionDenied, got \(error)")
+            return
+        }
+    }
+
+    func testClassifyScriptError_notAuthorizedCaseInsensitive_returnsPermissionDenied() {
+        let error = bridge.classifyScriptError(
+            terminationReason: .exit, exitCode: 1,
+            stderr: "Not Authorized to perform this action")
+        guard case .permissionDenied = error else {
+            XCTFail("Expected .permissionDenied, got \(error)")
+            return
+        }
+    }
+
+    func testClassifyScriptError_signalKill_returnsExecutionFailed() {
+        let error = bridge.classifyScriptError(
+            terminationReason: .uncaughtSignal, exitCode: 9,
+            stderr: "")
+        guard case .executionFailed(let detail) = error else {
+            XCTFail("Expected .executionFailed, got \(error)")
+            return
+        }
+        XCTAssertTrue(detail.contains("signal"), "Expected signal info in: \(detail)")
+        XCTAssertTrue(detail.contains("9"), "Expected signal number in: \(detail)")
+    }
+
+    func testClassifyScriptError_genericNonZero_returnsExecutionFailedWithStderr() {
+        let error = bridge.classifyScriptError(
+            terminationReason: .exit, exitCode: 1,
+            stderr: "some unexpected error")
+        guard case .executionFailed(let detail) = error else {
+            XCTFail("Expected .executionFailed, got \(error)")
+            return
+        }
+        XCTAssertEqual(detail, "some unexpected error")
+    }
+
+    func testClassifyScriptError_emptyStderr_returnsExecutionFailedWithExitCode() {
+        let error = bridge.classifyScriptError(
+            terminationReason: .exit, exitCode: 42,
+            stderr: "")
+        guard case .executionFailed(let detail) = error else {
+            XCTFail("Expected .executionFailed, got \(error)")
+            return
+        }
+        XCTAssertTrue(detail.contains("42"), "Expected exit code in: \(detail)")
+    }
+
+    func testClassifyScriptError_sentinelTakesPriorityOverTCC() {
+        // stderr contains both (9001) and -1743 — sentinel should match first
+        let error = bridge.classifyScriptError(
+            terminationReason: .exit, exitCode: 1,
+            stderr: "error (9001) also -1743")
+        guard case .noWindowFound = error else {
+            XCTFail("Expected .noWindowFound (sentinel priority), got \(error)")
+            return
+        }
+    }
+
     // MARK: - Manual-only tests (require live Safari)
     // T1–T3, T9–T11, T13: resizeWindow() end-to-end — must be run manually.
     // These tests launch osascript and require a running Safari window.
