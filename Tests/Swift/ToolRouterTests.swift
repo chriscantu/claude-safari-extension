@@ -885,4 +885,101 @@ final class ToolRouterDispatchTests: XCTestCase {
         let router = ToolRouter()
         router.performStartupCleanup()
     }
+
+    // MARK: - Extension Generation Detection (Spec 023 H2)
+
+    func testReadExtensionGeneration_returnsFileContents() throws {
+        guard let url = AppConstants.extensionGenerationURL else {
+            throw XCTSkip("App Group unavailable in test environment")
+        }
+        let dir = url.deletingLastPathComponent()
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        try "test-gen-abc".data(using: .utf8)!.write(to: url, options: .atomic)
+
+        let router = ToolRouter()
+        let gen = router.readExtensionGeneration()
+        XCTAssertEqual(gen, "test-gen-abc")
+
+        try? FileManager.default.removeItem(at: url)
+    }
+
+    func testReadExtensionGeneration_returnsNilWhenFileAbsent() throws {
+        if let url = AppConstants.extensionGenerationURL {
+            try? FileManager.default.removeItem(at: url)
+        }
+
+        let router = ToolRouter()
+        let gen = router.readExtensionGeneration()
+        XCTAssertNil(gen, "Should return nil when generation file does not exist")
+    }
+
+    func testPollForExtensionResponse_generationMismatch_failsImmediately() throws {
+        guard let genURL = AppConstants.extensionGenerationURL else {
+            throw XCTSkip("App Group unavailable in test environment")
+        }
+        guard let dir = AppConstants.responsesDirectoryURL else {
+            throw XCTSkip("App Group unavailable in test environment")
+        }
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        try "gen-A".data(using: .utf8)!.write(to: genURL, options: .atomic)
+
+        let mockServer = MockMCPSocketServer()
+        let router = ToolRouter(
+            screenshotService: ScreenshotService(),
+            gifService: GifService(),
+            fileService: FileService()
+        )
+        router.setServer(mockServer)
+
+        let requestId = "gen-mismatch-test"
+        router.injectPendingRequest(requestId: requestId, clientId: "test-client", jsonrpcId: 42)
+
+        // Change generation to simulate a background page reload
+        try "gen-B".data(using: .utf8)!.write(to: genURL, options: .atomic)
+
+        router.pollForExtensionResponseForTest(requestId: requestId, deadline: Date().addingTimeInterval(30),
+                                                generationSnapshot: "gen-A")
+
+        let expectation = XCTestExpectation(description: "Poll detects generation mismatch")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { expectation.fulfill() }
+        wait(for: [expectation], timeout: 1.0)
+
+        let json = mockServer.lastSentJSON()
+        let errorMsg = (json?["error"] as? [String: Any])?["message"] as? String ?? ""
+        XCTAssertTrue(errorMsg.contains("Extension reloaded"), "Expected generation mismatch error, got: \(errorMsg)")
+
+        try? FileManager.default.removeItem(at: genURL)
+    }
+
+    func testPollForExtensionResponse_nilGeneration_doesNotFail() throws {
+        guard let dir = AppConstants.responsesDirectoryURL else {
+            throw XCTSkip("App Group unavailable in test environment")
+        }
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        if let genURL = AppConstants.extensionGenerationURL {
+            try? FileManager.default.removeItem(at: genURL)
+        }
+
+        let mockServer = MockMCPSocketServer()
+        let router = ToolRouter(
+            screenshotService: ScreenshotService(),
+            gifService: GifService(),
+            fileService: FileService()
+        )
+        router.setServer(mockServer)
+
+        let requestId = "nil-gen-test"
+        router.injectPendingRequest(requestId: requestId, clientId: "test-client", jsonrpcId: 43)
+
+        router.pollForExtensionResponseForTest(requestId: requestId, deadline: Date().addingTimeInterval(0.15),
+                                                generationSnapshot: nil)
+
+        let expectation = XCTestExpectation(description: "Poll times out normally")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { expectation.fulfill() }
+        wait(for: [expectation], timeout: 1.0)
+
+        let json = mockServer.lastSentJSON()
+        let errorMsg = (json?["error"] as? [String: Any])?["message"] as? String ?? ""
+        XCTAssertTrue(errorMsg.contains("timeout"), "Expected timeout error, got: \(errorMsg)")
+    }
 }

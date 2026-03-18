@@ -60,6 +60,19 @@ class ToolRouter: MCPSocketServerDelegate {
         NSLog("ToolRouter: startup cleanup complete")
     }
 
+    /// Read the current extension generation marker from the App Group file.
+    /// Returns nil if the file does not exist or is unreadable.
+    func readExtensionGeneration() -> String? {
+        guard let url = AppConstants.extensionGenerationURL,
+              let data = try? Data(contentsOf: url) else { return nil }
+        return String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// Test-only: call pollForExtensionResponse from tests.
+    func pollForExtensionResponseForTest(requestId: String, deadline: Date, generationSnapshot: String?) {
+        pollForExtensionResponse(requestId: requestId, deadline: deadline, generationSnapshot: generationSnapshot)
+    }
+
     /// Staging set for native tools whose handler branch is not yet wired up in handleToolCall().
     /// Empty by default. Add a tool name here to have it return "not yet implemented" instead of
     /// being silently forwarded to the extension (useful while developing a new native handler).
@@ -691,20 +704,25 @@ class ToolRouter: MCPSocketServerDelegate {
             return
         }
 
+        let generationSnapshot = readExtensionGeneration()
+
         pendingRequestsLock.lock()
         pendingRequests[queued.requestId] = (clientId: clientId, jsonrpcId: id)
         pendingToolContext[queued.requestId] = (toolName: queued.tool, arguments: arguments)
         pendingRequestsLock.unlock()
 
-        pollForExtensionResponse(requestId: queued.requestId, deadline: Date().addingTimeInterval(30))
+        pollForExtensionResponse(requestId: queued.requestId, deadline: Date().addingTimeInterval(30),
+                                 generationSnapshot: generationSnapshot)
     }
 
-    private func pollForExtensionResponse(requestId: String, deadline: Date) {
+    private func pollForExtensionResponse(requestId: String, deadline: Date,
+                                           generationSnapshot: String?) {
         guard let fileURL = AppConstants.responseFileURL(for: requestId) else {
             failPendingRequest(requestId: requestId, message: "App Group unavailable")
             return
         }
 
+        // Check for response file first — a valid response takes priority over generation changes
         if let data = try? Data(contentsOf: fileURL),
            let responseString = String(data: data, encoding: .utf8) {
             // Delete the file so it isn't processed twice.
@@ -723,6 +741,18 @@ class ToolRouter: MCPSocketServerDelegate {
             return
         }
 
+        // H2: Check for extension generation mismatch (background page reloaded)
+        // Only check when we have a snapshot — nil means extension hadn't sent
+        // extension_ready yet, so we can't detect a reload.
+        if let snapshot = generationSnapshot {
+            let current = readExtensionGeneration()
+            if let current = current, current != snapshot {
+                NSLog("ToolRouter: extension generation changed (\(snapshot) → \(current)), failing request \(requestId)")
+                failPendingRequest(requestId: requestId, message: "Extension reloaded during tool execution")
+                return
+            }
+        }
+
         guard Date() < deadline else {
             failPendingRequest(requestId: requestId, message: "Extension response timeout (30s)")
             return
@@ -734,7 +764,8 @@ class ToolRouter: MCPSocketServerDelegate {
         guard isActive else { return }
 
         DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + 0.05) { [weak self] in
-            self?.pollForExtensionResponse(requestId: requestId, deadline: deadline)
+            self?.pollForExtensionResponse(requestId: requestId, deadline: deadline,
+                                            generationSnapshot: generationSnapshot)
         }
     }
 
