@@ -16,7 +16,7 @@ private enum Layout {
 
 // MARK: - OnboardingScreen
 
-private enum OnboardingScreen {
+enum OnboardingScreen: Equatable {
     case welcome
     case step(OnboardingStep)
     case done
@@ -36,7 +36,7 @@ final class OnboardingWindowController: NSWindowController {
 
     // MARK: Private state
 
-    private var currentScreen: OnboardingScreen = .welcome
+    private(set) var currentScreen: OnboardingScreen = .welcome
     private var pollTimer: Timer?
 
     // MARK: Init
@@ -112,7 +112,7 @@ final class OnboardingWindowController: NSWindowController {
         }
     }
 
-    private func advance() {
+    func advance() {
         switch currentScreen {
         case .welcome:
             show(screen: .step(.safariExtension))
@@ -127,9 +127,9 @@ final class OnboardingWindowController: NSWindowController {
         }
     }
 
-    private var dismissed = false
+    private(set) var dismissed = false
     private var checkInFlight = false
-    private func dismiss() {
+    func dismiss() {
         guard !dismissed else { return }
         dismissed = true
         stopPolling()

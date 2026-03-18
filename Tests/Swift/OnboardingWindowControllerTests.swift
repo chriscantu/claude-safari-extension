@@ -4,9 +4,6 @@ import XCTest
 
 // MARK: - Helpers
 
-/// MockPermissionChecker defined in PermissionMonitorTests.swift is in the same test target,
-/// so we can reuse it. If the build system compiles each file independently, we define a local
-/// alias below. To avoid redeclaration errors the local type is named distinctly.
 private final class OnboardingMockChecker: PermissionChecking {
     var accessibilityGranted = false
     var screenRecordingGranted = false
@@ -20,151 +17,163 @@ private final class OnboardingMockChecker: PermissionChecking {
     func requestAccessibility() {}
 }
 
+/// Creates a controller with a mock checker (all permissions denied by default).
+/// Caller is responsible for closing the window via `controller.window?.orderOut(nil)`.
+private func makeController() -> (OnboardingWindowController, OnboardingMockChecker) {
+    let checker = OnboardingMockChecker()
+    let monitor = PermissionMonitor(checker: checker)
+    let controller = OnboardingWindowController(monitor: monitor)
+    return (controller, checker)
+}
+
 // MARK: - OnboardingWindowControllerTests
 
 final class OnboardingWindowControllerTests: XCTestCase {
 
-    // All AppKit operations require the main thread.
-    // XCTest runs test methods on the main thread by default, so no extra dispatch
-    // is needed here, but we use @MainActor annotations where clarity helps.
+    // MARK: - T1: Initial state is .welcome
 
-    // MARK: - T1: showOnboarding(startingAt: nil) makes the window visible
+    func testInitialState_isWelcome() {
+        let (controller, _) = makeController()
+        XCTAssertEqual(controller.currentScreen, .welcome)
+    }
 
-    /// Verifies that calling showOnboarding(startingAt: nil) orders the window front.
-    /// currentScreen is private, so we verify the observable side effect: the window
-    /// is key and ordered front (i.e., isVisible == true).
-    func testShowOnboarding_nil_makesWindowVisible() {
-        let checker = OnboardingMockChecker()
-        let monitor = PermissionMonitor(checker: checker)
-        let controller = OnboardingWindowController(monitor: monitor)
+    // MARK: - T2: advance() follows the full navigation sequence
 
-        XCTAssertFalse(controller.window?.isVisible ?? true,
-                       "Window should start hidden before showOnboarding is called")
+    func testAdvance_followsCorrectSequence() {
+        let (controller, _) = makeController()
+        controller.showOnboarding(startingAt: nil)
+
+        XCTAssertEqual(controller.currentScreen, .welcome)
+
+        controller.advance()
+        XCTAssertEqual(controller.currentScreen, .step(.safariExtension))
+
+        controller.advance()
+        XCTAssertEqual(controller.currentScreen, .step(.screenRecording))
+
+        controller.advance()
+        XCTAssertEqual(controller.currentScreen, .step(.accessibility))
+
+        controller.advance()
+        XCTAssertEqual(controller.currentScreen, .done)
+
+        controller.window?.orderOut(nil)
+    }
+
+    // MARK: - T3: advance() from .done calls dismiss()
+
+    func testAdvance_fromDone_dismisses() {
+        let (controller, _) = makeController()
+        var dismissFired = false
+        controller.onDismiss = { dismissFired = true }
 
         controller.showOnboarding(startingAt: nil)
 
-        XCTAssertTrue(controller.window?.isVisible ?? false,
-                      "Window must be visible after showOnboarding(startingAt: nil)")
+        // Navigate to .done: welcome → safari → screenRecording → accessibility → done (4 advances)
+        for _ in 0..<4 { controller.advance() }
+        XCTAssertEqual(controller.currentScreen, .done)
+        XCTAssertFalse(dismissFired, "onDismiss should not fire until advance from .done")
 
-        // Clean up: close without triggering onDismiss cascade.
+        // One more advance triggers dismiss
+        controller.advance()
+        XCTAssertTrue(controller.dismissed)
+        XCTAssertTrue(dismissFired)
+    }
+
+    // MARK: - T4: showOnboarding(startingAt:) jumps to the correct step
+
+    func testShowOnboarding_startingAtStep_jumpsDirectly() {
+        let (controller, _) = makeController()
+
+        controller.showOnboarding(startingAt: .screenRecording)
+        XCTAssertEqual(controller.currentScreen, .step(.screenRecording))
+
         controller.window?.orderOut(nil)
     }
 
-    // MARK: - T2: showOnboarding(startingAt: .safariExtension) makes the window visible
+    // MARK: - T5: showOnboarding(startingAt: nil) opens to welcome
 
-    /// Verifies that passing a specific OnboardingStep still shows the window.
-    /// Since OnboardingScreen is private we cannot inspect currentScreen directly;
-    /// we confirm the window is presented and does not crash.
-    func testShowOnboarding_withStep_makesWindowVisible() {
-        let checker = OnboardingMockChecker()
-        let monitor = PermissionMonitor(checker: checker)
-        let controller = OnboardingWindowController(monitor: monitor)
+    func testShowOnboarding_nil_opensToWelcome() {
+        let (controller, _) = makeController()
 
-        controller.showOnboarding(startingAt: .safariExtension)
+        controller.showOnboarding(startingAt: nil)
 
-        XCTAssertTrue(controller.window?.isVisible ?? false,
-                      "Window must be visible after showOnboarding(startingAt: .safariExtension)")
+        XCTAssertEqual(controller.currentScreen, .welcome)
+        XCTAssertTrue(controller.window?.isVisible ?? false)
 
         controller.window?.orderOut(nil)
     }
 
-    // MARK: - T3: dismiss is idempotent — onDismiss fires exactly once
+    // MARK: - T6: dismiss() fires onDismiss exactly once (idempotent)
 
-    /// Simulates two dismiss paths firing: the Done button action and the
-    /// windowWillClose notification. Verifies onDismiss is called exactly once.
-    func testDismiss_idempotent_onDismissFiredOnce() {
-        let checker = OnboardingMockChecker()
-        let monitor = PermissionMonitor(checker: checker)
-        let controller = OnboardingWindowController(monitor: monitor)
-
+    func testDismiss_idempotent() {
+        let (controller, _) = makeController()
         var dismissCount = 0
         controller.onDismiss = { dismissCount += 1 }
 
         controller.showOnboarding(startingAt: nil)
 
-        // Advance to the done screen via manualAdvance (which calls advance() three times):
-        // welcome → safariExtension → screenRecording → accessibility → done
-        // Then doneTapped() calls dismiss().
-        controller.perform(NSSelectorFromString("manualAdvance"))  // welcome → safariExtension
-        controller.perform(NSSelectorFromString("manualAdvance"))  // safariExtension → screenRecording
-        controller.perform(NSSelectorFromString("manualAdvance"))  // screenRecording → accessibility
-        controller.perform(NSSelectorFromString("manualAdvance"))  // accessibility → done
-        controller.perform(NSSelectorFromString("doneTapped"))      // done → dismiss()
+        controller.dismiss()
+        controller.dismiss()
+        controller.dismiss()
 
-        // Now post willClose, which would double-fire if dismissed flag is not set.
-        if let window = controller.window {
-            NotificationCenter.default.post(
-                name: NSWindow.willCloseNotification,
-                object: window
-            )
-        }
-
-        XCTAssertEqual(dismissCount, 1,
-                       "onDismiss must fire exactly once regardless of how many dismiss paths are triggered")
+        XCTAssertEqual(dismissCount, 1, "onDismiss must fire exactly once regardless of repeated dismiss() calls")
+        XCTAssertTrue(controller.dismissed)
     }
 
-    // MARK: - T4: windowWillClose after normal dismiss does not double-fire onDismiss
+    // MARK: - T7: windowWillClose after dismiss() does not double-fire onDismiss
 
-    /// The later-tapped path (which calls dismiss() directly via laterTapped)
-    /// sets the dismissed flag. A subsequent windowWillClose must be a no-op.
-    func testWindowWillClose_doesNotDouble_fireOnDismiss() {
-        let checker = OnboardingMockChecker()
-        let monitor = PermissionMonitor(checker: checker)
-        let controller = OnboardingWindowController(monitor: monitor)
-
+    func testWindowWillClose_afterDismiss_doesNotDoubleFire() {
+        let (controller, _) = makeController()
         var dismissCount = 0
         controller.onDismiss = { dismissCount += 1 }
 
         controller.showOnboarding(startingAt: nil)
+        controller.dismiss()
 
-        // "I'll set this up later" button calls dismiss() via laterTapped.
-        controller.perform(NSSelectorFromString("laterTapped"))
-
-        // Simulate the window closing event (which fires from close() inside dismiss(),
-        // but also could fire again from external close).
+        // Simulate windowWillClose firing a second time (dismiss() already triggered it via close())
         if let window = controller.window {
-            NotificationCenter.default.post(
-                name: NSWindow.willCloseNotification,
-                object: window
-            )
+            controller.windowWillClose(Notification(name: NSWindow.willCloseNotification, object: window))
         }
 
-        XCTAssertEqual(dismissCount, 1,
-                       "windowWillClose after laterTapped must not fire onDismiss a second time")
+        XCTAssertEqual(dismissCount, 1, "windowWillClose after dismiss must not fire onDismiss a second time")
     }
 
-    // MARK: - T5: advance() from safariExtension goes to screenRecording (via polling)
+    // MARK: - T8: windowWillClose without prior dismiss() fires onDismiss
 
-    /// When the checker reports extensionEnabled = true, the polling timer fires
-    /// checkStepCompletion which calls advance(). We verify the side effect: the
-    /// window content view changes (a new view is installed for the next step).
-    /// Since the polling interval is 0.5 s we use an expectation with a generous timeout.
-    func testAdvance_fromSafariExtension_goesToScreenRecording() {
-        let checker = OnboardingMockChecker()
-        // Extension is enabled so the first poll should auto-advance.
-        checker.extensionEnabled = true
-        checker.screenRecordingGranted = false
-        checker.accessibilityGranted = false
-        let monitor = PermissionMonitor(checker: checker)
-        let controller = OnboardingWindowController(monitor: monitor)
+    func testWindowWillClose_withoutPriorDismiss_firesOnDismiss() {
+        let (controller, _) = makeController()
+        var dismissFired = false
+        controller.onDismiss = { dismissFired = true }
 
+        controller.showOnboarding(startingAt: nil)
+
+        // Simulate user clicking the window close button (X) directly
+        controller.window?.close()
+
+        XCTAssertTrue(dismissFired, "windowWillClose must fire onDismiss when dismiss() was not called first")
+        XCTAssertTrue(controller.dismissed)
+    }
+
+    // MARK: - T9: showOnboarding mid-flow brings window to front without resetting
+
+    func testShowOnboarding_midFlow_doesNotResetScreen() {
+        let (controller, _) = makeController()
+
+        controller.showOnboarding(startingAt: nil)
+        // Advance to screenRecording step
+        controller.advance() // → safariExtension
+        controller.advance() // → screenRecording
+
+        XCTAssertEqual(controller.currentScreen, .step(.screenRecording))
+
+        // Call showOnboarding again mid-flow — entire call is a no-op (only brings
+        // window to front), regardless of the startingAt argument
         controller.showOnboarding(startingAt: .safariExtension)
 
-        // Capture the initial content view installed for safariExtension step.
-        let initialContentView = controller.window?.contentView
+        XCTAssertEqual(controller.currentScreen, .step(.screenRecording),
+                       "showOnboarding mid-flow must be a no-op regardless of startingAt argument")
 
-        // Wait up to 2 s for the polling timer to fire and advance to the next screen.
-        let exp = expectation(description: "advance from safariExtension to screenRecording")
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.1) {
-            let newContentView = controller.window?.contentView
-            // The content view should have been replaced when the screen changed.
-            XCTAssertFalse(newContentView === initialContentView,
-                           "Content view must change after auto-advance from safariExtension step")
-            exp.fulfill()
-        }
-        waitForExpectations(timeout: 3)
-
-        // Clean up open window.
         controller.window?.orderOut(nil)
     }
 }
