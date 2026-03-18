@@ -7,7 +7,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
     // MARK: - Private state
 
     private var mcpServer: MCPSocketServer?
-    private var toolRouter: ToolRouter?
+    var toolRouter: ToolRouter?
     private var menuBarController: MenuBarController?
     private var onboardingWindowController: OnboardingWindowController?
     private var monitorTimer: Timer?
@@ -148,16 +148,22 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
         didReceive response: UNNotificationResponse,
         withCompletionHandler completionHandler: @escaping () -> Void
     ) {
-        if response.actionIdentifier == "stop-automation" {
+        handleNotificationAction(response.actionIdentifier)
+        completionHandler()
+    }
+
+    /// Routes a notification action identifier to the appropriate handler.
+    /// Extracted from userNotificationCenter(_:didReceive:) for testability.
+    func handleNotificationAction(_ identifier: String) {
+        if identifier == "stop-automation" {
             if let router = toolRouter {
                 router.cancelCurrentRequest()
             } else {
                 NSLog("AppDelegate: received stop-automation but toolRouter is nil")
             }
-        } else if response.actionIdentifier != UNNotificationDefaultActionIdentifier {
-            NSLog("AppDelegate: unhandled notification action identifier '%@'", response.actionIdentifier)
+        } else if identifier != UNNotificationDefaultActionIdentifier {
+            NSLog("AppDelegate: unhandled notification action identifier '%@'", identifier)
         }
-        completionHandler()
     }
 
     func userNotificationCenter(

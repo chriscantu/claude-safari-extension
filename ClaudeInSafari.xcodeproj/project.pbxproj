@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		01AD3E5F7B8C9D0E1F2A3B4C /* AppDelegateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 02AD4E6F8C9D0E1F2A3B4C5D /* AppDelegateTests.swift */; };
 		020608970AC171717C3AD738 /* MessageFramerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 48CBDB59857AA797155E19CC /* MessageFramerTests.swift */; };
 		0E751393E09E0A8E2C5E8AAA /* ToolModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = DCF900FB4B4265BA727FFA21 /* ToolModels.swift */; };
 		257435801FBA70A001BC58B6 /* GifServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 07542CB361F8FE6B0E4A5558 /* GifServiceTests.swift */; };
@@ -77,6 +78,7 @@
 /* Begin PBXFileReference section */
 		0133189C5F0296CB11A35A28 /* ClaudeInSafariExtension.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = ClaudeInSafariExtension.entitlements; sourceTree = "<group>"; };
 		02B361326E8F2C467CF43011 /* AppleScriptBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppleScriptBridge.swift; sourceTree = "<group>"; };
+		02AD4E6F8C9D0E1F2A3B4C5D /* AppDelegateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegateTests.swift; sourceTree = "<group>"; };
 		07542CB361F8FE6B0E4A5558 /* GifServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GifServiceTests.swift; sourceTree = "<group>"; };
 		14596A1FC6A28D35A07C800E /* ClaudeInSafari.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = ClaudeInSafari.entitlements; sourceTree = "<group>"; };
 		3C6A1743F9A8F1A1B1BBFDE4 /* PermissionMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PermissionMonitor.swift; sourceTree = "<group>"; };
@@ -196,6 +198,7 @@
 		A80FB5CDD3FAA1D105EE532E /* Swift */ = {
 			isa = PBXGroup;
 			children = (
+				02AD4E6F8C9D0E1F2A3B4C5D /* AppDelegateTests.swift */,
 				9C6819CDC28A43E78498350F /* AppleScriptBridgeTests.swift */,
 				C557C15A842E784429478650 /* FileServiceTests.swift */,
 				07542CB361F8FE6B0E4A5558 /* GifServiceTests.swift */,
@@ -377,6 +380,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				F8A556A293BA284872539B1F /* AppleScriptBridgeTests.swift in Sources */,
+				01AD3E5F7B8C9D0E1F2A3B4C /* AppDelegateTests.swift in Sources */,
 				3E3A0B200C0A287DA885E7A5 /* Constants.swift in Sources */,
 				50788C66B072DEF05E5A9A64 /* FileServiceTests.swift in Sources */,
 				257435801FBA70A001BC58B6 /* GifServiceTests.swift in Sources */,
