@@ -34,7 +34,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
         controller.onOpenSetup = { [weak self] in
             guard let self else { return }
             self.permissionMonitor.checkAll { [weak self] status in
-                self?.showOnboarding(startingAt: status.firstIncompleteStep)
+                self?.showOnboarding(startingAt: status.firstIncompleteStep, allComplete: status.allGranted)
             }
         }
         controller.onCheckConnection = { [weak self] in self?.checkConnection() }
@@ -63,7 +63,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
         }
     }
 
-    private func showOnboarding(startingAt step: OnboardingStep? = nil) {
+    private func showOnboarding(startingAt step: OnboardingStep? = nil, allComplete: Bool = false) {
         // Pause background monitoring while onboarding is active; it restarts on dismiss.
         monitorTimer?.invalidate()
         monitorTimer = nil
@@ -76,7 +76,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
             }
             onboardingWindowController = wc
         }
-        onboardingWindowController?.showOnboarding(startingAt: step)
+        onboardingWindowController?.showOnboarding(startingAt: step, allComplete: allComplete)
     }
 
     // MARK: - Continuous Monitoring

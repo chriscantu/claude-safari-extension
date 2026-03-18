@@ -109,6 +109,20 @@ final class OnboardingWindowControllerTests: XCTestCase {
         controller.window?.orderOut(nil)
     }
 
+    // MARK: - T5b: showOnboarding(allComplete: true) skips to done
+
+    func testShowOnboarding_allComplete_skipsToDone() {
+        let (controller, _) = makeController()
+
+        controller.showOnboarding(startingAt: nil, allComplete: true)
+
+        XCTAssertEqual(controller.currentScreen, .done,
+                       "When allComplete is true, should skip directly to done screen")
+        XCTAssertTrue(controller.window?.isVisible ?? false)
+
+        controller.window?.orderOut(nil)
+    }
+
     // MARK: - T6: dismiss() fires onDismiss exactly once (idempotent)
 
     func testDismiss_idempotent() {

@@ -65,7 +65,7 @@ final class OnboardingWindowController: NSWindowController {
 
     /// Shows the onboarding window. If `step` is non-nil, opens directly to that step's screen.
     /// If `step` is nil (the default), opens to the Welcome screen.
-    func showOnboarding(startingAt step: OnboardingStep? = nil) {
+    func showOnboarding(startingAt step: OnboardingStep? = nil, allComplete: Bool = false) {
         // If the window is already visible and mid-flow, just bring it to front
         // without resetting state, to avoid interrupting the user mid-step.
         if let existingWindow = window, existingWindow.isVisible {
@@ -79,6 +79,8 @@ final class OnboardingWindowController: NSWindowController {
         }
         if let step = step {
             show(screen: .step(step))
+        } else if allComplete {
+            show(screen: .done)
         } else {
             show(screen: .welcome)
         }
@@ -499,8 +501,12 @@ final class OnboardingWindowController: NSWindowController {
         let copy = NSButton(title: "Copy", target: self, action: #selector(copyExamplePrompt))
         copy.bezelStyle = .rounded
         copy.font = NSFont.systemFont(ofSize: 12, weight: .semibold)
-        copy.contentTintColor = .claudeOrange
-        copy.frame = NSRect(x: cardWidth - 72, y: 6, width: 58, height: 26)
+        copy.wantsLayer = true
+        copy.layer?.backgroundColor = NSColor.claudeOrange.cgColor
+        copy.layer?.cornerRadius = 6
+        copy.contentTintColor = .white
+        copy.isBordered = false
+        copy.frame = NSRect(x: cardWidth - 76, y: 8, width: 62, height: 26)
         card.addSubview(copy)
         copyButton = copy
 
