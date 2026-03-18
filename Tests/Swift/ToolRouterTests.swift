@@ -847,4 +847,42 @@ final class ToolRouterDispatchTests: XCTestCase {
     func testParseZoomRegion_missingRegion_returnsNil() {
         XCTAssertNil(router.parseZoomRegion([:]))
     }
+
+    // MARK: - Startup Cleanup (Spec 023 H1 + M1)
+
+    func testPerformStartupCleanup_truncatesQueue() throws {
+        guard let url = AppConstants.pendingRequestsQueueURL else {
+            throw XCTSkip("App Group unavailable in test environment")
+        }
+        let dir = url.deletingLastPathComponent()
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        try JSONEncoder().encode(["stale-request-1", "stale-request-2"]).write(to: url, options: .atomic)
+
+        let router = ToolRouter()
+        router.performStartupCleanup()
+
+        let data = try Data(contentsOf: url)
+        let queue = try JSONDecoder().decode([String].self, from: data)
+        XCTAssertEqual(queue, [], "Queue should be empty after startup cleanup")
+    }
+
+    func testPerformStartupCleanup_deletesResponseFiles() throws {
+        guard let dir = AppConstants.responsesDirectoryURL else {
+            throw XCTSkip("App Group unavailable in test environment")
+        }
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        try "{}".data(using: .utf8)!.write(to: dir.appendingPathComponent("orphan-1.json"), options: .atomic)
+        try "{}".data(using: .utf8)!.write(to: dir.appendingPathComponent("orphan-2.json"), options: .atomic)
+
+        let router = ToolRouter()
+        router.performStartupCleanup()
+
+        let remaining = try FileManager.default.contentsOfDirectory(atPath: dir.path)
+        XCTAssertEqual(remaining.count, 0, "All response files should be deleted after startup cleanup")
+    }
+
+    func testPerformStartupCleanup_appGroupUnavailable_doesNotCrash() {
+        let router = ToolRouter()
+        router.performStartupCleanup()
+    }
 }

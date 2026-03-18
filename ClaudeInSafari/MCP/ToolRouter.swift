@@ -37,6 +37,29 @@ class ToolRouter: MCPSocketServerDelegate {
         self.notificationCenter = notificationCenter
     }
 
+    /// One-time startup cleanup: truncate stale pending requests and delete orphaned response files.
+    /// Called by AppDelegate before the socket server starts accepting connections.
+    /// All operations are best-effort — if the App Group is unavailable, cleanup is skipped.
+    func performStartupCleanup() {
+        // H1: Truncate pending request queue — any entries are from a dead session
+        if let queueURL = AppConstants.pendingRequestsQueueURL {
+            let dir = queueURL.deletingLastPathComponent()
+            try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            try? JSONEncoder().encode([String]()).write(to: queueURL, options: .atomic)
+        }
+
+        // M1: Delete all orphaned response files
+        if let responsesDir = AppConstants.responsesDirectoryURL {
+            if let files = try? FileManager.default.contentsOfDirectory(atPath: responsesDir.path) {
+                for file in files where file.hasSuffix(".json") {
+                    try? FileManager.default.removeItem(atPath: responsesDir.appendingPathComponent(file).path)
+                }
+            }
+        }
+
+        NSLog("ToolRouter: startup cleanup complete")
+    }
+
     /// Staging set for native tools whose handler branch is not yet wired up in handleToolCall().
     /// Empty by default. Add a tool name here to have it return "not yet implemented" instead of
     /// being silently forwarded to the extension (useful while developing a new native handler).
