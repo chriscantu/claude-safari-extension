@@ -102,6 +102,18 @@ final class OnboardingWindowController: NSWindowController {
         currentScreen = screen
         window?.contentView = buildView(for: screen)
         if case .step(let step) = screen {
+            if step == .screenRecording {
+                // Register the app in TCC so it appears in System Settings → Screen Recording.
+                // Called once per step entry. Safe — ScreenshotService now uses
+                // CGPreflightScreenCaptureAccess() and will not create a competing dialog loop.
+                CGRequestScreenCaptureAccess()
+            }
+            if step == .accessibility {
+                // Register the app in TCC so it appears in System Settings → Accessibility.
+                // Shows the system prompt directing the user to grant access. Without this,
+                // the app may never appear in the Accessibility list after a rebuild.
+                monitor.checker.requestAccessibility()
+            }
             startPolling(for: step)
         }
     }

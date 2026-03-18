@@ -17,6 +17,7 @@ private final class OnboardingMockChecker: PermissionChecking {
     func getExtensionEnabled(completion: @escaping (Bool) -> Void) {
         completion(extensionEnabled)
     }
+    func requestAccessibility() {}
 }
 
 // MARK: - OnboardingWindowControllerTests

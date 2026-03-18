@@ -9,11 +9,14 @@ final class MockPermissionChecker: PermissionChecking {
     var screenRecordingGranted = false
     var extensionEnabled = false
 
+    var requestAccessibilityCalled = false
+
     func isAccessibilityGranted() -> Bool { accessibilityGranted }
     func isScreenRecordingGranted() -> Bool { screenRecordingGranted }
     func getExtensionEnabled(completion: @escaping (Bool) -> Void) {
         completion(extensionEnabled)
     }
+    func requestAccessibility() { requestAccessibilityCalled = true }
 }
 
 // MARK: - Tests

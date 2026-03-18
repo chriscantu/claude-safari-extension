@@ -43,6 +43,10 @@ protocol PermissionChecking {
     /// completion, so callers of `checkAll` do not need to add their own dispatch.
     /// Direct callers of this protocol method are responsible for their own queue management.
     func getExtensionEnabled(completion: @escaping (Bool) -> Void)
+
+    /// Registers the app in the TCC database for Accessibility and shows the system prompt
+    /// directing the user to System Settings. Call once when entering the Accessibility step.
+    func requestAccessibility()
 }
 
 // MARK: - SystemPermissionChecker
@@ -73,6 +77,11 @@ struct SystemPermissionChecker: PermissionChecking {
             completion(state?.isEnabled ?? false)
         }
     }
+
+    func requestAccessibility() {
+        let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
+        AXIsProcessTrustedWithOptions(options)
+    }
 }
 
 // MARK: - PermissionMonitor
@@ -80,7 +89,13 @@ struct SystemPermissionChecker: PermissionChecking {
 /// Checks permission state and delivers `PermissionStatus` on the main queue.
 /// Must be called from the main thread. Not thread-safe for concurrent callers.
 final class PermissionMonitor {
-    private let checker: PermissionChecking
+    let checker: PermissionChecking
+
+    /// Debounce state for `extensionEnabled`. SFSafariExtensionManager can flicker
+    /// between true/false on rapid polls; we require two consecutive identical results
+    /// before changing the reported value.
+    private var lastExtensionEnabled: Bool?
+    private var pendingExtensionEnabled: Bool?
 
     init(checker: PermissionChecking = SystemPermissionChecker()) {
         self.checker = checker
@@ -90,9 +105,22 @@ final class PermissionMonitor {
     func checkAll(completion: @escaping (PermissionStatus) -> Void) {
         let accessibility = checker.isAccessibilityGranted()
         let screenRecording = checker.isScreenRecordingGranted()
-        checker.getExtensionEnabled { extensionEnabled in
+        checker.getExtensionEnabled { [weak self] extensionEnabled in
+            guard let self else { return }
+            // Debounce: only adopt a new value after two consecutive identical reads.
+            let stable: Bool
+            if extensionEnabled == self.pendingExtensionEnabled {
+                // Two consecutive reads agree — adopt this value.
+                self.lastExtensionEnabled = extensionEnabled
+                stable = extensionEnabled
+            } else {
+                // First read of a new value — buffer it but keep the old value.
+                self.pendingExtensionEnabled = extensionEnabled
+                stable = self.lastExtensionEnabled ?? extensionEnabled
+            }
+
             let status = PermissionStatus(
-                extensionEnabled: extensionEnabled,
+                extensionEnabled: stable,
                 screenRecording: screenRecording,
                 accessibility: accessibility
             )
