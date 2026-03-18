@@ -78,6 +78,7 @@ claude-safari-extension/
 │   │
 │   └── Tests/                               # All test files
 │       ├── Swift/                            # XCTest suites for native app
+│       │   ├── AppDelegateTests.swift
 │       │   ├── AppleScriptBridgeTests.swift
 │       │   ├── FileServiceTests.swift
 │       │   ├── GifServiceTests.swift
