@@ -39,6 +39,7 @@
 		FC4CA75768D2C5FD6249AE6B /* GifService.swift in Sources */ = {isa = PBXBuildFile; fileRef = C53DE74FE809B179A899A57B /* GifService.swift */; };
 		FF56AA2D0EFD16F29AFA30CD /* PermissionMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3C6A1743F9A8F1A1B1BBFDE4 /* PermissionMonitor.swift */; };
 		A1B2C3D4E5F60718293A4B5C /* BrandColors.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4E5F6A7B8C9D0E1F2A3B4C5 /* BrandColors.swift */; };
+		C6D7E8F9A0B1C2D3E4F5A6B7 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = E7F8A9B0C1D2E3F4A5B6C7D8 /* Assets.xcassets */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -109,6 +110,7 @@
 		F1D372117A4FF27A236BD5F8 /* Constants.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Constants.swift; sourceTree = "<group>"; };
 		F7A729444DE88ABCACE1FBD2 /* MCPMessageTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MCPMessageTests.swift; sourceTree = "<group>"; };
 		D4E5F6A7B8C9D0E1F2A3B4C5 /* BrandColors.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrandColors.swift; sourceTree = "<group>"; };
+		E7F8A9B0C1D2E3F4A5B6C7D8 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -119,6 +121,7 @@
 				70785E49FB0004F0F29E498A /* MCP */,
 				ECEC39715D60EE485DABE324 /* Models */,
 				607F690CCCD242C1E420B4A0 /* Services */,
+				E7F8A9B0C1D2E3F4A5B6C7D8 /* Assets.xcassets */,
 				14596A1FC6A28D35A07C800E /* ClaudeInSafari.entitlements */,
 				C2582CE7621B3778BA974E87 /* Info.plist */,
 			);
@@ -260,6 +263,7 @@
 			buildConfigurationList = 0EB43B3D7A2E7EF8BB9A9B41 /* Build configuration list for PBXNativeTarget "ClaudeInSafari" */;
 			buildPhases = (
 				B8486C7D659C51D7756DDFEE /* Sources */,
+				F1A2B3C4D5E6F7081920A1B2 /* Resources */,
 				D90BE1AC5B30C9E0CC7E4E76 /* Embed Foundation Extensions */,
 			);
 			buildRules = (
@@ -321,6 +325,17 @@
 			);
 		};
 /* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		F1A2B3C4D5E6F7081920A1B2 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				C6D7E8F9A0B1C2D3E4F5A6B7 /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
 
 /* Begin PBXShellScriptBuildPhase section */
 		16403CAD72195DCF96E7D3AD /* Copy Extension Resources */ = {

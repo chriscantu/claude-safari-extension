@@ -12,6 +12,7 @@ claude-safari-extension/
 │   ├── ClaudeInSafari.xcodeproj
 │   │
 │   ├── ClaudeInSafari/                      # macOS App Target
+│   │   ├── Assets.xcassets/                  # Asset catalog (AppIcon)
 │   │   ├── App/
 │   │   │   ├── AppDelegate.swift            # App lifecycle — wires menu bar, onboarding, MCP server, notifications
 │   │   │   ├── BrandColors.swift            # NSColor extension: claudeOrange, claudeOrangeLight
