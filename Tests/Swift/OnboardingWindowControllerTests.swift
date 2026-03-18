@@ -331,7 +331,96 @@ final class OnboardingWindowControllerTests: XCTestCase {
         XCTAssertNil(controller.pollTimer, "pollTimer must be nil after dismiss")
     }
 
-    // MARK: - T16: Step entry silently registers in TCC but does not show system dialogs
+    // MARK: - Done screen "Try this" card
+
+    // MARK: - T16: Done screen contains the example prompt text
+
+    func testDoneScreen_containsExamplePrompt() {
+        let (controller, _) = makeController()
+        controller.showOnboarding(startingAt: nil)
+        for _ in 0..<4 { controller.advance() }
+        XCTAssertEqual(controller.currentScreen, .done)
+
+        // Walk the view hierarchy to find a text field containing the example prompt
+        let contentView = controller.window?.contentView
+        let promptField = findTextField(in: contentView, matching: OnboardingWindowController.examplePrompt)
+        XCTAssertNotNil(promptField, "Done screen must contain a text field with the example prompt")
+        XCTAssertTrue(promptField?.isSelectable ?? false, "Example prompt must be selectable for copy")
+
+        controller.window?.orderOut(nil)
+    }
+
+    // MARK: - T17: Done screen contains "Try this" label
+
+    func testDoneScreen_containsTryThisLabel() {
+        let (controller, _) = makeController()
+        controller.showOnboarding(startingAt: nil)
+        for _ in 0..<4 { controller.advance() }
+
+        let contentView = controller.window?.contentView
+        let tryLabel = findTextField(in: contentView, matching: "Try this in Claude Code:")
+        XCTAssertNotNil(tryLabel, "Done screen must contain a 'Try this in Claude Code:' label")
+
+        controller.window?.orderOut(nil)
+    }
+
+    // MARK: - T18: Done screen contains a Copy button
+
+    func testDoneScreen_containsCopyButton() {
+        let (controller, _) = makeController()
+        controller.showOnboarding(startingAt: nil)
+        for _ in 0..<4 { controller.advance() }
+
+        let contentView = controller.window?.contentView
+        let copyButton = findButton(in: contentView, titled: "Copy")
+        XCTAssertNotNil(copyButton, "Done screen must contain a 'Copy' button")
+
+        controller.window?.orderOut(nil)
+    }
+
+    // MARK: - T19: Copy button places example prompt on pasteboard
+
+    func testCopyButton_placesPromptOnPasteboard() {
+        let (controller, _) = makeController()
+        controller.showOnboarding(startingAt: nil)
+        for _ in 0..<4 { controller.advance() }
+
+        let contentView = controller.window?.contentView
+        let copyButton = findButton(in: contentView, titled: "Copy")
+        XCTAssertNotNil(copyButton)
+
+        // Simulate clicking the Copy button
+        copyButton?.performClick(nil)
+
+        let pasteboardString = NSPasteboard.general.string(forType: .string)
+        XCTAssertEqual(pasteboardString, OnboardingWindowController.examplePrompt,
+                       "Clicking Copy must place the example prompt on the pasteboard")
+
+        controller.window?.orderOut(nil)
+    }
+
+    // MARK: - View hierarchy helpers
+
+    private func findTextField(in view: NSView?, matching text: String) -> NSTextField? {
+        guard let view = view else { return nil }
+        if let tf = view as? NSTextField, tf.stringValue == text { return tf }
+        for sub in view.subviews {
+            if let found = findTextField(in: sub, matching: text) { return found }
+        }
+        return nil
+    }
+
+    private func findButton(in view: NSView?, titled title: String) -> NSButton? {
+        guard let view = view else { return nil }
+        if let btn = view as? NSButton, btn.title == title { return btn }
+        for sub in view.subviews {
+            if let found = findButton(in: sub, titled: title) { return found }
+        }
+        return nil
+    }
+
+    // MARK: - T20: Step entry silently registers in TCC but does not show system dialogs
+    // (was T16 before Try-this tests were added)
 
     func testStepEntry_registersButDoesNotPrompt() {
         let (controller, checker) = makeController()

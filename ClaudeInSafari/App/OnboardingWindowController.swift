@@ -434,32 +434,85 @@ final class OnboardingWindowController: NSWindowController {
 
     // MARK: Done
 
+    static let examplePrompt = "Go to news.ycombinator.com and tell me what the top 5 stories are about"
+
     private func buildDoneView() -> NSView {
         let root = paddedRoot()
 
         // Checkmark icon
         let checkIcon = makeIconView(size: Layout.iconSizeLg, corner: Layout.cornerLg, content: checkmarkIconImage(size: Layout.iconSizeLg * 0.55))
-        checkIcon.frame.origin = CGPoint(x: (Layout.windowWidth - Layout.iconSizeLg) / 2, y: Layout.windowHeight - Layout.padding - Layout.iconSizeLg - 20)
+        checkIcon.frame.origin = CGPoint(x: (Layout.windowWidth - Layout.iconSizeLg) / 2, y: Layout.windowHeight - Layout.padding - Layout.iconSizeLg - 12)
         root.addSubview(checkIcon)
 
         let title = makeLabel("You're all set!", size: 22, weight: .bold)
         title.alignment = .center
-        title.frame = NSRect(x: Layout.padding, y: checkIcon.frame.minY - 48, width: Layout.windowWidth - Layout.padding * 2, height: 30)
+        title.frame = NSRect(x: Layout.padding, y: checkIcon.frame.minY - 42, width: Layout.windowWidth - Layout.padding * 2, height: 30)
         root.addSubview(title)
 
-        let body = makeLabel("Claude Code can now use Safari. Ask Claude to open a page, fill a form, or take a screenshot — it'll just work.\n\nLook for the robot icon in your menu bar whenever the connection is active.", size: 13, weight: .regular, color: .secondaryLabelColor, wraps: true)
+        let body = makeLabel("Claude Code can now use Safari. Look for the robot icon in your menu bar whenever the connection is active.", size: 13, weight: .regular, color: .secondaryLabelColor, wraps: true)
         body.alignment = .center
-        body.frame = NSRect(x: Layout.padding, y: title.frame.minY - 90, width: Layout.windowWidth - Layout.padding * 2, height: 84)
+        body.frame = NSRect(x: Layout.padding, y: title.frame.minY - 52, width: Layout.windowWidth - Layout.padding * 2, height: 44)
         root.addSubview(body)
 
+        // "Try this" card
+        let cardInset: CGFloat = Layout.padding
+        let cardWidth = Layout.windowWidth - cardInset * 2
+        let cardHeight: CGFloat = 120
+        let cardY = body.frame.minY - cardHeight - 12
+        let accentWidth: CGFloat = 4
+        let innerPadding: CGFloat = 18
+
+        let card = NSView(frame: NSRect(x: cardInset, y: cardY, width: cardWidth, height: cardHeight))
+        card.wantsLayer = true
+        card.layer?.backgroundColor = NSColor.claudeOrangeLight.cgColor
+        card.layer?.cornerRadius = 10
+        root.addSubview(card)
+
+        // Left accent bar
+        let accent = NSView(frame: NSRect(x: 0, y: 0, width: accentWidth, height: cardHeight))
+        accent.wantsLayer = true
+        accent.layer?.backgroundColor = NSColor.claudeOrange.cgColor
+        // Round only left corners
+        accent.layer?.cornerRadius = 10
+        accent.layer?.maskedCorners = [.layerMinXMinYCorner, .layerMinXMaxYCorner]
+        card.addSubview(accent)
+
+        let textX = accentWidth + innerPadding
+        let textWidth = cardWidth - textX - innerPadding
+
+        let tryLabel = makeLabel("Try this in Claude Code:", size: 13, weight: .bold, color: .claudeOrange)
+        tryLabel.frame = NSRect(x: textX, y: cardHeight - 32, width: textWidth, height: 20)
+        card.addSubview(tryLabel)
+
+        let prompt = NSTextField(wrappingLabelWithString: Self.examplePrompt)
+        prompt.font = NSFont.monospacedSystemFont(ofSize: 13.5, weight: .medium)
+        prompt.textColor = .black
+        prompt.isSelectable = true
+        prompt.drawsBackground = false
+        prompt.isBezeled = false
+        prompt.frame = NSRect(x: textX, y: 36, width: textWidth, height: cardHeight - 68)
+        card.addSubview(prompt)
+
+        let copy = NSButton(title: "Copy", target: self, action: #selector(copyExamplePrompt))
+        copy.bezelStyle = .rounded
+        copy.font = NSFont.systemFont(ofSize: 12, weight: .semibold)
+        copy.contentTintColor = .claudeOrange
+        copy.frame = NSRect(x: cardWidth - 72, y: 6, width: 58, height: 26)
+        card.addSubview(copy)
+
         let done = makeButton("Done", action: #selector(doneTapped), primary: true)
-        done.frame = NSRect(x: Layout.padding + 60, y: 60, width: Layout.windowWidth - (Layout.padding + 60) * 2, height: 36)
+        done.frame = NSRect(x: Layout.padding + 60, y: 30, width: Layout.windowWidth - (Layout.padding + 60) * 2, height: 36)
         root.addSubview(done)
 
         return root
     }
 
     @objc private func doneTapped() { dismiss() }
+
+    @objc private func copyExamplePrompt() {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(Self.examplePrompt, forType: .string)
+    }
 
     // MARK: - UI helpers
 
