@@ -497,6 +497,7 @@ final class OnboardingWindowController: NSWindowController {
         copy.bezelStyle = .rounded
         copy.font = NSFont.systemFont(ofSize: 12, weight: .semibold)
         copy.contentTintColor = .claudeOrange
+        copy.tag = 999
         copy.frame = NSRect(x: cardWidth - 72, y: 6, width: 58, height: 26)
         card.addSubview(copy)
 
@@ -511,7 +512,17 @@ final class OnboardingWindowController: NSWindowController {
 
     @objc private func copyExamplePrompt() {
         NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(Self.examplePrompt, forType: .string)
+        let ok = NSPasteboard.general.setString(Self.examplePrompt, forType: .string)
+        if !ok {
+            NSLog("OnboardingWindowController: failed to write example prompt to pasteboard")
+        }
+        // Brief "Copied!" / "Failed" feedback on the button
+        if let button = window?.contentView?.viewWithTag(999) as? NSButton {
+            button.title = ok ? "Copied!" : "Failed"
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                button.title = "Copy"
+            }
+        }
     }
 
     // MARK: - UI helpers

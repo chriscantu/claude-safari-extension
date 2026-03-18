@@ -396,6 +396,10 @@ final class OnboardingWindowControllerTests: XCTestCase {
         XCTAssertEqual(pasteboardString, OnboardingWindowController.examplePrompt,
                        "Clicking Copy must place the example prompt on the pasteboard")
 
+        // Button should show "Copied!" feedback
+        XCTAssertEqual(copyButton?.title, "Copied!",
+                       "Copy button must show 'Copied!' after successful copy")
+
         controller.window?.orderOut(nil)
     }
 
@@ -420,7 +424,6 @@ final class OnboardingWindowControllerTests: XCTestCase {
     }
 
     // MARK: - T20: Step entry silently registers in TCC but does not show system dialogs
-    // (was T16 before Try-this tests were added)
 
     func testStepEntry_registersButDoesNotPrompt() {
         let (controller, checker) = makeController()
