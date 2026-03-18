@@ -244,4 +244,57 @@ final class MCPSocketServerTests: XCTestCase {
         // MessageFramerTests.testDeframeOversizedMessage.
         throw XCTSkip("10 MB socket stream required — O(n²) scan makes this ~43 s; covered by MessageFramerTests.testDeframeOversizedMessage")
     }
+
+    // MARK: - Stale socket cleanup
+
+    func testStart_removesExistingSockFilesFromDirectory() throws {
+        let username = NSUserName()
+        let directory = "/tmp/claude-mcp-browser-bridge-\(username)"
+
+        // Ensure directory exists
+        try FileManager.default.createDirectory(
+            atPath: directory,
+            withIntermediateDirectories: true,
+            attributes: nil
+        )
+
+        // Create a dummy stale socket file
+        let stalePath = "\(directory)/99999.sock"
+        FileManager.default.createFile(atPath: stalePath, contents: nil)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: stalePath), "Precondition: stale file exists")
+
+        // Start the server — it should clean up stale .sock files
+        let server = MCPSocketServer(framer: MessageFramer())
+        try server.start()
+        defer { server.stop() }
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: stalePath),
+                       "Stale .sock file should be removed on start")
+    }
+
+    func testStart_preservesNonSockFilesInDirectory() throws {
+        let username = NSUserName()
+        let directory = "/tmp/claude-mcp-browser-bridge-\(username)"
+
+        // Ensure directory exists
+        try FileManager.default.createDirectory(
+            atPath: directory,
+            withIntermediateDirectories: true,
+            attributes: nil
+        )
+
+        // Create a non-.sock file
+        let otherPath = "\(directory)/keepme.txt"
+        FileManager.default.createFile(atPath: otherPath, contents: Data("hello".utf8))
+
+        let server = MCPSocketServer(framer: MessageFramer())
+        try server.start()
+        defer { server.stop() }
+
+        XCTAssertTrue(FileManager.default.fileExists(atPath: otherPath),
+                      "Non-.sock files should be preserved")
+
+        // Cleanup
+        try? FileManager.default.removeItem(atPath: otherPath)
+    }
 }
