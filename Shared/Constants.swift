@@ -28,6 +28,11 @@ enum AppConstants {
         responsesDirectoryURL?.appendingPathComponent("\(requestId).json")
     }
 
+    /// URL for the extension generation marker file (written by SafariWebExtensionHandler on extension_ready).
+    static var extensionGenerationURL: URL? {
+        appGroupContainerURL?.appendingPathComponent("extension_generation")
+    }
+
     /// File names for App Group communication.
     enum UserDefaultsKeys {
         /// File name for the FIFO queue of pending tool requests (within the App Group container).
