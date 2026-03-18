@@ -982,4 +982,32 @@ final class ToolRouterDispatchTests: XCTestCase {
         let errorMsg = (json?["error"] as? [String: Any])?["message"] as? String ?? ""
         XCTAssertTrue(errorMsg.contains("timeout"), "Expected timeout error, got: \(errorMsg)")
     }
+
+    // MARK: - Response File Cleanup (Spec 023 M1)
+
+    func testFailPendingRequest_deletesResponseFile() throws {
+        guard let dir = AppConstants.responsesDirectoryURL else {
+            throw XCTSkip("App Group unavailable in test environment")
+        }
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+
+        let requestId = "test-cleanup-req"
+        let responseFile = dir.appendingPathComponent("\(requestId).json")
+        try "{}".data(using: .utf8)!.write(to: responseFile, options: .atomic)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: responseFile.path), "Precondition: file exists")
+
+        let mockServer = MockMCPSocketServer()
+        let router = ToolRouter(
+            screenshotService: ScreenshotService(),
+            gifService: GifService(),
+            fileService: FileService()
+        )
+        router.setServer(mockServer)
+
+        router.injectPendingRequest(requestId: requestId, clientId: "test-client", jsonrpcId: 1)
+        router.failPendingRequestForTest(requestId: requestId, message: "test timeout")
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: responseFile.path),
+                        "Response file should be deleted after failPendingRequest")
+    }
 }

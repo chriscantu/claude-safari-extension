@@ -770,6 +770,11 @@ class ToolRouter: MCPSocketServerDelegate {
     }
 
     private func failPendingRequest(requestId: String, message: String) {
+        // M1: Delete the response file to prevent orphans
+        if let url = AppConstants.responseFileURL(for: requestId) {
+            try? FileManager.default.removeItem(at: url)
+        }
+
         pendingRequestsLock.lock()
         let pending = pendingRequests.removeValue(forKey: requestId)
         pendingToolContext.removeValue(forKey: requestId)
@@ -777,6 +782,11 @@ class ToolRouter: MCPSocketServerDelegate {
         if let pending = pending {
             sendError(id: pending.jsonrpcId, code: -32000, message: message, to: pending.clientId)
         }
+    }
+
+    /// Test-only: call failPendingRequest from tests.
+    func failPendingRequestForTest(requestId: String, message: String) {
+        failPendingRequest(requestId: requestId, message: message)
     }
 
     // MARK: - Extension Queue
