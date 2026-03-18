@@ -149,7 +149,7 @@ final class MenuBarController {
             fixItem.attributedTitle = NSAttributedString(
                 string: "🔧  Fix This →",
                 attributes: [
-                    .foregroundColor: NSColor(red: 0.851, green: 0.467, blue: 0.341, alpha: 1),
+                    .foregroundColor: NSColor.claudeOrange,
                     .font: NSFont.systemFont(ofSize: 13, weight: .bold)
                 ]
             )
@@ -188,7 +188,7 @@ final class MenuBarController {
         let avatar = NSView(frame: NSRect(x: 12, y: 10, width: avatarSize, height: avatarSize))
         avatar.wantsLayer = true
         avatar.layer?.cornerRadius = 8
-        avatar.layer?.backgroundColor = NSColor(red: 0.851, green: 0.467, blue: 0.341, alpha: 1).cgColor
+        avatar.layer?.backgroundColor = NSColor.claudeOrange.cgColor
         view.addSubview(avatar)
 
         // Title
@@ -234,12 +234,12 @@ final class MenuBarController {
     @objc private func checkConnection() { onCheckConnection?() }
     @objc private func openSetup()       { onOpenSetup?() }
     @objc private func openSafari() {
-        if let url = URL(string: "safari://") {
-            if !NSWorkspace.shared.open(url) {
-                NSLog("MenuBarController: failed to open safari://")
+        let safariURL = URL(fileURLWithPath: "/Applications/Safari.app")
+        let config = NSWorkspace.OpenConfiguration()
+        NSWorkspace.shared.openApplication(at: safariURL, configuration: config) { _, error in
+            if let error = error {
+                NSLog("MenuBarController: failed to open Safari — %@", error.localizedDescription)
             }
-        } else {
-            NSLog("MenuBarController: malformed URL literal safari://")
         }
     }
     @objc private func quitApp()         { NSApplication.shared.terminate(nil) }

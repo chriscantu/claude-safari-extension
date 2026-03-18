@@ -14,6 +14,7 @@ claude-safari-extension/
 │   ├── ClaudeInSafari/                      # macOS App Target
 │   │   ├── App/
 │   │   │   ├── AppDelegate.swift            # App lifecycle — wires menu bar, onboarding, MCP server, notifications
+│   │   │   ├── BrandColors.swift            # NSColor extension: claudeOrange, claudeOrangeLight
 │   │   │   ├── MenuBarController.swift      # NSStatusItem, MenuBarState enum, icon compositing, menu construction
 │   │   │   ├── OnboardingWindowController.swift  # 5-screen setup wizard: Welcome → 3 permission steps → Done
 │   │   │   └── PermissionMonitor.swift      # PermissionChecking protocol, SystemPermissionChecker, polling

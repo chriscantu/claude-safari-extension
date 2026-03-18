@@ -2,13 +2,7 @@
 import Cocoa
 import SafariServices
 
-// MARK: - Color + layout constants
-
-private extension NSColor {
-    /// Claude / Anthropic brand orange
-    static let claudeOrange = NSColor(red: 0.851, green: 0.467, blue: 0.341, alpha: 1)
-    static let claudeOrangeLight = NSColor(red: 0.961, green: 0.929, blue: 0.910, alpha: 1)
-}
+// MARK: - Layout constants
 
 private enum Layout {
     static let windowWidth: CGFloat  = 440

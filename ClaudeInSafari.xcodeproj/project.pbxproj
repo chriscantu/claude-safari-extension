@@ -38,6 +38,7 @@
 		FA97D65DA63E1D2123E0014F /* MenuBarController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 96906F7FF10A8AF6F6E0CB2B /* MenuBarController.swift */; };
 		FC4CA75768D2C5FD6249AE6B /* GifService.swift in Sources */ = {isa = PBXBuildFile; fileRef = C53DE74FE809B179A899A57B /* GifService.swift */; };
 		FF56AA2D0EFD16F29AFA30CD /* PermissionMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3C6A1743F9A8F1A1B1BBFDE4 /* PermissionMonitor.swift */; };
+		A1B2C3D4E5F60718293A4B5C /* BrandColors.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4E5F6A7B8C9D0E1F2A3B4C5 /* BrandColors.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -107,6 +108,7 @@
 		EFD3A85665B31B76E55FCDE6 /* ToolRouterNotificationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolRouterNotificationTests.swift; sourceTree = "<group>"; };
 		F1D372117A4FF27A236BD5F8 /* Constants.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Constants.swift; sourceTree = "<group>"; };
 		F7A729444DE88ABCACE1FBD2 /* MCPMessageTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MCPMessageTests.swift; sourceTree = "<group>"; };
+		D4E5F6A7B8C9D0E1F2A3B4C5 /* BrandColors.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrandColors.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -127,6 +129,7 @@
 			isa = PBXGroup;
 			children = (
 				EAD6A30A647A7F4F5DC5DEA3 /* AppDelegate.swift */,
+				D4E5F6A7B8C9D0E1F2A3B4C5 /* BrandColors.swift */,
 				9954643B23BF0AF20F074015 /* main.swift */,
 				96906F7FF10A8AF6F6E0CB2B /* MenuBarController.swift */,
 				4E5E2B99CB3C4EDAEB877794 /* OnboardingWindowController.swift */,
@@ -377,6 +380,7 @@
 			files = (
 				A9635C5FE604D747DE0D1D62 /* AppDelegate.swift in Sources */,
 				B0B3DAD82B9C21C2DF890362 /* AppleScriptBridge.swift in Sources */,
+				A1B2C3D4E5F60718293A4B5C /* BrandColors.swift in Sources */,
 				921D7ABA46275FD600060ED6 /* Constants.swift in Sources */,
 				30EB2D0811612DBB6A50EF32 /* FileService.swift in Sources */,
 				FC4CA75768D2C5FD6249AE6B /* GifService.swift in Sources */,
