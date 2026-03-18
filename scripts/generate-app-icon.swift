@@ -6,7 +6,7 @@
 import Cocoa
 
 // Claude brand orange (#D97757) — keep in sync with BrandColors.swift
-let brandOrange = NSColor(red: 0.851, green: 0.467, blue: 0.341, alpha: 1)
+let brandOrange = NSColor(srgbRed: 0.851, green: 0.467, blue: 0.341, alpha: 1)
 
 /// Renders the icon at exact pixel dimensions using NSBitmapImageRep
 /// (bypasses Retina backing-scale that lockFocus would apply).
