@@ -24,6 +24,8 @@ class SafariWebExtensionHandler: NSObject, NSExtensionRequestHandling {
             handleToolResponse(message: message, context: context)
         case "status":
             handleStatusRequest(context: context)
+        case "extension_ready":
+            handleExtensionReady(message: message, context: context)
         default:
             Self.logger.warning("Unknown message type: \(messageType)")
             respond(with: ["status": "error", "message": "Unknown message type"], context: context)
@@ -88,6 +90,14 @@ class SafariWebExtensionHandler: NSObject, NSExtensionRequestHandling {
             isConnected = value.trimmingCharacters(in: .whitespacesAndNewlines) == "1"
         }
         respond(with: ["status": "ok", "mcpConnected": isConnected], context: context)
+    }
+
+    private func handleExtensionReady(message: [String: Any], context: NSExtensionContext) {
+        let generation = message["generation"] as? String ?? ""
+        if let url = AppConstants.extensionGenerationURL {
+            try? generation.data(using: .utf8)?.write(to: url, options: .atomic)
+        }
+        respond(with: ["status": "ok"], context: context)
     }
 
     // MARK: - Helpers
