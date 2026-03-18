@@ -186,6 +186,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
             toolRouter?.setServer(server)
         }
 
+        toolRouter?.performStartupCleanup()
+
         do {
             try mcpServer?.start()
             NSLog("MCP Socket Server started at: \(mcpServer?.socketPath ?? "unknown")")
