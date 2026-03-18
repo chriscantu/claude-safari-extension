@@ -363,13 +363,13 @@ if (typeof browser.runtime !== "undefined" && browser.runtime.onMessage) {
 }
 
 // H2 (Spec 023): Send generation marker so the native app can detect background page reloads.
-// Fire-and-forget — if the native app is not running, this fails silently.
+// If this fails, reload detection is disabled for this session (ToolRouter sees nil generation).
 var extensionGeneration = Date.now() + "-" + Math.random();
 browser.runtime.sendNativeMessage(NATIVE_APP_ID, {
     type: "extension_ready",
     generation: extensionGeneration,
 }).catch(function (e) {
-    console.warn("extension_ready: failed to send generation marker (non-critical):", e && e.message);
+    console.error("extension_ready: FAILED to send generation marker — reload detection disabled for this session:", e && e.message);
 });
 
 // Start polling when the extension loads

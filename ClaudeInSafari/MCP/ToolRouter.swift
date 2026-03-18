@@ -44,16 +44,29 @@ class ToolRouter: MCPSocketServerDelegate {
         // H1: Truncate pending request queue — any entries are from a dead session
         if let queueURL = AppConstants.pendingRequestsQueueURL {
             let dir = queueURL.deletingLastPathComponent()
-            try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-            try? JSONEncoder().encode([String]()).write(to: queueURL, options: .atomic)
+            do {
+                try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+                try JSONEncoder().encode([String]()).write(to: queueURL, options: .atomic)
+            } catch {
+                NSLog("ToolRouter: startup cleanup failed to truncate queue: %@", error.localizedDescription)
+            }
+        } else {
+            NSLog("ToolRouter: startup cleanup skipped — App Group unavailable")
         }
 
         // M1: Delete all orphaned response files
         if let responsesDir = AppConstants.responsesDirectoryURL {
-            if let files = try? FileManager.default.contentsOfDirectory(atPath: responsesDir.path) {
+            do {
+                let files = try FileManager.default.contentsOfDirectory(atPath: responsesDir.path)
                 for file in files where file.hasSuffix(".json") {
-                    try? FileManager.default.removeItem(atPath: responsesDir.appendingPathComponent(file).path)
+                    do {
+                        try FileManager.default.removeItem(atPath: responsesDir.appendingPathComponent(file).path)
+                    } catch {
+                        NSLog("ToolRouter: startup cleanup failed to delete %@: %@", file, error.localizedDescription)
+                    }
                 }
+            } catch {
+                NSLog("ToolRouter: startup cleanup failed to list responses directory: %@", error.localizedDescription)
             }
         }
 
@@ -772,7 +785,13 @@ class ToolRouter: MCPSocketServerDelegate {
     private func failPendingRequest(requestId: String, message: String) {
         // M1: Delete the response file to prevent orphans
         if let url = AppConstants.responseFileURL(for: requestId) {
-            try? FileManager.default.removeItem(at: url)
+            do {
+                try FileManager.default.removeItem(at: url)
+            } catch let error as NSError where error.domain == NSCocoaErrorDomain && error.code == NSFileReadNoSuchFileError {
+                // File doesn't exist — not an error
+            } catch {
+                NSLog("ToolRouter: failed to delete response file for %@: %@", requestId, error.localizedDescription)
+            }
         }
 
         pendingRequestsLock.lock()

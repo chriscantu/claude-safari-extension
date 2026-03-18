@@ -93,9 +93,22 @@ class SafariWebExtensionHandler: NSObject, NSExtensionRequestHandling {
     }
 
     private func handleExtensionReady(message: [String: Any], context: NSExtensionContext) {
-        let generation = message["generation"] as? String ?? ""
-        if let url = AppConstants.extensionGenerationURL {
-            try? generation.data(using: .utf8)?.write(to: url, options: .atomic)
+        guard let generation = message["generation"] as? String, !generation.isEmpty else {
+            Self.logger.warning("extension_ready: missing or empty generation string")
+            respond(with: ["status": "error", "message": "Missing generation"], context: context)
+            return
+        }
+        guard let url = AppConstants.extensionGenerationURL else {
+            Self.logger.error("extension_ready: extensionGenerationURL is nil (App Group unavailable)")
+            respond(with: ["status": "error", "message": "App Group unavailable"], context: context)
+            return
+        }
+        do {
+            try generation.data(using: .utf8)!.write(to: url, options: .atomic)
+        } catch {
+            Self.logger.error("extension_ready: failed to write generation file: \(error.localizedDescription)")
+            respond(with: ["status": "error", "message": "Failed to write generation file"], context: context)
+            return
         }
         respond(with: ["status": "ok"], context: context)
     }

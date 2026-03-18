@@ -983,6 +983,55 @@ final class ToolRouterDispatchTests: XCTestCase {
         XCTAssertTrue(errorMsg.contains("timeout"), "Expected timeout error, got: \(errorMsg)")
     }
 
+    func testPollForExtensionResponse_responseFileTakesPriorityOverGenerationMismatch() throws {
+        guard let genURL = AppConstants.extensionGenerationURL else {
+            throw XCTSkip("App Group unavailable in test environment")
+        }
+        guard let dir = AppConstants.responsesDirectoryURL else {
+            throw XCTSkip("App Group unavailable in test environment")
+        }
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+
+        // Write initial generation and then change it (simulating a reload)
+        try "gen-old".data(using: .utf8)!.write(to: genURL, options: .atomic)
+
+        let mockServer = MockMCPSocketServer()
+        let router = ToolRouter(
+            screenshotService: ScreenshotService(),
+            gifService: GifService(),
+            fileService: FileService()
+        )
+        router.setServer(mockServer)
+
+        let requestId = "priority-test"
+        router.injectPendingRequest(requestId: requestId, clientId: "test-client", jsonrpcId: 99)
+
+        // Write a valid response file AND a mismatched generation — response should win
+        let responseJSON = """
+        {"result":{"content":[{"type":"text","text":"success"}]}}
+        """
+        try responseJSON.data(using: .utf8)!.write(
+            to: dir.appendingPathComponent("\(requestId).json"), options: .atomic)
+        try "gen-new".data(using: .utf8)!.write(to: genURL, options: .atomic)
+
+        router.pollForExtensionResponseForTest(requestId: requestId, deadline: Date().addingTimeInterval(30),
+                                                generationSnapshot: "gen-old")
+
+        let expectation = XCTestExpectation(description: "Response delivered despite generation mismatch")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { expectation.fulfill() }
+        wait(for: [expectation], timeout: 1.0)
+
+        // Should get a success response, NOT a generation mismatch error
+        let json = mockServer.lastSentJSON()
+        let hasResult = json?["result"] != nil
+        let errorMsg = (json?["error"] as? [String: Any])?["message"] as? String
+        XCTAssertTrue(hasResult, "Expected success result, got error: \(errorMsg ?? "nil")")
+        XCTAssertNil(errorMsg, "Should not have error when response file exists")
+
+        // Cleanup
+        try? FileManager.default.removeItem(at: genURL)
+    }
+
     // MARK: - Response File Cleanup (Spec 023 M1)
 
     func testFailPendingRequest_deletesResponseFile() throws {
