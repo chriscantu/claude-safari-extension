@@ -37,7 +37,7 @@ final class OnboardingWindowController: NSWindowController {
     // MARK: Private state
 
     private(set) var currentScreen: OnboardingScreen = .welcome
-    private var pollTimer: Timer?
+    private(set) var pollTimer: Timer?
 
     // MARK: Init
 
@@ -128,7 +128,7 @@ final class OnboardingWindowController: NSWindowController {
     }
 
     private(set) var dismissed = false
-    private var checkInFlight = false
+    private(set) var checkInFlight = false
     func dismiss() {
         guard !dismissed else { return }
         dismissed = true
@@ -154,7 +154,7 @@ final class OnboardingWindowController: NSWindowController {
         checkInFlight = false
     }
 
-    private func checkStepCompletion(_ step: OnboardingStep) {
+    func checkStepCompletion(_ step: OnboardingStep) {
         // Skip if a checkAll is already in-flight; avoids stacking concurrent calls to
         // SFSafariExtensionManager when Safari is slow or restarting.
         guard !checkInFlight else { return }

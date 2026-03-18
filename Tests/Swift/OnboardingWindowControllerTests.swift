@@ -176,4 +176,153 @@ final class OnboardingWindowControllerTests: XCTestCase {
 
         controller.window?.orderOut(nil)
     }
+
+    // MARK: - Category B: Polling-driven auto-advance
+
+    // MARK: - T10: Permission granted mid-step triggers advance
+
+    func testCheckStepCompletion_permissionGranted_advances() {
+        let (controller, checker) = makeController()
+        controller.showOnboarding(startingAt: .safariExtension)
+        XCTAssertEqual(controller.currentScreen, .step(.safariExtension))
+
+        // Grant the extension permission
+        checker.extensionEnabled = true
+
+        // Call checkStepCompletion — the mock's getExtensionEnabled completes synchronously,
+        // but checkAll re-dispatches to main queue, so we need to drain it
+        controller.checkStepCompletion(.safariExtension)
+
+        let exp = expectation(description: "advance after permission granted")
+        DispatchQueue.main.async {
+            XCTAssertEqual(controller.currentScreen, .step(.screenRecording),
+                           "Should auto-advance to screenRecording after extension is enabled")
+            exp.fulfill()
+        }
+        waitForExpectations(timeout: 1)
+
+        controller.window?.orderOut(nil)
+    }
+
+    // MARK: - T11: Permission not granted does not advance
+
+    func testCheckStepCompletion_permissionNotGranted_staysOnStep() {
+        let (controller, checker) = makeController()
+        controller.showOnboarding(startingAt: .screenRecording)
+        XCTAssertEqual(controller.currentScreen, .step(.screenRecording))
+
+        // Screen recording still denied
+        checker.extensionEnabled = true
+        checker.screenRecordingGranted = false
+
+        controller.checkStepCompletion(.screenRecording)
+
+        let exp = expectation(description: "no advance")
+        DispatchQueue.main.async {
+            XCTAssertEqual(controller.currentScreen, .step(.screenRecording),
+                           "Should stay on screenRecording when permission is not granted")
+            exp.fulfill()
+        }
+        waitForExpectations(timeout: 1)
+
+        controller.window?.orderOut(nil)
+    }
+
+    // MARK: - T12: checkInFlight guard prevents stacking
+
+    func testCheckStepCompletion_checkInFlight_skips() {
+        let (controller, checker) = makeController()
+        controller.showOnboarding(startingAt: .safariExtension)
+        checker.extensionEnabled = true
+
+        // First call sets checkInFlight = true
+        controller.checkStepCompletion(.safariExtension)
+        XCTAssertTrue(controller.checkInFlight, "checkInFlight should be true while checkAll is pending")
+
+        // Second call while first is in-flight should be a no-op — screen unchanged
+        // (The first call hasn't delivered its callback yet because main queue hasn't drained)
+        controller.checkStepCompletion(.safariExtension)
+
+        // Drain to let the first callback deliver
+        let exp = expectation(description: "first callback delivers")
+        DispatchQueue.main.async {
+            XCTAssertEqual(controller.currentScreen, .step(.screenRecording),
+                           "Only the first call should advance — second was skipped")
+            XCTAssertFalse(controller.checkInFlight, "checkInFlight should reset after callback")
+            exp.fulfill()
+        }
+        waitForExpectations(timeout: 1)
+
+        controller.window?.orderOut(nil)
+    }
+
+    // MARK: - T13: Stale callback after screen change is ignored
+
+    func testCheckStepCompletion_staleCallback_ignored() {
+        let (controller, checker) = makeController()
+        controller.showOnboarding(startingAt: .safariExtension)
+        checker.extensionEnabled = true
+
+        // Fire checkStepCompletion for safariExtension
+        controller.checkStepCompletion(.safariExtension)
+
+        // Before the callback delivers, manually advance past safariExtension
+        controller.advance() // → screenRecording
+        controller.advance() // → accessibility
+        XCTAssertEqual(controller.currentScreen, .step(.accessibility))
+
+        // Now drain — the stale safariExtension callback should be ignored
+        let exp = expectation(description: "stale callback ignored")
+        DispatchQueue.main.async {
+            XCTAssertEqual(controller.currentScreen, .step(.accessibility),
+                           "Stale callback for safariExtension must not advance from accessibility")
+            exp.fulfill()
+        }
+        waitForExpectations(timeout: 1)
+
+        controller.window?.orderOut(nil)
+    }
+
+    // MARK: - T14: Callback after dismiss is ignored
+
+    func testCheckStepCompletion_afterDismiss_ignored() {
+        let (controller, checker) = makeController()
+        var dismissCount = 0
+        controller.onDismiss = { dismissCount += 1 }
+
+        controller.showOnboarding(startingAt: .safariExtension)
+        checker.extensionEnabled = true
+
+        // Fire checkStepCompletion then dismiss before callback delivers
+        controller.checkStepCompletion(.safariExtension)
+        controller.dismiss()
+        XCTAssertTrue(controller.dismissed)
+        XCTAssertEqual(dismissCount, 1)
+
+        // Drain — callback should see dismissed flag and bail
+        let exp = expectation(description: "post-dismiss callback ignored")
+        DispatchQueue.main.async {
+            // Should still be on safariExtension (no advance after dismiss)
+            XCTAssertEqual(controller.currentScreen, .step(.safariExtension),
+                           "Callback after dismiss must not advance the screen")
+            XCTAssertEqual(dismissCount, 1, "No additional onDismiss from post-dismiss callback")
+            exp.fulfill()
+        }
+        waitForExpectations(timeout: 1)
+    }
+
+    // MARK: - T15: pollTimer is nil after dismiss
+
+    func testDismiss_stopsPollTimer() {
+        let (controller, _) = makeController()
+        controller.showOnboarding(startingAt: .safariExtension)
+
+        // Entering a step starts polling — timer should exist
+        XCTAssertNotNil(controller.pollTimer, "pollTimer should be running on a step screen")
+        XCTAssertTrue(controller.pollTimer?.isValid ?? false)
+
+        controller.dismiss()
+
+        XCTAssertNil(controller.pollTimer, "pollTimer must be nil after dismiss")
+    }
 }
