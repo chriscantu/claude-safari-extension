@@ -8,14 +8,18 @@ private final class OnboardingMockChecker: PermissionChecking {
     var accessibilityGranted = false
     var screenRecordingGranted = false
     var extensionEnabled = false
+    var registerAccessibilityCallCount = 0
     var requestAccessibilityCallCount = 0
+    var registerScreenRecordingCallCount = 0
 
     func isAccessibilityGranted() -> Bool { accessibilityGranted }
     func isScreenRecordingGranted() -> Bool { screenRecordingGranted }
     func getExtensionEnabled(completion: @escaping (Bool) -> Void) {
         completion(extensionEnabled)
     }
+    func registerAccessibility() { registerAccessibilityCallCount += 1 }
     func requestAccessibility() { requestAccessibilityCallCount += 1 }
+    func registerScreenRecording() { registerScreenRecordingCallCount += 1 }
 }
 
 /// Creates a controller with a mock checker (all permissions denied by default).
@@ -327,19 +331,29 @@ final class OnboardingWindowControllerTests: XCTestCase {
         XCTAssertNil(controller.pollTimer, "pollTimer must be nil after dismiss")
     }
 
-    // MARK: - T16: Entering permission steps does not trigger TCC prompts
+    // MARK: - T16: Step entry silently registers in TCC but does not show system dialogs
 
-    func testStepEntry_doesNotCallRequestAccessibility() {
+    func testStepEntry_registersButDoesNotPrompt() {
         let (controller, checker) = makeController()
 
-        // Navigate through all permission steps
-        controller.showOnboarding(startingAt: .accessibility)
+        // Enter the Screen Recording step
+        controller.showOnboarding(startingAt: .screenRecording)
 
-        // requestAccessibility must NOT be called on step entry — it shows a
-        // system TCC dialog that competes with our onboarding UI's own
-        // "Open System Settings" button (bad UX: two prompts at once).
+        // Silent registration SHOULD happen on step entry (so app appears in System Settings)
+        XCTAssertEqual(checker.registerScreenRecordingCallCount, 1,
+                       "registerScreenRecording must be called on step entry for TCC registration")
+
+        // Advance to Accessibility step
+        controller.advance()
+
+        // Silent registration SHOULD happen on step entry
+        XCTAssertEqual(checker.registerAccessibilityCallCount, 1,
+                       "registerAccessibility must be called on step entry for TCC registration")
+
+        // The prompt-dialog version must NOT be called on step entry — it shows a
+        // system TCC dialog that competes with our "Open System Settings" button.
         XCTAssertEqual(checker.requestAccessibilityCallCount, 0,
-                       "requestAccessibility must not be called on step entry — defer to button tap")
+                       "requestAccessibility (with prompt) must not be called on step entry — defer to button tap")
 
         controller.window?.orderOut(nil)
     }

@@ -39,8 +39,12 @@ final class ToolModelsTests: XCTestCase {
             XCTAssertEqual(tool, "computer")
             XCTAssertEqual(args["action"]?.value as? String, "click")
             XCTAssertEqual((args["x"]?.value as? NSNumber)?.intValue, 100)
-            // Bool must survive as Bool, not Int(0) — validates CFBoolean detection
+            // Bool must survive as Bool, not Int(0) — validates CFBoolean detection.
+            // `as? Bool` alone isn't sufficient (NSNumber(0) also casts to Bool),
+            // so we also verify Int cast fails — proving it's truly stored as Bool.
+            XCTAssertTrue(args["doubleClick"]?.value is Bool, "value should be Bool type, not Int")
             XCTAssertEqual(args["doubleClick"]?.value as? Bool, false)
+            XCTAssertNil(args["doubleClick"]?.value as? Int, "Bool must not round-trip as Int")
             XCTAssertEqual(ctx?.clientId, "cli-1")
             XCTAssertEqual(ctx?.tabGroupId, "tg-1")
         } else {
@@ -87,6 +91,27 @@ final class ToolModelsTests: XCTestCase {
             XCTAssertEqual(id, "req-3")
             XCTAssertEqual(result?.content.first?.text, "done")
             XCTAssertNil(error)
+        } else {
+            XCTFail("Expected .toolResponse, got \(decoded)")
+        }
+    }
+
+    // MARK: - T4b: ToolResponse error-path round-trip
+
+    func testToolResponseErrorPathRoundTrip() throws {
+        let errorBlock = ContentBlock(type: "text", text: "something went wrong")
+        let original = NativeMessage.toolResponse(
+            requestId: "err-1",
+            result: nil,
+            error: ToolResponseContent(content: [errorBlock])
+        )
+        let data = try encoder.encode(original)
+        let decoded = try decoder.decode(NativeMessage.self, from: data)
+
+        if case .toolResponse(let id, let result, let error) = decoded {
+            XCTAssertEqual(id, "err-1")
+            XCTAssertNil(result)
+            XCTAssertEqual(error?.content.first?.text, "something went wrong")
         } else {
             XCTFail("Expected .toolResponse, got \(decoded)")
         }

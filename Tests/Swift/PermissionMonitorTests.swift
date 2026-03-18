@@ -16,7 +16,9 @@ final class MockPermissionChecker: PermissionChecking {
     func getExtensionEnabled(completion: @escaping (Bool) -> Void) {
         completion(extensionEnabled)
     }
+    func registerAccessibility() {}
     func requestAccessibility() { requestAccessibilityCalled = true }
+    func registerScreenRecording() {}
 }
 
 // MARK: - Tests

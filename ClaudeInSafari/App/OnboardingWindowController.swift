@@ -96,6 +96,16 @@ final class OnboardingWindowController: NSWindowController {
         currentScreen = screen
         window?.contentView = buildView(for: screen)
         if case .step(let step) = screen {
+            if step == .screenRecording {
+                // Silently register in TCC so the app appears in Screen Recording list.
+                // No dialog on macOS 14+. Must happen before user navigates to System Settings.
+                monitor.registerScreenRecording()
+            }
+            if step == .accessibility {
+                // Silently register in TCC so the app appears in Accessibility list.
+                // No dialog — the prompt-dialog is deferred to the button tap handler.
+                monitor.registerAccessibility()
+            }
             startPolling(for: step)
         }
     }
@@ -358,10 +368,9 @@ final class OnboardingWindowController: NSWindowController {
     }
 
     @objc private func openScreenRecordingSettings() {
-        // Register the app in TCC so it appears in the Screen Recording list.
-        // Deferred to button tap (not step entry) to avoid a competing system
-        // dialog that surprises the user before they've read the instructions.
-        CGRequestScreenCaptureAccess()
+        // Re-register in TCC (idempotent) to refresh the per-process cache,
+        // then open System Settings to the Screen Recording pane.
+        monitor.registerScreenRecording()
         if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture") {
             if !NSWorkspace.shared.open(url) {
                 NSLog("OnboardingWindowController: failed to open Screen Recording system preferences URL")
@@ -409,9 +418,8 @@ final class OnboardingWindowController: NSWindowController {
     }
 
     @objc private func openAccessibilitySettings() {
-        // Register the app in TCC so it appears in the Accessibility list.
-        // Deferred to button tap (not step entry) to avoid a system TCC dialog
-        // that competes with our own onboarding UI.
+        // Show the system TCC dialog (which also re-registers in TCC) and open
+        // System Settings. The dialog only fires on button tap, not step entry.
         monitor.requestAccessibility()
         if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
             if !NSWorkspace.shared.open(url) {

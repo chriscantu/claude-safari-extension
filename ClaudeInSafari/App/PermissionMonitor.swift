@@ -44,9 +44,17 @@ protocol PermissionChecking {
     /// Direct callers of this protocol method are responsible for their own queue management.
     func getExtensionEnabled(completion: @escaping (Bool) -> Void)
 
-    /// Registers the app in the TCC database for Accessibility and shows the system prompt
-    /// directing the user to System Settings. Call once when entering the Accessibility step.
+    /// Silently registers the app in the TCC database for Accessibility (no system dialog).
+    /// Call on step entry so the app appears in System Settings before the user navigates there.
+    func registerAccessibility()
+
+    /// Registers the app in TCC and shows the system prompt directing the user to System Settings.
+    /// Call when the user taps "Open System Settings" — not on step entry (avoids a competing dialog).
     func requestAccessibility()
+
+    /// Silently registers the app in TCC for Screen Recording (no dialog on macOS 14+).
+    /// Call on step entry so the app appears in System Settings before the user navigates there.
+    func registerScreenRecording()
 }
 
 // MARK: - SystemPermissionChecker
@@ -61,9 +69,6 @@ struct SystemPermissionChecker: PermissionChecking {
 
     func isScreenRecordingGranted() -> Bool {
         // Silent check — no UI, no side effects. Used for the 0.5 s polling loop.
-        // CGRequestScreenCaptureAccess() is called separately (once on step entry and
-        // once on app-did-become-active) to refresh the per-process TCC cache after the
-        // user grants permission in System Settings.
         CGPreflightScreenCaptureAccess()
     }
 
@@ -78,9 +83,22 @@ struct SystemPermissionChecker: PermissionChecking {
         }
     }
 
+    func registerAccessibility() {
+        // Silent registration — adds app to TCC without showing a system dialog.
+        let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: false] as CFDictionary
+        AXIsProcessTrustedWithOptions(options)
+    }
+
     func requestAccessibility() {
+        // Shows system dialog directing user to System Settings → Accessibility.
         let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
         AXIsProcessTrustedWithOptions(options)
+    }
+
+    func registerScreenRecording() {
+        // Registers in TCC so the app appears in System Settings → Screen Recording.
+        // No dialog on macOS 14+; returns Bool (ignored here).
+        CGRequestScreenCaptureAccess()
     }
 }
 
@@ -101,10 +119,21 @@ final class PermissionMonitor {
         self.checker = checker
     }
 
-    /// Registers the app in TCC for Accessibility and shows the system prompt.
-    /// Forwards to the underlying checker. Call once when entering the Accessibility step.
+    /// Silently registers the app in TCC for Accessibility (no dialog).
+    /// Call on step entry so the app appears in System Settings.
+    func registerAccessibility() {
+        checker.registerAccessibility()
+    }
+
+    /// Registers in TCC and shows the system dialog. Call on button tap only.
     func requestAccessibility() {
         checker.requestAccessibility()
+    }
+
+    /// Silently registers the app in TCC for Screen Recording (no dialog).
+    /// Call on step entry so the app appears in System Settings.
+    func registerScreenRecording() {
+        checker.registerScreenRecording()
     }
 
     /// One-shot check of all three permissions. Delivers `PermissionStatus` on the main queue.
