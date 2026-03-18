@@ -234,11 +234,20 @@ final class MenuBarController {
     @objc private func checkConnection() { onCheckConnection?() }
     @objc private func openSetup()       { onOpenSetup?() }
     @objc private func openSafari() {
-        let safariURL = URL(fileURLWithPath: "/Applications/Safari.app")
+        let safariURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.Safari")
+            ?? URL(fileURLWithPath: "/Applications/Safari.app")
         let config = NSWorkspace.OpenConfiguration()
         NSWorkspace.shared.openApplication(at: safariURL, configuration: config) { _, error in
             if let error = error {
                 NSLog("MenuBarController: failed to open Safari — %@", error.localizedDescription)
+                DispatchQueue.main.async {
+                    let alert = NSAlert()
+                    alert.messageText = "Could not open Safari"
+                    alert.informativeText = error.localizedDescription
+                    alert.alertStyle = .warning
+                    alert.addButton(withTitle: "OK")
+                    alert.runModal()
+                }
             }
         }
     }

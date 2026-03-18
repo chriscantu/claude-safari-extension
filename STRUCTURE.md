@@ -114,6 +114,7 @@ claude-safari-extension/
 │
 ├── Makefile                                 # Dev workflow: build, run, test, send tool calls
 ├── scripts/                                 # Development and testing scripts
+│   ├── generate-app-icon.swift              # Generate AppIcon PNGs for macOS asset catalog
 │   ├── mcp-test.py                          # MCP socket test client (handshake + tool calls)
 │   └── validate-injected-scripts.js         # CI: syntax-check IIFE code strings in tool files
 │
