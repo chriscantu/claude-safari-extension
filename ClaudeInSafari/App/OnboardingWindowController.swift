@@ -96,18 +96,6 @@ final class OnboardingWindowController: NSWindowController {
         currentScreen = screen
         window?.contentView = buildView(for: screen)
         if case .step(let step) = screen {
-            if step == .screenRecording {
-                // Register the app in TCC so it appears in System Settings → Screen Recording.
-                // Called once per step entry. Safe — ScreenshotService now uses
-                // CGPreflightScreenCaptureAccess() and will not create a competing dialog loop.
-                CGRequestScreenCaptureAccess()
-            }
-            if step == .accessibility {
-                // Register the app in TCC so it appears in System Settings → Accessibility.
-                // Shows the system prompt directing the user to grant access. Without this,
-                // the app may never appear in the Accessibility list after a rebuild.
-                monitor.requestAccessibility()
-            }
             startPolling(for: step)
         }
     }
@@ -370,6 +358,10 @@ final class OnboardingWindowController: NSWindowController {
     }
 
     @objc private func openScreenRecordingSettings() {
+        // Register the app in TCC so it appears in the Screen Recording list.
+        // Deferred to button tap (not step entry) to avoid a competing system
+        // dialog that surprises the user before they've read the instructions.
+        CGRequestScreenCaptureAccess()
         if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture") {
             if !NSWorkspace.shared.open(url) {
                 NSLog("OnboardingWindowController: failed to open Screen Recording system preferences URL")
@@ -417,6 +409,10 @@ final class OnboardingWindowController: NSWindowController {
     }
 
     @objc private func openAccessibilitySettings() {
+        // Register the app in TCC so it appears in the Accessibility list.
+        // Deferred to button tap (not step entry) to avoid a system TCC dialog
+        // that competes with our own onboarding UI.
+        monitor.requestAccessibility()
         if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
             if !NSWorkspace.shared.open(url) {
                 NSLog("OnboardingWindowController: failed to open Accessibility system preferences URL")

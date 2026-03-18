@@ -8,13 +8,14 @@ private final class OnboardingMockChecker: PermissionChecking {
     var accessibilityGranted = false
     var screenRecordingGranted = false
     var extensionEnabled = false
+    var requestAccessibilityCallCount = 0
 
     func isAccessibilityGranted() -> Bool { accessibilityGranted }
     func isScreenRecordingGranted() -> Bool { screenRecordingGranted }
     func getExtensionEnabled(completion: @escaping (Bool) -> Void) {
         completion(extensionEnabled)
     }
-    func requestAccessibility() {}
+    func requestAccessibility() { requestAccessibilityCallCount += 1 }
 }
 
 /// Creates a controller with a mock checker (all permissions denied by default).
@@ -324,5 +325,22 @@ final class OnboardingWindowControllerTests: XCTestCase {
         controller.dismiss()
 
         XCTAssertNil(controller.pollTimer, "pollTimer must be nil after dismiss")
+    }
+
+    // MARK: - T16: Entering permission steps does not trigger TCC prompts
+
+    func testStepEntry_doesNotCallRequestAccessibility() {
+        let (controller, checker) = makeController()
+
+        // Navigate through all permission steps
+        controller.showOnboarding(startingAt: .accessibility)
+
+        // requestAccessibility must NOT be called on step entry — it shows a
+        // system TCC dialog that competes with our onboarding UI's own
+        // "Open System Settings" button (bad UX: two prompts at once).
+        XCTAssertEqual(checker.requestAccessibilityCallCount, 0,
+                       "requestAccessibility must not be called on step entry — defer to button tap")
+
+        controller.window?.orderOut(nil)
     }
 }
