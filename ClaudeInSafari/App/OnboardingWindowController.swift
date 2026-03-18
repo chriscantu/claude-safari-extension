@@ -38,6 +38,8 @@ final class OnboardingWindowController: NSWindowController {
 
     private(set) var currentScreen: OnboardingScreen = .welcome
     private(set) var pollTimer: Timer?
+    private weak var copyButton: NSButton?
+    private var copyResetWork: DispatchWorkItem?
 
     // MARK: Init
 
@@ -131,6 +133,7 @@ final class OnboardingWindowController: NSWindowController {
         guard !dismissed else { return }
         dismissed = true
         stopPolling()
+        copyResetWork?.cancel()
         close()
         onDismiss?()
     }
@@ -497,9 +500,9 @@ final class OnboardingWindowController: NSWindowController {
         copy.bezelStyle = .rounded
         copy.font = NSFont.systemFont(ofSize: 12, weight: .semibold)
         copy.contentTintColor = .claudeOrange
-        copy.tag = 999
         copy.frame = NSRect(x: cardWidth - 72, y: 6, width: 58, height: 26)
         card.addSubview(copy)
+        copyButton = copy
 
         let done = makeButton("Done", action: #selector(doneTapped), primary: true)
         done.frame = NSRect(x: Layout.padding + 60, y: 30, width: Layout.windowWidth - (Layout.padding + 60) * 2, height: 36)
@@ -517,12 +520,13 @@ final class OnboardingWindowController: NSWindowController {
             NSLog("OnboardingWindowController: failed to write example prompt to pasteboard")
         }
         // Brief "Copied!" / "Failed" feedback on the button
-        if let button = window?.contentView?.viewWithTag(999) as? NSButton {
-            button.title = ok ? "Copied!" : "Failed"
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
-                button.title = "Copy"
-            }
+        copyButton?.title = ok ? "Copied!" : "Failed"
+        copyResetWork?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            self?.copyButton?.title = "Copy"
         }
+        copyResetWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5, execute: work)
     }
 
     // MARK: - UI helpers

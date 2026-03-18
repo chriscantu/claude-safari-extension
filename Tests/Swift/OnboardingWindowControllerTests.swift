@@ -384,6 +384,7 @@ final class OnboardingWindowControllerTests: XCTestCase {
         let (controller, _) = makeController()
         controller.showOnboarding(startingAt: nil)
         for _ in 0..<4 { controller.advance() }
+        defer { NSPasteboard.general.clearContents() }
 
         let contentView = controller.window?.contentView
         let copyButton = findButton(in: contentView, titled: "Copy")
@@ -400,7 +401,8 @@ final class OnboardingWindowControllerTests: XCTestCase {
         XCTAssertEqual(copyButton?.title, "Copied!",
                        "Copy button must show 'Copied!' after successful copy")
 
-        controller.window?.orderOut(nil)
+        // Dismiss cancels the pending 1.5s reset work item, preventing async leaks
+        controller.dismiss()
     }
 
     // MARK: - View hierarchy helpers
