@@ -6,14 +6,14 @@ final class AppDelegateTests: XCTestCase {
 
     // MARK: - handleNotificationAction
 
-    func testHandleNotificationAction_stopAutomation_callsCancelOnRouter() {
+    func testHandleNotificationAction_stopAutomation_withRouter_doesNotCrash() {
         let delegate = AppDelegate()
         let mockServer = MockMCPSocketServer()
         let router = ToolRouter()
         router.setServer(mockServer)
         delegate.toolRouter = router
 
-        // Should not crash; cancelCurrentRequest logs "cancelling 0 extension request(s)"
+        // Exercises the stop-automation → cancelCurrentRequest path with a live router
         delegate.handleNotificationAction("stop-automation")
     }
 

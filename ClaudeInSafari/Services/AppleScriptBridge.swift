@@ -203,11 +203,13 @@ class AppleScriptBridge {
 
         guard process.terminationStatus == 0 else {
             let message = String(data: stderrData, encoding: .utf8) ?? ""
-            throw classifyScriptError(
+            let error = classifyScriptError(
                 terminationReason: process.terminationReason,
                 exitCode: process.terminationStatus,
                 stderr: message
             )
+            NSLog("AppleScriptBridge: osascript failed — %@", "\(error)")
+            throw error
         }
     }
 }
