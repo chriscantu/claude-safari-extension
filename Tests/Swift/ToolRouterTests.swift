@@ -815,4 +815,36 @@ final class ToolRouterDispatchTests: XCTestCase {
         XCTAssertTrue(message.contains("Cancelled"),
                       "req-B (client-other) should still be pending and cancellable: \(message)")
     }
+
+    // MARK: - parseZoomRegion
+
+    func testParseZoomRegion_validIntArray_returnsTuple() {
+        let result = router.parseZoomRegion(["region": [100, 200, 300, 400]])
+        XCTAssertNotNil(result)
+        XCTAssertEqual(result?.x, 100)
+        XCTAssertEqual(result?.y, 200)
+        XCTAssertEqual(result?.width, 300)
+        XCTAssertEqual(result?.height, 400)
+    }
+
+    func testParseZoomRegion_wrongLength_returnsNil() {
+        XCTAssertNil(router.parseZoomRegion(["region": [100, 200]]))
+    }
+
+    func testParseZoomRegion_nonNumericElements_returnsNil() {
+        XCTAssertNil(router.parseZoomRegion(["region": ["a", "b", "c", "d"]]))
+    }
+
+    func testParseZoomRegion_doubleElements_convertsToInt() {
+        let result = router.parseZoomRegion(["region": [100.5, 200.7, 300.0, 400.9]])
+        XCTAssertNotNil(result)
+        XCTAssertEqual(result?.x, 100)  // truncated
+        XCTAssertEqual(result?.y, 200)
+        XCTAssertEqual(result?.width, 300)
+        XCTAssertEqual(result?.height, 400)
+    }
+
+    func testParseZoomRegion_missingRegion_returnsNil() {
+        XCTAssertNil(router.parseZoomRegion([:]))
+    }
 }

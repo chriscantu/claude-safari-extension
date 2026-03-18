@@ -279,21 +279,9 @@ class ToolRouter: MCPSocketServerDelegate {
                 }
             }
         } else {
-            // zoom — parse region as [Int], tolerating JSON numbers arriving as Double or NSNumber
-            let region: [Int]? = {
-                guard let raw = arguments["region"] else { return nil }
-                if let ints = raw as? [Int] { return ints }
-                if let any = raw as? [Any] {
-                    let converted = any.compactMap { v -> Int? in
-                        if let i = v as? Int { return i }
-                        if let d = v as? Double { return Int(d) }
-                        if let n = v as? NSNumber { return n.intValue }
-                        return nil
-                    }
-                    return converted.count == 4 ? converted : nil
-                }
-                return nil
-            }()
+            // zoom — parse region
+            let regionTuple = parseZoomRegion(arguments)
+            let region: [Int]? = regionTuple.map { [$0.x, $0.y, $0.width, $0.height] }
             screenshotService.captureZoom(tabId: tabIdOpt, region: region) { [weak self] result in
                 guard let self else { return }
                 self.pendingRequestsLock.lock()
@@ -525,6 +513,27 @@ class ToolRouter: MCPSocketServerDelegate {
                 sendError(id: id, code: -32000, message: error.userMessage, to: clientId)
             }
         }
+    }
+
+    /// Parses a zoom region from tool arguments.
+    /// Expects `region` key containing a 4-element array of integers [x, y, width, height].
+    /// Tolerates JSON numbers arriving as Double or NSNumber (common via native bridge).
+    /// Returns nil if `region` is missing, wrong length, or contains non-numeric elements.
+    func parseZoomRegion(_ arguments: [String: Any]) -> (x: Int, y: Int, width: Int, height: Int)? {
+        guard let raw = arguments["region"] else { return nil }
+        if let ints = raw as? [Int], ints.count == 4 {
+            return (ints[0], ints[1], ints[2], ints[3])
+        }
+        if let any = raw as? [Any] {
+            let converted = any.compactMap { v -> Int? in
+                if let i = v as? Int { return i }
+                if let d = v as? Double { return Int(d) }
+                if let n = v as? NSNumber { return n.intValue }
+                return nil
+            }
+            if converted.count == 4 { return (converted[0], converted[1], converted[2], converted[3]) }
+        }
+        return nil
     }
 
     /// Parse width and height from tool arguments, tolerating Int, Double, or NSNumber.
