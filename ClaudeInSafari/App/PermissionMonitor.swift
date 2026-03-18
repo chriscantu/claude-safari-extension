@@ -89,7 +89,7 @@ struct SystemPermissionChecker: PermissionChecking {
 /// Checks permission state and delivers `PermissionStatus` on the main queue.
 /// Must be called from the main thread. Not thread-safe for concurrent callers.
 final class PermissionMonitor {
-    let checker: PermissionChecking
+    private let checker: PermissionChecking
 
     /// Debounce state for `extensionEnabled`. SFSafariExtensionManager can flicker
     /// between true/false on rapid polls; we require two consecutive identical results
@@ -101,30 +101,44 @@ final class PermissionMonitor {
         self.checker = checker
     }
 
+    /// Registers the app in TCC for Accessibility and shows the system prompt.
+    /// Forwards to the underlying checker. Call once when entering the Accessibility step.
+    func requestAccessibility() {
+        checker.requestAccessibility()
+    }
+
     /// One-shot check of all three permissions. Delivers `PermissionStatus` on the main queue.
     func checkAll(completion: @escaping (PermissionStatus) -> Void) {
+        dispatchPrecondition(condition: .onQueue(.main))
         let accessibility = checker.isAccessibilityGranted()
         let screenRecording = checker.isScreenRecordingGranted()
         checker.getExtensionEnabled { [weak self] extensionEnabled in
-            guard let self else { return }
-            // Debounce: only adopt a new value after two consecutive identical reads.
-            let stable: Bool
-            if extensionEnabled == self.pendingExtensionEnabled {
-                // Two consecutive reads agree — adopt this value.
-                self.lastExtensionEnabled = extensionEnabled
-                stable = extensionEnabled
-            } else {
-                // First read of a new value — buffer it but keep the old value.
-                self.pendingExtensionEnabled = extensionEnabled
-                stable = self.lastExtensionEnabled ?? extensionEnabled
-            }
+            DispatchQueue.main.async {
+                guard let self else {
+                    // Self deallocated — deliver a safe default so callers are never left hanging.
+                    NSLog("PermissionMonitor: deallocated during checkAll — delivering empty status")
+                    completion(PermissionStatus(extensionEnabled: false, screenRecording: false, accessibility: false))
+                    return
+                }
+                // Debounce: only adopt a new value after two consecutive identical reads.
+                let stable: Bool
+                if extensionEnabled == self.pendingExtensionEnabled {
+                    // Two consecutive reads agree — adopt this value.
+                    self.lastExtensionEnabled = extensionEnabled
+                    stable = extensionEnabled
+                } else {
+                    // First read of a new value — buffer it but keep the old value.
+                    self.pendingExtensionEnabled = extensionEnabled
+                    stable = self.lastExtensionEnabled ?? extensionEnabled
+                }
 
-            let status = PermissionStatus(
-                extensionEnabled: stable,
-                screenRecording: screenRecording,
-                accessibility: accessibility
-            )
-            DispatchQueue.main.async { completion(status) }
+                let status = PermissionStatus(
+                    extensionEnabled: stable,
+                    screenRecording: screenRecording,
+                    accessibility: accessibility
+                )
+                completion(status)
+            }
         }
     }
 }

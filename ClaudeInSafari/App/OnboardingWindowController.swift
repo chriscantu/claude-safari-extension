@@ -112,7 +112,7 @@ final class OnboardingWindowController: NSWindowController {
                 // Register the app in TCC so it appears in System Settings → Accessibility.
                 // Shows the system prompt directing the user to grant access. Without this,
                 // the app may never appear in the Accessibility list after a rebuild.
-                monitor.checker.requestAccessibility()
+                monitor.requestAccessibility()
             }
             startPolling(for: step)
         }
@@ -309,20 +309,25 @@ final class OnboardingWindowController: NSWindowController {
                 end tell
             end tell
             """
-        DispatchQueue.global(qos: .userInitiated).async {
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             let process = Process()
             process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
             process.arguments = ["-e", script]
+            let stderrPipe = Pipe()
+            process.standardError = stderrPipe
             do {
                 try process.run()
                 process.waitUntilExit()
                 if process.terminationStatus != 0 {
-                    NSLog("OnboardingWindowController: osascript exited %d — falling back to Safari.app", process.terminationStatus)
-                    DispatchQueue.main.async { self.openSafariFallback() }
+                    let stderrData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
+                    let stderrStr = String(data: stderrData, encoding: .utf8) ?? "<unreadable>"
+                    NSLog("OnboardingWindowController: osascript exited %d — stderr: %@ — falling back to Safari.app",
+                          process.terminationStatus, stderrStr)
+                    DispatchQueue.main.async { [weak self] in self?.openSafariFallback() }
                 }
             } catch {
                 NSLog("OnboardingWindowController: failed to launch osascript: %@ — falling back", error.localizedDescription)
-                DispatchQueue.main.async { self.openSafariFallback() }
+                DispatchQueue.main.async { [weak self] in self?.openSafariFallback() }
             }
         }
     }

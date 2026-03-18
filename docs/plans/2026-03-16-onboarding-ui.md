@@ -8,7 +8,7 @@
 
 **Tech Stack:** Swift / AppKit / XCTest — macOS 13.0+ deployment target. `SafariServices` for `SFSafariExtensionManager`. No SwiftUI.
 
-**Spec:** `docs/superpowers/specs/2026-03-16-onboarding-ui-design.md`
+**Spec:** `docs/specs/2026-03-16-onboarding-ui-design.md`
 
 ---
 
