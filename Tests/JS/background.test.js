@@ -255,12 +255,15 @@ describe("background.js poll loop", () => {
 
     test("T9 — Phase 4 error (response send fails): console.error called, loop continues", async () => {
         const payload = { tool: "read_page", args: {}, requestId: "req-4" };
-        let callCount = 0;
+        let pollCount = 0;
         const browser = makeBrowserMock();
         browser.runtime.sendNativeMessage = jest.fn(async (appId, msg) => {
-            callCount++;
+            if (msg.type === "extension_ready") {
+                return {};
+            }
             if (msg.type === "poll") {
-                return callCount === 1
+                pollCount++;
+                return pollCount === 1
                     ? { type: "tool_request", payload: JSON.stringify(payload) }
                     : { type: "idle" };
             }
@@ -321,6 +324,21 @@ describe("background.js poll loop", () => {
         const browser = makeBrowserMock({ alarms: false });
         // Should not throw when browser.alarms is undefined
         expect(() => loadBackground({ browser })).not.toThrow();
+    });
+
+    // T13 — extension_ready: sends generation marker on load (Spec 023 H2)
+    test("T13 — sends extension_ready with generation on load", () => {
+        const mock = makeBrowserMock();
+        loadBackground({ browser: mock });
+
+        // Find the extension_ready call among all sendNativeMessage calls
+        const readyCalls = mock.runtime.sendNativeMessage.mock.calls.filter(
+            (call) => call[1] && call[1].type === "extension_ready"
+        );
+        expect(readyCalls.length).toBe(1);
+        expect(readyCalls[0][1].generation).toBeDefined();
+        expect(typeof readyCalls[0][1].generation).toBe("string");
+        expect(readyCalls[0][1].generation.length).toBeGreaterThan(0);
     });
 });
 
