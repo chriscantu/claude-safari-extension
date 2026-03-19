@@ -21,13 +21,14 @@
  * Dependencies:
  *   globalThis.resolveTab                — tabs-manager.js
  *   globalThis.classifyExecuteScriptError — tool-registry.js
+ *   globalThis.executeScriptWithTabGuard  — tool-registry.js
  *   globalThis.registerTool              — tool-registry.js
  *
  * ⚠ Safari must be frontmost for all actions except wait.
- *   ToolRouter.swift must activate Safari before forwarding any computer action.
+ *   ToolRouter.swift activates Safari before forwarding any computer action.
  *
- * ⚠ wait > 20s uses browser.alarms to survive background page suspension
- *   (persistent: false + 24s keepalive alarm leave a gap for long waits).
+ * ⚠ wait > 20s uses browser.alarms for forward compatibility with non-persistent mode
+ *   (persistent: true eliminates suspension risk, but alarms are kept as a safety net).
  *
  * See Spec 010 (computer-mouse-keyboard).
  */
@@ -81,6 +82,8 @@ async function handleComputer(args) {
 
     // Upfront validation — reject bad payloads before resolveTab or executeScript.
     // Per-handler checks remain as a safety net.
+    // Click/hover coordinate-or-ref validation stays in handlers (already rejects
+    // before executeScript via validateCoordinateOrRef).
     if (action === "type" || action === "key") {
         if (!args.text || typeof args.text !== "string") {
             throw new Error("text parameter is required for " + action + " action");
@@ -434,7 +437,7 @@ async function handleClick(args, realTabId) {
             realTabId, buildClickScript(action, coordinate, ref, modifiers), "computer"
         );
     } catch (err) {
-        if (/was closed during/.test(err.message)) throw err;
+        if (/was closed during|timed out/.test(err.message)) throw err;
         throw globalThis.classifyExecuteScriptError("computer", realTabId, err);
     }
 
@@ -458,7 +461,7 @@ async function handleHover(args, realTabId) {
             realTabId, buildHoverScript(coordinate, ref), "computer"
         );
     } catch (err) {
-        if (/was closed during/.test(err.message)) throw err;
+        if (/was closed during|timed out/.test(err.message)) throw err;
         throw globalThis.classifyExecuteScriptError("computer", realTabId, err);
     }
 
@@ -484,7 +487,7 @@ async function handleType(args, realTabId) {
             realTabId, buildTypeScript(text), "computer"
         );
     } catch (err) {
-        if (/was closed during/.test(err.message)) throw err;
+        if (/was closed during|timed out/.test(err.message)) throw err;
         throw globalThis.classifyExecuteScriptError("computer", realTabId, err);
     }
 
@@ -512,7 +515,7 @@ async function handleKey(args, realTabId) {
             realTabId, buildKeyScript(text, repeatNum), "computer"
         );
     } catch (err) {
-        if (/was closed during/.test(err.message)) throw err;
+        if (/was closed during|timed out/.test(err.message)) throw err;
         throw globalThis.classifyExecuteScriptError("computer", realTabId, err);
     }
 
@@ -659,7 +662,7 @@ async function handleScroll(args, realTabId) {
             realTabId, buildScrollScript(coordinate, scroll_direction, scrollAmount), "computer"
         );
     } catch (err) {
-        if (/was closed during/.test(err.message)) throw err;
+        if (/was closed during|timed out/.test(err.message)) throw err;
         throw globalThis.classifyExecuteScriptError("computer", realTabId, err);
     }
 
@@ -684,7 +687,7 @@ async function handleScrollTo(args, realTabId) {
             realTabId, buildScrollToScript(ref), "computer"
         );
     } catch (err) {
-        if (/was closed during/.test(err.message)) throw err;
+        if (/was closed during|timed out/.test(err.message)) throw err;
         throw globalThis.classifyExecuteScriptError("computer", realTabId, err);
     }
 
@@ -711,7 +714,7 @@ async function handleDrag(args, realTabId) {
             realTabId, buildDragScript(start_coordinate, coordinate), "computer"
         );
     } catch (err) {
-        if (/was closed during/.test(err.message)) throw err;
+        if (/was closed during|timed out/.test(err.message)) throw err;
         throw globalThis.classifyExecuteScriptError("computer", realTabId, err);
     }
 

@@ -212,19 +212,40 @@ class ToolRouter: MCPSocketServerDelegate {
     ]
 
     /// Activate Safari if it is not already the frontmost application.
-    /// Best-effort: logs a warning on failure but does not throw — the tool will
-    /// fail with a clearer executeScript permission error.
+    /// Best-effort: logs warnings on failure but does not throw — the subsequent
+    /// executeScript call will surface a specific permission error if Safari is
+    /// not frontmost. Polls briefly after activation to let the window server
+    /// bring Safari to the foreground before the tool request is forwarded.
+    ///
+    /// Note: computer/screenshot and computer/zoom are handled natively before
+    /// forwardToExtension, so activation only fires for executeScript-based actions.
     func activateSafariIfNeeded() {
         guard let safari = NSWorkspace.shared.runningApplications.first(where: {
             $0.bundleIdentifier == "com.apple.Safari"
         }) else {
-            NSLog("activateSafariIfNeeded: Safari is not running")
+            NSLog("activateSafariIfNeeded: Safari is not running — tool will likely fail")
             return
         }
         if safari.isActive { return }
-        if !safari.activate(options: .activateIgnoringOtherApps) {
-            NSLog("activateSafariIfNeeded: activate() returned false")
+
+        var activated: Bool
+        if #available(macOS 14.0, *) {
+            activated = safari.activate()
+        } else {
+            activated = safari.activate(options: .activateIgnoringOtherApps)
         }
+
+        if !activated {
+            NSLog("activateSafariIfNeeded: activate() returned false — tool may fail with permission error")
+            return
+        }
+
+        // Poll briefly for activation to take effect (window server is async)
+        for _ in 0..<10 {
+            if safari.isActive { return }
+            Thread.sleep(forTimeInterval: 0.05)
+        }
+        NSLog("activateSafariIfNeeded: Safari did not become active within 500ms")
     }
 
     // MARK: - MCPSocketServerDelegate
@@ -738,7 +759,6 @@ class ToolRouter: MCPSocketServerDelegate {
 
     private func forwardToExtension(_ queued: QueuedToolRequest, id: Any?, clientId: String,
                                      arguments: [String: Any] = [:]) {
-        // Activate Safari before executeScript-requiring tools
         if Self.executeScriptTools.contains(queued.tool) {
             activateSafariIfNeeded()
         }
