@@ -807,6 +807,68 @@ describe("computer tool", () => {
         });
     });
 
+    describe("upfront payload validation", () => {
+        test("type with non-string text rejects before resolveTab", async () => {
+            const resolveTab = jest.fn(async () => 42);
+            const handler = loadComputer({ browser: makeBrowserMock(), resolveTab });
+
+            await expect(handler({ action: "type", text: 123 })).rejects.toThrow(/text.*required/);
+            expect(resolveTab).not.toHaveBeenCalled();
+        });
+
+        test("type with empty string text rejects before resolveTab", async () => {
+            const resolveTab = jest.fn(async () => 42);
+            const handler = loadComputer({ browser: makeBrowserMock(), resolveTab });
+
+            await expect(handler({ action: "type", text: "" })).rejects.toThrow(/text.*required/);
+            expect(resolveTab).not.toHaveBeenCalled();
+        });
+
+        test("key with missing text rejects before resolveTab", async () => {
+            const resolveTab = jest.fn(async () => 42);
+            const handler = loadComputer({ browser: makeBrowserMock(), resolveTab });
+
+            await expect(handler({ action: "key" })).rejects.toThrow(/text.*required/);
+            expect(resolveTab).not.toHaveBeenCalled();
+        });
+
+        test("scroll with missing scroll_direction rejects before resolveTab", async () => {
+            const resolveTab = jest.fn(async () => 42);
+            const handler = loadComputer({ browser: makeBrowserMock(), resolveTab });
+
+            await expect(handler({ action: "scroll" })).rejects.toThrow(/scroll_direction.*required/);
+            expect(resolveTab).not.toHaveBeenCalled();
+        });
+
+        test("scroll_to with missing ref rejects before resolveTab", async () => {
+            const resolveTab = jest.fn(async () => 42);
+            const handler = loadComputer({ browser: makeBrowserMock(), resolveTab });
+
+            await expect(handler({ action: "scroll_to" })).rejects.toThrow(/ref.*required/);
+            expect(resolveTab).not.toHaveBeenCalled();
+        });
+
+        test("left_click_drag with missing start_coordinate rejects before resolveTab", async () => {
+            const resolveTab = jest.fn(async () => 42);
+            const handler = loadComputer({ browser: makeBrowserMock(), resolveTab });
+
+            await expect(
+                handler({ action: "left_click_drag", coordinate: [300, 300] })
+            ).rejects.toThrow(/start_coordinate.*required/);
+            expect(resolveTab).not.toHaveBeenCalled();
+        });
+
+        test("left_click_drag with missing coordinate rejects before resolveTab", async () => {
+            const resolveTab = jest.fn(async () => 42);
+            const handler = loadComputer({ browser: makeBrowserMock(), resolveTab });
+
+            await expect(
+                handler({ action: "left_click_drag", start_coordinate: [100, 100] })
+            ).rejects.toThrow(/coordinate.*required/);
+            expect(resolveTab).not.toHaveBeenCalled();
+        });
+    });
+
     describe("registration", () => {
         test("registers itself under the name 'computer'", () => {
             loadComputer({ browser: makeBrowserMock(), resolveTab: jest.fn(async () => 42) });

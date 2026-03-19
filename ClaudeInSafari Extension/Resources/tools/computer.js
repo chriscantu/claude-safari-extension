@@ -79,6 +79,29 @@ async function handleComputer(args) {
         return handler(args);
     }
 
+    // Upfront validation — reject bad payloads before resolveTab or executeScript.
+    // Per-handler checks remain as a safety net.
+    if (action === "type" || action === "key") {
+        if (!args.text || typeof args.text !== "string") {
+            throw new Error("text parameter is required for " + action + " action");
+        }
+    } else if (action === "scroll") {
+        if (!args.scroll_direction) {
+            throw new Error("scroll_direction is required for scroll action");
+        }
+    } else if (action === "scroll_to") {
+        if (!args.ref || typeof args.ref !== "string") {
+            throw new Error("ref is required for scroll_to action");
+        }
+    } else if (action === "left_click_drag") {
+        if (!args.start_coordinate) {
+            throw new Error("start_coordinate is required for left_click_drag");
+        }
+        if (!args.coordinate) {
+            throw new Error("coordinate is required for left_click_drag");
+        }
+    }
+
     const realTabId = await globalThis.resolveTab(virtualTabId);
     return handler(args, realTabId);
 }
