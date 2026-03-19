@@ -70,6 +70,13 @@ class ToolRouter: MCPSocketServerDelegate {
             }
         }
 
+        // H2: Delete stale generation file so readExtensionGeneration() returns nil
+        // until the extension sends a fresh extension_ready. Prevents false-positive
+        // "Extension reloaded" errors when a tool call arrives before the new marker.
+        if let genURL = AppConstants.extensionGenerationURL {
+            try? FileManager.default.removeItem(at: genURL)
+        }
+
         NSLog("ToolRouter: startup cleanup complete")
     }
 
