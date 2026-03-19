@@ -92,23 +92,24 @@ class SafariWebExtensionHandler: NSObject, NSExtensionRequestHandling {
         respond(with: ["status": "ok", "mcpConnected": isConnected], context: context)
     }
 
+    /// Write the extension generation marker to the App Group container.
+    /// Always responds "ok" — sendNativeMessage resolves (not rejects) with the response,
+    /// so returning an error status would not trigger background.js's .catch() handler.
+    /// If the write fails, the nil-generation fallback in pollForExtensionResponse handles it.
     private func handleExtensionReady(message: [String: Any], context: NSExtensionContext) {
         guard let generation = message["generation"] as? String, !generation.isEmpty else {
-            Self.logger.warning("extension_ready: missing or empty generation string")
-            respond(with: ["status": "error", "message": "Missing generation"], context: context)
+            Self.logger.warning("extension_ready: missing or empty generation string — reload detection disabled")
+            respond(with: ["status": "ok"], context: context)
             return
         }
-        guard let url = AppConstants.extensionGenerationURL else {
+        if let url = AppConstants.extensionGenerationURL {
+            do {
+                try generation.data(using: .utf8)!.write(to: url, options: .atomic)
+            } catch {
+                Self.logger.error("extension_ready: failed to write generation file: \(error.localizedDescription)")
+            }
+        } else {
             Self.logger.error("extension_ready: extensionGenerationURL is nil (App Group unavailable)")
-            respond(with: ["status": "error", "message": "App Group unavailable"], context: context)
-            return
-        }
-        do {
-            try generation.data(using: .utf8)!.write(to: url, options: .atomic)
-        } catch {
-            Self.logger.error("extension_ready: failed to write generation file: \(error.localizedDescription)")
-            respond(with: ["status": "error", "message": "Failed to write generation file"], context: context)
-            return
         }
         respond(with: ["status": "ok"], context: context)
     }

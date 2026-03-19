@@ -364,7 +364,7 @@ if (typeof browser.runtime !== "undefined" && browser.runtime.onMessage) {
 
 // H2 (Spec 023): Send generation marker so the native app can detect background page reloads.
 // If this fails, reload detection is disabled for this session (ToolRouter sees nil generation).
-var extensionGeneration = Date.now() + "-" + Math.random();
+const extensionGeneration = Date.now() + "-" + Math.random();
 browser.runtime.sendNativeMessage(NATIVE_APP_ID, {
     type: "extension_ready",
     generation: extensionGeneration,
