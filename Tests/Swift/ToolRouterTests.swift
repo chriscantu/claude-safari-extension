@@ -1076,12 +1076,21 @@ final class ToolRouterDispatchTests: XCTestCase {
     // MARK: - Safari Activation
 
     func testActivateSafariIfNeeded_doesNotCrash() {
-        // activateSafariIfNeeded is a best-effort call.
-        // We verify it doesn't crash and returns without error.
-        // Full activation requires a running Safari.app — cannot unit test.
+        // Best-effort smoke test — verifies no crash. Actual activation requires a running Safari.app (integration test).
         let router = ToolRouter()
         router.activateSafariIfNeeded()
-        // No assertion — just verifying it doesn't crash or hang.
-        // Integration testing via `make send` covers actual activation.
+    }
+
+    func testExecuteScriptToolsContainsAllExecuteScriptBasedTools() {
+        // Guard: if a new executeScript-based tool is added to the extension but not
+        // listed in executeScriptTools, Safari won't be activated and the tool will
+        // fail with a cryptic WKWebExtensionError when Safari is in the background.
+        let expected: Set<String> = [
+            "computer", "find", "read_page", "form_input", "get_page_text",
+            "javascript_tool", "read_console_messages", "read_network_requests",
+            "upload_image", "file_upload"
+        ]
+        XCTAssertEqual(ToolRouter.executeScriptToolsForTesting, expected,
+                       "executeScriptTools is out of sync — update it when adding new executeScript-based tools")
     }
 }
