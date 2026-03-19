@@ -68,9 +68,14 @@ class ScreenshotService {
     private var imageOrder: [String] = []     // insertion-ordered ids for LRU eviction
 
     private static let maxStoredImages = 50
+    private static let imageExpirationSeconds: TimeInterval = 300  // 5 minutes
+    private static let cleanupIntervalSeconds: TimeInterval = 60
+
+    private var cleanupTimer: DispatchSourceTimer?
 
     init(captureProvider: ScreenCaptureProvider = DefaultScreenCaptureProvider()) {
         self.captureProvider = captureProvider
+        startCleanupTimer()
     }
 
     // MARK: - Public API
@@ -192,6 +197,36 @@ class ScreenshotService {
         lock.lock()
         defer { lock.unlock() }
         return imageStore[imageId]
+    }
+
+    // MARK: - TTL cleanup (Spec 025 §3)
+
+    /// Evict images older than `olderThan` seconds. Called by the periodic timer
+    /// and exposed internally for testability.
+    func evictExpiredImages(olderThan maxAge: TimeInterval = ScreenshotService.imageExpirationSeconds) {
+        lock.lock()
+        defer { lock.unlock() }
+        let now = Date()
+        let expiredIds = imageStore.filter { now.timeIntervalSince($0.value.timestamp) > maxAge }.map { $0.key }
+        for id in expiredIds {
+            imageStore.removeValue(forKey: id)
+            imageOrder.removeAll { $0 == id }
+        }
+    }
+
+    private func startCleanupTimer() {
+        let timer = DispatchSource.makeTimerSource(queue: DispatchQueue.global(qos: .utility))
+        timer.schedule(deadline: .now() + Self.cleanupIntervalSeconds,
+                       repeating: Self.cleanupIntervalSeconds)
+        timer.setEventHandler { [weak self] in
+            self?.evictExpiredImages()
+        }
+        timer.resume()
+        cleanupTimer = timer
+    }
+
+    deinit {
+        cleanupTimer?.cancel()
     }
 
     // MARK: - Private helpers
