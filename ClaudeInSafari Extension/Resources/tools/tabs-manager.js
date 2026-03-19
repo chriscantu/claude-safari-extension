@@ -213,13 +213,48 @@ async function handleTabsCreateMcp(_args) {
 }
 
 // ---------------------------------------------------------------------------
+// Prune stale groups (Spec 025 §1)
+// ---------------------------------------------------------------------------
+
+/**
+ * Remove tab entries whose real tab no longer exists.
+ * Delete groups that become empty after pruning.
+ * Called periodically from background.js on a 60-second interval.
+ */
+async function pruneStaleGroups() {
+    const state = await readState();
+    if (!state.groups || Object.keys(state.groups).length === 0) return;
+
+    let changed = false;
+    for (const [groupId, group] of Object.entries(state.groups)) {
+        for (const [vtid, entry] of Object.entries(group.tabs)) {
+            try {
+                await browser.tabs.get(entry.realTabId);
+            } catch (_) {
+                delete group.tabs[vtid];
+                changed = true;
+            }
+        }
+        if (Object.keys(group.tabs).length === 0) {
+            delete state.groups[groupId];
+            changed = true;
+        }
+    }
+
+    if (changed) {
+        await writeState(state);
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Registration
 // ---------------------------------------------------------------------------
 
 registerTool("tabs_context_mcp", handleTabsContextMcp);
 registerTool("tabs_create_mcp", handleTabsCreateMcp);
 
-// Expose resolveTab globally so other tool modules can use it
+// Expose resolveTab and pruneStaleGroups globally so other modules can use them
 if (typeof globalThis !== "undefined") {
     globalThis.resolveTab = resolveTab;
+    globalThis.pruneStaleGroups = pruneStaleGroups;
 }
