@@ -245,7 +245,7 @@ class ToolRouter: MCPSocketServerDelegate {
             if safari.isActive { return }
             Thread.sleep(forTimeInterval: 0.05)
         }
-        NSLog("activateSafariIfNeeded: Safari did not become active within 500ms")
+        NSLog("activateSafariIfNeeded: Safari did not become active within 500ms — tool may fail with permission error")
     }
 
     // MARK: - MCPSocketServerDelegate

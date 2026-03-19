@@ -437,7 +437,7 @@ async function handleClick(args, realTabId) {
             realTabId, buildClickScript(action, coordinate, ref, modifiers), "computer"
         );
     } catch (err) {
-        if (/was closed during|timed out/.test(err.message)) throw err;
+        if (/was closed during|executeScript timed out/.test(err.message)) throw err;
         throw globalThis.classifyExecuteScriptError("computer", realTabId, err);
     }
 
@@ -461,7 +461,7 @@ async function handleHover(args, realTabId) {
             realTabId, buildHoverScript(coordinate, ref), "computer"
         );
     } catch (err) {
-        if (/was closed during|timed out/.test(err.message)) throw err;
+        if (/was closed during|executeScript timed out/.test(err.message)) throw err;
         throw globalThis.classifyExecuteScriptError("computer", realTabId, err);
     }
 
@@ -487,7 +487,7 @@ async function handleType(args, realTabId) {
             realTabId, buildTypeScript(text), "computer"
         );
     } catch (err) {
-        if (/was closed during|timed out/.test(err.message)) throw err;
+        if (/was closed during|executeScript timed out/.test(err.message)) throw err;
         throw globalThis.classifyExecuteScriptError("computer", realTabId, err);
     }
 
@@ -515,7 +515,7 @@ async function handleKey(args, realTabId) {
             realTabId, buildKeyScript(text, repeatNum), "computer"
         );
     } catch (err) {
-        if (/was closed during|timed out/.test(err.message)) throw err;
+        if (/was closed during|executeScript timed out/.test(err.message)) throw err;
         throw globalThis.classifyExecuteScriptError("computer", realTabId, err);
     }
 
@@ -662,7 +662,7 @@ async function handleScroll(args, realTabId) {
             realTabId, buildScrollScript(coordinate, scroll_direction, scrollAmount), "computer"
         );
     } catch (err) {
-        if (/was closed during|timed out/.test(err.message)) throw err;
+        if (/was closed during|executeScript timed out/.test(err.message)) throw err;
         throw globalThis.classifyExecuteScriptError("computer", realTabId, err);
     }
 
@@ -687,7 +687,7 @@ async function handleScrollTo(args, realTabId) {
             realTabId, buildScrollToScript(ref), "computer"
         );
     } catch (err) {
-        if (/was closed during|timed out/.test(err.message)) throw err;
+        if (/was closed during|executeScript timed out/.test(err.message)) throw err;
         throw globalThis.classifyExecuteScriptError("computer", realTabId, err);
     }
 
@@ -714,7 +714,7 @@ async function handleDrag(args, realTabId) {
             realTabId, buildDragScript(start_coordinate, coordinate), "computer"
         );
     } catch (err) {
-        if (/was closed during|timed out/.test(err.message)) throw err;
+        if (/was closed during|executeScript timed out/.test(err.message)) throw err;
         throw globalThis.classifyExecuteScriptError("computer", realTabId, err);
     }
 
