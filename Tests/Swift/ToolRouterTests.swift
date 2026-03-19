@@ -816,6 +816,37 @@ final class ToolRouterDispatchTests: XCTestCase {
                       "req-B (client-other) should still be pending and cancellable: \(message)")
     }
 
+    // T_disconnect2 — didDisconnect deletes response files for the disconnecting client (Spec 025 §4)
+    func testDidDisconnect_deletesResponseFilesForClient() throws {
+        guard let dir = AppConstants.responsesDirectoryURL else {
+            throw XCTSkip("App Group unavailable in test environment")
+        }
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+
+        // Create response files for two requests — one belonging to the disconnecting client
+        let reqA = "req-disc-A"
+        let reqB = "req-disc-B"
+        let fileA = dir.appendingPathComponent("\(reqA).json")
+        let fileB = dir.appendingPathComponent("\(reqB).json")
+        try "{}".data(using: .utf8)!.write(to: fileA, options: .atomic)
+        try "{}".data(using: .utf8)!.write(to: fileB, options: .atomic)
+        addTeardownBlock {
+            try? FileManager.default.removeItem(at: fileA)
+            try? FileManager.default.removeItem(at: fileB)
+        }
+
+        router.injectPendingRequest(requestId: reqA, clientId: "client-disc", jsonrpcId: 20)
+        router.injectPendingRequest(requestId: reqB, clientId: "client-other", jsonrpcId: 21)
+
+        // Disconnect client-disc — its response file should be deleted
+        router.socketServer(server, didDisconnect: "client-disc")
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: fileA.path),
+                        "Response file for disconnected client should be deleted")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: fileB.path),
+                       "Response file for other client should be preserved")
+    }
+
     // MARK: - parseZoomRegion
 
     func testParseZoomRegion_validIntArray_returnsTuple() {
