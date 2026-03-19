@@ -218,3 +218,108 @@ describe("tabs-manager", () => {
         expect(id1).not.toBe(id2);
     });
 });
+
+// ---------------------------------------------------------------------------
+// pruneStaleGroups (Spec 025 §1)
+// ---------------------------------------------------------------------------
+
+describe("pruneStaleGroups", () => {
+    afterEach(() => {
+        jest.resetModules();
+        delete globalThis.browser;
+        delete globalThis.registerTool;
+        delete globalThis.pruneStaleGroups;
+    });
+
+    function setup(opts) {
+        jest.resetModules();
+        const bm = makeBrowserMock(opts);
+        globalThis.browser = bm;
+        globalThis.registerTool = jest.fn();
+        require("../../ClaudeInSafari Extension/Resources/tools/tabs-manager.js");
+        return bm;
+    }
+
+    test("T_prune1: removes tabs whose real tab no longer exists", async () => {
+        const bm = setup({
+            existingRealTabs: { 10: { id: 10, url: "https://a.com", title: "A" } },
+            storageData: {
+                __claudeTabGroups: {
+                    nextGroupId: 2, nextTabId: 3,
+                    groups: {
+                        "1": {
+                            tabs: {
+                                "1": { realTabId: 10, url: "https://a.com", title: "A", isStale: false },
+                                "2": { realTabId: 99, url: "https://gone.com", title: "Gone", isStale: false },
+                            },
+                        },
+                    },
+                },
+            },
+        });
+
+        await globalThis.pruneStaleGroups();
+
+        const state = bm.storage.session._raw.__claudeTabGroups;
+        expect(Object.keys(state.groups["1"].tabs)).toEqual(["1"]);
+    });
+
+    test("T_prune2: deletes group when all tabs are dead", async () => {
+        const bm = setup({
+            existingRealTabs: {},
+            storageData: {
+                __claudeTabGroups: {
+                    nextGroupId: 2, nextTabId: 2,
+                    groups: {
+                        "1": {
+                            tabs: {
+                                "1": { realTabId: 99, url: "https://gone.com", title: "Gone", isStale: false },
+                            },
+                        },
+                    },
+                },
+            },
+        });
+
+        await globalThis.pruneStaleGroups();
+
+        const state = bm.storage.session._raw.__claudeTabGroups;
+        expect(Object.keys(state.groups)).toEqual([]);
+    });
+
+    test("T_prune3: no-op when no groups exist", async () => {
+        const bm = setup({ existingRealTabs: {} });
+
+        await globalThis.pruneStaleGroups();
+
+        const state = bm.storage.session._raw.__claudeTabGroups;
+        expect(state).toBeUndefined();
+    });
+
+    test("T_prune4: preserves groups with all live tabs", async () => {
+        const bm = setup({
+            existingRealTabs: {
+                10: { id: 10, url: "https://a.com", title: "A" },
+                11: { id: 11, url: "https://b.com", title: "B" },
+            },
+            storageData: {
+                __claudeTabGroups: {
+                    nextGroupId: 2, nextTabId: 3,
+                    groups: {
+                        "1": {
+                            tabs: {
+                                "1": { realTabId: 10, url: "https://a.com", title: "A", isStale: false },
+                                "2": { realTabId: 11, url: "https://b.com", title: "B", isStale: false },
+                            },
+                        },
+                    },
+                },
+            },
+        });
+
+        await globalThis.pruneStaleGroups();
+
+        const state = bm.storage.session._raw.__claudeTabGroups;
+        expect(Object.keys(state.groups["1"].tabs)).toEqual(["1", "2"]);
+    });
+});
