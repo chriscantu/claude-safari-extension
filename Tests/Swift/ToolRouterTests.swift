@@ -886,6 +886,23 @@ final class ToolRouterDispatchTests: XCTestCase {
         router.performStartupCleanup()
     }
 
+    func testPerformStartupCleanup_deletesStaleGenerationFile() throws {
+        guard let genURL = AppConstants.extensionGenerationURL else {
+            throw XCTSkip("App Group unavailable in test environment")
+        }
+        let dir = genURL.deletingLastPathComponent()
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        try "stale-gen".data(using: .utf8)!.write(to: genURL, options: .atomic)
+        addTeardownBlock { try? FileManager.default.removeItem(at: genURL) }
+        XCTAssertTrue(FileManager.default.fileExists(atPath: genURL.path), "Precondition: generation file exists")
+
+        let router = ToolRouter()
+        router.performStartupCleanup()
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: genURL.path),
+                        "Generation file should be deleted after startup cleanup")
+    }
+
     // MARK: - Extension Generation Detection (Spec 023 H2)
 
     func testReadExtensionGeneration_returnsFileContents() throws {
