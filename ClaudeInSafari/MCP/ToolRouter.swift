@@ -205,6 +205,8 @@ class ToolRouter: MCPSocketServerDelegate {
     }
 
     /// Set of tool names that use browser.tabs.executeScript and require Safari frontmost.
+    /// Must include every tool whose extension handler calls executeScript via
+    /// executeScriptWithTabGuard. Update when adding new executeScript-based tools.
     private static let executeScriptTools: Set<String> = [
         "computer", "find", "read_page", "form_input", "get_page_text",
         "javascript_tool", "read_console_messages", "read_network_requests",
@@ -240,7 +242,8 @@ class ToolRouter: MCPSocketServerDelegate {
             return
         }
 
-        // Poll briefly for activation to take effect (window server is async)
+        // Poll briefly for activation to take effect (window server is async).
+        // Called on the GCD delegate queue — sequential MCP tool requests make this safe.
         for _ in 0..<10 {
             if safari.isActive { return }
             Thread.sleep(forTimeInterval: 0.05)
