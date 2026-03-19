@@ -407,11 +407,11 @@ async function handleClick(args, realTabId) {
 
     let results;
     try {
-        results = await browser.tabs.executeScript(realTabId, {
-            code: buildClickScript(action, coordinate, ref, modifiers),
-            runAt: "document_idle",
-        });
+        results = await globalThis.executeScriptWithTabGuard(
+            realTabId, buildClickScript(action, coordinate, ref, modifiers), "computer"
+        );
     } catch (err) {
+        if (/was closed during/.test(err.message)) throw err;
         throw globalThis.classifyExecuteScriptError("computer", realTabId, err);
     }
 
@@ -431,11 +431,11 @@ async function handleHover(args, realTabId) {
 
     let results;
     try {
-        results = await browser.tabs.executeScript(realTabId, {
-            code: buildHoverScript(coordinate, ref),
-            runAt: "document_idle",
-        });
+        results = await globalThis.executeScriptWithTabGuard(
+            realTabId, buildHoverScript(coordinate, ref), "computer"
+        );
     } catch (err) {
+        if (/was closed during/.test(err.message)) throw err;
         throw globalThis.classifyExecuteScriptError("computer", realTabId, err);
     }
 
@@ -457,11 +457,11 @@ async function handleType(args, realTabId) {
 
     let results;
     try {
-        results = await browser.tabs.executeScript(realTabId, {
-            code: buildTypeScript(text),
-            runAt: "document_idle",
-        });
+        results = await globalThis.executeScriptWithTabGuard(
+            realTabId, buildTypeScript(text), "computer"
+        );
     } catch (err) {
+        if (/was closed during/.test(err.message)) throw err;
         throw globalThis.classifyExecuteScriptError("computer", realTabId, err);
     }
 
@@ -485,11 +485,11 @@ async function handleKey(args, realTabId) {
 
     let results;
     try {
-        results = await browser.tabs.executeScript(realTabId, {
-            code: buildKeyScript(text, repeatNum),
-            runAt: "document_idle",
-        });
+        results = await globalThis.executeScriptWithTabGuard(
+            realTabId, buildKeyScript(text, repeatNum), "computer"
+        );
     } catch (err) {
+        if (/was closed during/.test(err.message)) throw err;
         throw globalThis.classifyExecuteScriptError("computer", realTabId, err);
     }
 
@@ -632,11 +632,11 @@ async function handleScroll(args, realTabId) {
 
     let results;
     try {
-        results = await browser.tabs.executeScript(realTabId, {
-            code: buildScrollScript(coordinate, scroll_direction, scrollAmount),
-            runAt: "document_idle",
-        });
+        results = await globalThis.executeScriptWithTabGuard(
+            realTabId, buildScrollScript(coordinate, scroll_direction, scrollAmount), "computer"
+        );
     } catch (err) {
+        if (/was closed during/.test(err.message)) throw err;
         throw globalThis.classifyExecuteScriptError("computer", realTabId, err);
     }
 
@@ -657,11 +657,11 @@ async function handleScrollTo(args, realTabId) {
 
     let results;
     try {
-        results = await browser.tabs.executeScript(realTabId, {
-            code: buildScrollToScript(ref),
-            runAt: "document_idle",
-        });
+        results = await globalThis.executeScriptWithTabGuard(
+            realTabId, buildScrollToScript(ref), "computer"
+        );
     } catch (err) {
+        if (/was closed during/.test(err.message)) throw err;
         throw globalThis.classifyExecuteScriptError("computer", realTabId, err);
     }
 
@@ -684,11 +684,11 @@ async function handleDrag(args, realTabId) {
 
     let results;
     try {
-        results = await browser.tabs.executeScript(realTabId, {
-            code: buildDragScript(start_coordinate, coordinate),
-            runAt: "document_idle",
-        });
+        results = await globalThis.executeScriptWithTabGuard(
+            realTabId, buildDragScript(start_coordinate, coordinate), "computer"
+        );
     } catch (err) {
+        if (/was closed during/.test(err.message)) throw err;
         throw globalThis.classifyExecuteScriptError("computer", realTabId, err);
     }
 
