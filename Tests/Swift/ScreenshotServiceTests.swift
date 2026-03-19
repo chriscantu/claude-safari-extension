@@ -311,4 +311,44 @@ final class ScreenshotServiceTests: XCTestCase {
         waitForExpectations(timeout: 1)
         XCTAssertEqual(Set(ids).count, 3, "All imageIds should be unique")
     }
+
+    // MARK: - T_ttl1: Images older than 5 minutes are evicted by cleanup timer (Spec 025 §3)
+
+    func testTTLEvictsExpiredImages() {
+        // Capture an image (timestamp = now)
+        let exp1 = expectation(description: "capture")
+        var capturedId: String?
+        service.captureScreenshot(tabId: nil) { result in
+            if case .success(let img) = result { capturedId = img.imageId }
+            exp1.fulfill()
+        }
+        waitForExpectations(timeout: 1)
+        guard let id = capturedId else { return XCTFail("No imageId") }
+        XCTAssertNotNil(service.retrieveImage(imageId: id), "Image should exist before TTL")
+
+        // Run cleanup with a custom expiration of 0 seconds (everything expires immediately)
+        service.evictExpiredImages(olderThan: 0)
+
+        XCTAssertNil(service.retrieveImage(imageId: id), "Image should be evicted after TTL cleanup")
+        XCTAssertEqual(service.imageCount, 0, "Image count should be 0 after eviction")
+    }
+
+    // MARK: - T_ttl2: Fresh images survive TTL cleanup
+
+    func testTTLPreservesFreshImages() {
+        let exp1 = expectation(description: "capture")
+        var capturedId: String?
+        service.captureScreenshot(tabId: nil) { result in
+            if case .success(let img) = result { capturedId = img.imageId }
+            exp1.fulfill()
+        }
+        waitForExpectations(timeout: 1)
+        guard let id = capturedId else { return XCTFail("No imageId") }
+
+        // Run cleanup with a long expiration (images younger than 1 hour survive)
+        service.evictExpiredImages(olderThan: 3600)
+
+        XCTAssertNotNil(service.retrieveImage(imageId: id), "Fresh image should survive TTL cleanup")
+        XCTAssertEqual(service.imageCount, 1)
+    }
 }
