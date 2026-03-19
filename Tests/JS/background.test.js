@@ -393,6 +393,32 @@ describe("background.js poll loop", () => {
         expect(pollCalls.length).toBeGreaterThanOrEqual(3);
     });
 
+    // T16 — Prune scheduling: pruneStaleGroups called after 60s of idle (Spec 025 §1)
+    test("T16 — prune fires after 60s idle, skipped during active tool", async () => {
+        const pruneStaleGroups = jest.fn(async () => {});
+        globalThis.pruneStaleGroups = pruneStaleGroups;
+
+        const browser = makeBrowserMock({
+            nativeResponses: Array(20).fill({ type: "idle" }),
+        });
+        loadBackground({ browser });
+
+        // First idle poll
+        await Promise.resolve();
+
+        // Advance 59 seconds — prune should NOT have fired
+        jest.advanceTimersByTime(59000);
+        for (let i = 0; i < 10; i++) await Promise.resolve();
+        expect(pruneStaleGroups).not.toHaveBeenCalled();
+
+        // Advance 2 more seconds (total 61s) — prune should fire
+        jest.advanceTimersByTime(2000);
+        for (let i = 0; i < 10; i++) await Promise.resolve();
+        expect(pruneStaleGroups).toHaveBeenCalledTimes(1);
+
+        delete globalThis.pruneStaleGroups;
+    });
+
     // T13 — extension_ready: sends generation marker on load (Spec 023 H2)
     test("T13 — sends extension_ready with generation on load", () => {
         const mock = makeBrowserMock();

@@ -225,25 +225,35 @@ async function pruneStaleGroups() {
     const state = await readState();
     if (!state.groups || Object.keys(state.groups).length === 0) return;
 
-    let changed = false;
+    // Phase 1: collect stale tab IDs without mutating state (avoids read-modify-write race)
+    const staleEntries = [];
     for (const [groupId, group] of Object.entries(state.groups)) {
         for (const [vtid, entry] of Object.entries(group.tabs)) {
+            if (typeof entry.realTabId !== "number") {
+                console.warn("prune: corrupt entry vtid=" + vtid + " in group=" + groupId);
+                staleEntries.push({ groupId, vtid });
+                continue;
+            }
             try {
                 await browser.tabs.get(entry.realTabId);
             } catch (_) {
-                delete group.tabs[vtid];
-                changed = true;
+                staleEntries.push({ groupId, vtid });
             }
         }
-        if (Object.keys(group.tabs).length === 0) {
-            delete state.groups[groupId];
-            changed = true;
+    }
+    if (staleEntries.length === 0) return;
+
+    // Phase 2: re-read fresh state and apply removals
+    const freshState = await readState();
+    for (const { groupId, vtid } of staleEntries) {
+        if (freshState.groups[groupId]?.tabs[vtid]) {
+            delete freshState.groups[groupId].tabs[vtid];
+        }
+        if (freshState.groups[groupId] && Object.keys(freshState.groups[groupId].tabs).length === 0) {
+            delete freshState.groups[groupId];
         }
     }
-
-    if (changed) {
-        await writeState(state);
-    }
+    await writeState(freshState);
 }
 
 // ---------------------------------------------------------------------------

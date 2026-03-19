@@ -137,13 +137,13 @@ async function pollForRequests() {
                 console.error("Poll: native message failed:", error);
             }
             isActive = false;
-            idleStreak++;
+            idleStreak = Math.min(idleStreak + 1, 10);
             return;
         }
 
         if (!response || response.type !== "tool_request") {
             isActive = false;
-            idleStreak++;
+            idleStreak = Math.min(idleStreak + 1, 10);
             return;
         }
 
@@ -157,7 +157,7 @@ async function pollForRequests() {
         } catch (error) {
             console.error("Poll: failed to parse tool request payload:", error);
             isActive = false;
-            idleStreak++;
+            idleStreak = Math.min(idleStreak + 1, 10);
             return;
         }
 
@@ -282,7 +282,7 @@ async function pollForRequests() {
                 lastPruneTime = now;
                 isPruning = true;
                 globalThis.pruneStaleGroups()
-                    .catch((e) => console.warn("prune: failed (non-critical):", e && e.message))
+                    .catch((e) => console.error("prune: failed:", e))
                     .finally(() => { isPruning = false; });
             }
         }
