@@ -81,11 +81,6 @@ class ToolRouter: MCPSocketServerDelegate {
         return String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    /// Test-only: call pollForExtensionResponse from tests.
-    func pollForExtensionResponseForTest(requestId: String, deadline: Date, generationSnapshot: String?) {
-        pollForExtensionResponse(requestId: requestId, deadline: deadline, generationSnapshot: generationSnapshot)
-    }
-
     /// Staging set for native tools whose handler branch is not yet wired up in handleToolCall().
     /// Empty by default. Add a tool name here to have it return "not yet implemented" instead of
     /// being silently forwarded to the extension (useful while developing a new native handler).
@@ -728,7 +723,7 @@ class ToolRouter: MCPSocketServerDelegate {
                                  generationSnapshot: generationSnapshot)
     }
 
-    private func pollForExtensionResponse(requestId: String, deadline: Date,
+    func pollForExtensionResponse(requestId: String, deadline: Date,
                                            generationSnapshot: String?) {
         guard let fileURL = AppConstants.responseFileURL(for: requestId) else {
             failPendingRequest(requestId: requestId, message: "App Group unavailable")
@@ -782,12 +777,12 @@ class ToolRouter: MCPSocketServerDelegate {
         }
     }
 
-    private func failPendingRequest(requestId: String, message: String) {
+    func failPendingRequest(requestId: String, message: String) {
         // M1: Delete the response file to prevent orphans
         if let url = AppConstants.responseFileURL(for: requestId) {
             do {
                 try FileManager.default.removeItem(at: url)
-            } catch let error as NSError where error.domain == NSCocoaErrorDomain && error.code == NSFileReadNoSuchFileError {
+            } catch let error as NSError where error.domain == NSCocoaErrorDomain && error.code == NSFileNoSuchFileError {
                 // File doesn't exist — not an error
             } catch {
                 NSLog("ToolRouter: failed to delete response file for %@: %@", requestId, error.localizedDescription)
@@ -803,10 +798,6 @@ class ToolRouter: MCPSocketServerDelegate {
         }
     }
 
-    /// Test-only: call failPendingRequest from tests.
-    func failPendingRequestForTest(requestId: String, message: String) {
-        failPendingRequest(requestId: requestId, message: message)
-    }
 
     // MARK: - Extension Queue
 

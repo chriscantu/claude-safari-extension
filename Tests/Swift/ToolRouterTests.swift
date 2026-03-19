@@ -895,12 +895,11 @@ final class ToolRouterDispatchTests: XCTestCase {
         let dir = url.deletingLastPathComponent()
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         try "test-gen-abc".data(using: .utf8)!.write(to: url, options: .atomic)
+        addTeardownBlock { try? FileManager.default.removeItem(at: url) }
 
         let router = ToolRouter()
         let gen = router.readExtensionGeneration()
         XCTAssertEqual(gen, "test-gen-abc")
-
-        try? FileManager.default.removeItem(at: url)
     }
 
     func testReadExtensionGeneration_returnsNilWhenFileAbsent() throws {
@@ -922,6 +921,7 @@ final class ToolRouterDispatchTests: XCTestCase {
         }
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         try "gen-A".data(using: .utf8)!.write(to: genURL, options: .atomic)
+        addTeardownBlock { try? FileManager.default.removeItem(at: genURL) }
 
         let mockServer = MockMCPSocketServer()
         let router = ToolRouter(
@@ -937,7 +937,7 @@ final class ToolRouterDispatchTests: XCTestCase {
         // Change generation to simulate a background page reload
         try "gen-B".data(using: .utf8)!.write(to: genURL, options: .atomic)
 
-        router.pollForExtensionResponseForTest(requestId: requestId, deadline: Date().addingTimeInterval(30),
+        router.pollForExtensionResponse(requestId: requestId, deadline: Date().addingTimeInterval(30),
                                                 generationSnapshot: "gen-A")
 
         let expectation = XCTestExpectation(description: "Poll detects generation mismatch")
@@ -947,8 +947,6 @@ final class ToolRouterDispatchTests: XCTestCase {
         let json = mockServer.lastSentJSON()
         let errorMsg = (json?["error"] as? [String: Any])?["message"] as? String ?? ""
         XCTAssertTrue(errorMsg.contains("Extension reloaded"), "Expected generation mismatch error, got: \(errorMsg)")
-
-        try? FileManager.default.removeItem(at: genURL)
     }
 
     func testPollForExtensionResponse_nilGeneration_doesNotFail() throws {
@@ -971,7 +969,7 @@ final class ToolRouterDispatchTests: XCTestCase {
         let requestId = "nil-gen-test"
         router.injectPendingRequest(requestId: requestId, clientId: "test-client", jsonrpcId: 43)
 
-        router.pollForExtensionResponseForTest(requestId: requestId, deadline: Date().addingTimeInterval(0.15),
+        router.pollForExtensionResponse(requestId: requestId, deadline: Date().addingTimeInterval(0.15),
                                                 generationSnapshot: nil)
 
         let expectation = XCTestExpectation(description: "Poll times out normally")
@@ -994,6 +992,7 @@ final class ToolRouterDispatchTests: XCTestCase {
 
         // Write initial generation and then change it (simulating a reload)
         try "gen-old".data(using: .utf8)!.write(to: genURL, options: .atomic)
+        addTeardownBlock { try? FileManager.default.removeItem(at: genURL) }
 
         let mockServer = MockMCPSocketServer()
         let router = ToolRouter(
@@ -1014,7 +1013,7 @@ final class ToolRouterDispatchTests: XCTestCase {
             to: dir.appendingPathComponent("\(requestId).json"), options: .atomic)
         try "gen-new".data(using: .utf8)!.write(to: genURL, options: .atomic)
 
-        router.pollForExtensionResponseForTest(requestId: requestId, deadline: Date().addingTimeInterval(30),
+        router.pollForExtensionResponse(requestId: requestId, deadline: Date().addingTimeInterval(30),
                                                 generationSnapshot: "gen-old")
 
         let expectation = XCTestExpectation(description: "Response delivered despite generation mismatch")
@@ -1027,9 +1026,6 @@ final class ToolRouterDispatchTests: XCTestCase {
         let errorMsg = (json?["error"] as? [String: Any])?["message"] as? String
         XCTAssertTrue(hasResult, "Expected success result, got error: \(errorMsg ?? "nil")")
         XCTAssertNil(errorMsg, "Should not have error when response file exists")
-
-        // Cleanup
-        try? FileManager.default.removeItem(at: genURL)
     }
 
     // MARK: - Response File Cleanup (Spec 023 M1)
@@ -1054,7 +1050,7 @@ final class ToolRouterDispatchTests: XCTestCase {
         router.setServer(mockServer)
 
         router.injectPendingRequest(requestId: requestId, clientId: "test-client", jsonrpcId: 1)
-        router.failPendingRequestForTest(requestId: requestId, message: "test timeout")
+        router.failPendingRequest(requestId: requestId, message: "test timeout")
 
         XCTAssertFalse(FileManager.default.fileExists(atPath: responseFile.path),
                         "Response file should be deleted after failPendingRequest")
