@@ -290,6 +290,7 @@ class ToolRouter: MCPSocketServerDelegate {
 
     func socketServer(_ server: MCPSocketServer, didDisconnect clientId: String) {
         NSLog("MCP client disconnected: \(clientId)")
+        // Collect request IDs under lock, then release before doing file I/O
         pendingRequestsLock.lock()
         let toCancel = pendingRequests.filter { $0.value.clientId == clientId }.map { $0.key }
         toCancel.forEach {
@@ -297,6 +298,19 @@ class ToolRouter: MCPSocketServerDelegate {
             pendingToolContext.removeValue(forKey: $0)
         }
         pendingRequestsLock.unlock()
+
+        // Spec 025 §4: Delete orphaned response files outside the lock
+        for requestId in toCancel {
+            if let url = AppConstants.responseFileURL(for: requestId) {
+                do {
+                    try FileManager.default.removeItem(at: url)
+                } catch let error as NSError where error.domain == NSCocoaErrorDomain && error.code == NSFileNoSuchFileError {
+                    // File doesn't exist — not an error
+                } catch {
+                    NSLog("ToolRouter: disconnect cleanup failed to delete response file for %@: %@", requestId, error.localizedDescription)
+                }
+            }
+        }
     }
 
     // MARK: - MCP Protocol Handlers
