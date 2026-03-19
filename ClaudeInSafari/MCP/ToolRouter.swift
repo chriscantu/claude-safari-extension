@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import UserNotifications
 
@@ -200,6 +201,29 @@ class ToolRouter: MCPSocketServerDelegate {
         NSLog("cancelCurrentRequest: cancelling %d extension request(s); nativeCallCancelled=true", toCancel.count)
         for requestId in toCancel {
             failPendingRequest(requestId: requestId, message: "Cancelled by user")
+        }
+    }
+
+    /// Set of tool names that use browser.tabs.executeScript and require Safari frontmost.
+    private static let executeScriptTools: Set<String> = [
+        "computer", "find", "read_page", "form_input", "get_page_text",
+        "javascript_tool", "read_console_messages", "read_network_requests",
+        "upload_image", "file_upload"
+    ]
+
+    /// Activate Safari if it is not already the frontmost application.
+    /// Best-effort: logs a warning on failure but does not throw — the tool will
+    /// fail with a clearer executeScript permission error.
+    func activateSafariIfNeeded() {
+        guard let safari = NSWorkspace.shared.runningApplications.first(where: {
+            $0.bundleIdentifier == "com.apple.Safari"
+        }) else {
+            NSLog("activateSafariIfNeeded: Safari is not running")
+            return
+        }
+        if safari.isActive { return }
+        if !safari.activate(options: .activateIgnoringOtherApps) {
+            NSLog("activateSafariIfNeeded: activate() returned false")
         }
     }
 
@@ -714,6 +738,11 @@ class ToolRouter: MCPSocketServerDelegate {
 
     private func forwardToExtension(_ queued: QueuedToolRequest, id: Any?, clientId: String,
                                      arguments: [String: Any] = [:]) {
+        // Activate Safari before executeScript-requiring tools
+        if Self.executeScriptTools.contains(queued.tool) {
+            activateSafariIfNeeded()
+        }
+
         guard enqueueToolRequest(queued) else {
             sendError(id: id, code: -32000, message: "Failed to enqueue tool request", to: clientId)
             return

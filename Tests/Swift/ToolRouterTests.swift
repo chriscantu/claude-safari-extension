@@ -1072,4 +1072,16 @@ final class ToolRouterDispatchTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: responseFile.path),
                         "Response file should be deleted after failPendingRequest")
     }
+
+    // MARK: - Safari Activation
+
+    func testActivateSafariIfNeeded_doesNotCrash() {
+        // activateSafariIfNeeded is a best-effort call.
+        // We verify it doesn't crash and returns without error.
+        // Full activation requires a running Safari.app — cannot unit test.
+        let router = ToolRouter()
+        router.activateSafariIfNeeded()
+        // No assertion — just verifying it doesn't crash or hang.
+        // Integration testing via `make send` covers actual activation.
+    }
 }
