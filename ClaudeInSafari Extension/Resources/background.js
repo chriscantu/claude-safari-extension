@@ -25,6 +25,9 @@ const POLL_INTERVAL_MS = 100;
 const POLL_IDLE_INTERVAL_MS = 5000;
 let isActive = false;
 let pollTimer = null;
+let idleStreak = 0;
+let lastPruneTime = Date.now();
+let isPruning = false;
 
 // ── Indicator state ───────────────────────────────────────────────────────
 var currentRequestId   = null; // requestId of the in-flight extension-forwarded tool call
@@ -134,15 +137,18 @@ async function pollForRequests() {
                 console.error("Poll: native message failed:", error);
             }
             isActive = false;
+            idleStreak++;
             return;
         }
 
         if (!response || response.type !== "tool_request") {
             isActive = false;
+            idleStreak++;
             return;
         }
 
         isActive = true;
+        idleStreak = 0;
 
         // Phase 2: parse the tool request payload
         let payload;
@@ -151,6 +157,7 @@ async function pollForRequests() {
         } catch (error) {
             console.error("Poll: failed to parse tool request payload:", error);
             isActive = false;
+            idleStreak++;
             return;
         }
 
@@ -265,7 +272,20 @@ async function pollForRequests() {
         }
     } finally {
         // Schedule next poll (faster when active, slower when idle)
-        const interval = isActive ? POLL_INTERVAL_MS : POLL_IDLE_INTERVAL_MS;
+        const interval = isActive
+            ? POLL_INTERVAL_MS
+            : Math.min(POLL_INTERVAL_MS * Math.pow(2, idleStreak), POLL_IDLE_INTERVAL_MS);
+        // Spec 025 §1: periodic tab group pruning (every 60s when idle)
+        if (idleStreak > 0 && !isPruning && typeof globalThis.pruneStaleGroups === "function") {
+            const now = Date.now();
+            if (now - lastPruneTime >= 60000) {
+                lastPruneTime = now;
+                isPruning = true;
+                globalThis.pruneStaleGroups()
+                    .catch((e) => console.warn("prune: failed (non-critical):", e && e.message))
+                    .finally(() => { isPruning = false; });
+            }
+        }
         pollTimer = setTimeout(pollForRequests, interval);
     }
 }
