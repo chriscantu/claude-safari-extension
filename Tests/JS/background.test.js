@@ -326,6 +326,73 @@ describe("background.js poll loop", () => {
         expect(() => loadBackground({ browser })).not.toThrow();
     });
 
+    // T14 — Poll backoff: second idle poll fires at 200ms, not at 100ms (Spec 025 §2)
+    // Strategy: after the first idle response, advance only 100ms — that should NOT fire
+    // the second poll (which should be at 200ms). Then advance another 100ms — that should.
+    test("T14 — idle backoff: second idle poll needs 200ms, not 100ms", async () => {
+        const browser = makeBrowserMock({
+            nativeResponses: [{ type: "idle" }, { type: "idle" }, { type: "idle" }],
+        });
+        loadBackground({ browser });
+
+        // First poll fires immediately (no timer). Wait for it to resolve.
+        await Promise.resolve();
+
+        // After first idle response, idleStreak=1, next timer = 100*2^1 = 200ms.
+        // Advance only 100ms — second poll should NOT have fired yet.
+        jest.advanceTimersByTime(100);
+        await Promise.resolve();
+        const pollsAfter100 = browser.runtime.sendNativeMessage.mock.calls
+            .filter(([, msg]) => msg.type === "poll").length;
+
+        // Advance another 100ms (total 200ms) — second poll should fire now.
+        jest.advanceTimersByTime(100);
+        await Promise.resolve();
+        const pollsAfter200 = browser.runtime.sendNativeMessage.mock.calls
+            .filter(([, msg]) => msg.type === "poll").length;
+
+        // Before backoff: both would be 2 (binary switch used 5000ms idle).
+        // With backoff: pollsAfter100 === 1 (timer hasn't fired), pollsAfter200 === 2.
+        expect(pollsAfter100).toBe(1);
+        expect(pollsAfter200).toBe(2);
+    });
+
+    // T15 — Poll backoff: activity resets idleStreak to 0 (Spec 025 §2)
+    test("T15 — activity resets backoff: tool request after idle resets to 100ms", async () => {
+        const payload = { tool: "navigate", args: {}, requestId: "req-backoff" };
+        const browser = makeBrowserMock({
+            nativeResponses: [
+                { type: "idle" },
+                { type: "tool_request", payload: JSON.stringify(payload) },
+                { type: "idle" },
+            ],
+        });
+        loadBackground({ browser });
+
+        // First idle poll
+        await Promise.resolve();
+
+        // idleStreak=1, next timer at 200ms
+        jest.advanceTimersByTime(200);
+        await Promise.resolve();
+
+        // Second poll is a tool_request — resets idleStreak=0
+        jest.runAllTimers(); // setTimeout(0) for tool dispatch
+        await Promise.resolve(); // executeTool
+        await Promise.resolve(); // Phase 4 send
+        await Promise.resolve(); // finally
+        await Promise.resolve();
+
+        // After tool, idleStreak=0, so next timer is 100ms (100*2^0).
+        // Advance 100ms — the idle poll after the tool should fire.
+        jest.advanceTimersByTime(100);
+        await Promise.resolve();
+
+        const pollCalls = browser.runtime.sendNativeMessage.mock.calls
+            .filter(([, msg]) => msg.type === "poll");
+        expect(pollCalls.length).toBeGreaterThanOrEqual(3);
+    });
+
     // T13 — extension_ready: sends generation marker on load (Spec 023 H2)
     test("T13 — sends extension_ready with generation on load", () => {
         const mock = makeBrowserMock();
