@@ -141,7 +141,51 @@ final class ConfigInstallerTests: XCTestCase {
         XCTAssertNotNil(json["installed_at"] as? String)
     }
 
-    // T8: removeMarkerFile deletes the file
+    // T8: install removes stale MCP server keys
+    func testInstall_removesStaleKeys() throws {
+        let configPath = tmpDir.appendingPathComponent("claude.json").path
+        let existing = """
+        {
+          "mcpServers": {
+            "claude-safari-mcp": {
+              "command": "/old/wrapper",
+              "args": []
+            },
+            "other-server": {
+              "command": "other-binary"
+            }
+          }
+        }
+        """
+        try existing.write(toFile: configPath, atomically: true, encoding: .utf8)
+
+        let result = ConfigInstaller.installConfig(
+            bridgePath: "/test/bridge",
+            configPath: configPath
+        )
+        XCTAssertTrue(result.success)
+        XCTAssertTrue(result.message.contains("removed stale"))
+
+        let data = try Data(contentsOf: URL(fileURLWithPath: configPath))
+        let json = try JSONSerialization.jsonObject(with: data) as! [String: Any]
+        let servers = json["mcpServers"] as! [String: Any]
+        XCTAssertNil(servers["claude-safari-mcp"], "Stale key must be removed")
+        XCTAssertNotNil(servers["claude-in-safari"], "Current key must be present")
+        XCTAssertNotNil(servers["other-server"], "Unrelated servers must be preserved")
+    }
+
+    // T9: install without stale keys does not mention removal
+    func testInstall_noStaleKeys_noRemovalMessage() throws {
+        let configPath = tmpDir.appendingPathComponent("claude.json").path
+        let result = ConfigInstaller.installConfig(
+            bridgePath: "/test/bridge",
+            configPath: configPath
+        )
+        XCTAssertTrue(result.success)
+        XCTAssertFalse(result.message.contains("removed stale"))
+    }
+
+    // T10: removeMarkerFile deletes the file
     func testRemoveMarkerFile_deletesFile() throws {
         let markerPath = tmpDir.appendingPathComponent("mcp_config_installed.json").path
         ConfigInstaller.writeMarkerFile(bridgePath: "/test/bridge", clients: [], markerPath: markerPath)

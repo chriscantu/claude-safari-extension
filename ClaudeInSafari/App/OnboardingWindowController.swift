@@ -516,7 +516,7 @@ final class OnboardingWindowController: NSWindowController {
         title.frame = NSRect(x: Layout.padding, y: checkIcon.frame.minY - 42, width: Layout.windowWidth - Layout.padding * 2, height: 30)
         root.addSubview(title)
 
-        let body = makeLabel("Claude Code can now use Safari. Look for the robot icon in your menu bar whenever the connection is active.", size: 13, weight: .regular, color: .secondaryLabelColor, wraps: true)
+        let body = makeLabel("Restart Claude Code or Claude Desktop to connect, then try the example below.", size: 13, weight: .regular, color: .secondaryLabelColor, wraps: true)
         body.alignment = .center
         body.frame = NSRect(x: Layout.padding, y: title.frame.minY - 52, width: Layout.windowWidth - Layout.padding * 2, height: 44)
         root.addSubview(body)

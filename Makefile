@@ -70,6 +70,9 @@ dev: build kill queue-clean run reload-ext health ## Build + relaunch + activate
 # ---------------------------------------------------------------------------
 
 build: ## Build the Xcode project
+	@if [ -d "/Applications/$(APP_NAME).app" ]; then \
+		echo "⚠ /Applications/$(APP_NAME).app exists — Safari will show duplicate extensions."; \
+	fi
 	@echo "Building..."
 	@xcodebuild build \
 		-project $(PROJECT) \
@@ -408,10 +411,24 @@ status: ## Show app, socket, and extension status
 	@echo "=== Build ==="
 	@if [ -d "$(APP_PATH)" ]; then echo "  $(APP_PATH)"; else echo "  Not built (run: make build)"; fi
 
-clean: kill ## Kill app, remove sockets, clean build
+clean: kill ## Kill app, remove sockets, clean DerivedData + local build
 	@rm -rf "$(SOCK_DIR)" 2>/dev/null || true
 	@rm -rf "$(LEGACY_SOCK_DIR)" 2>/dev/null || true
 	@echo "Cleaned sockets"
+	@# Remove DerivedData and local build dir to prevent duplicate Safari extensions.
+	@# When both a debug build (DerivedData) and a release build (/Applications) exist,
+	@# Safari registers two extensions with the same bundle ID, showing duplicates in Settings.
+	@rm -rf ~/Library/Developer/Xcode/DerivedData/ClaudeInSafari-*/ 2>/dev/null || true
+	@rm -rf build/ 2>/dev/null || true
+	@echo "Cleaned DerivedData and local build"
+	@# Warn if a release build exists in /Applications — the new debug build will
+	@# register a second extension with the same bundle ID, causing duplicates in Safari.
+	@if [ -d "/Applications/$(APP_NAME).app" ]; then \
+		echo ""; \
+		echo "⚠ /Applications/$(APP_NAME).app exists — Safari will show duplicate extensions."; \
+		echo "  Remove it or run from /Applications only to avoid duplicates."; \
+		echo ""; \
+	fi
 	@# IMPORTANT: Must run clean + build in one xcodebuild invocation.
 	@# A standalone `xcodebuild clean` followed by a separate `xcodebuild build`
 	@# produces an invalid app signature ("code has no resources but signature

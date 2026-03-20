@@ -340,6 +340,21 @@ final class OnboardingWindowControllerTests: XCTestCase {
 
     // MARK: - Done screen "Try this" card
 
+    // MARK: - T16a: Done screen tells user to restart Claude clients
+
+    func testDoneScreen_containsRestartMessage() {
+        let (controller, _) = makeController()
+        controller.showOnboarding(startingAt: nil)
+        for _ in 0..<4 { controller.advance() }
+        XCTAssertEqual(controller.currentScreen, .done)
+
+        let contentView = controller.window?.contentView
+        let restartLabel = findTextField(in: contentView, matching: "Restart Claude Code or Claude Desktop to connect, then try the example below.")
+        XCTAssertNotNil(restartLabel, "Done screen must tell user to restart Claude clients")
+
+        controller.window?.orderOut(nil)
+    }
+
     // MARK: - T16: Done screen contains the example prompt text
 
     func testDoneScreen_containsExamplePrompt() {

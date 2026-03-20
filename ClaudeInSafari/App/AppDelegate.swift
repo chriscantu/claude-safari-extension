@@ -16,7 +16,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
     // MARK: - Lifecycle
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        requestNotificationAuthorization()
+        // Note: notification authorization is deferred until after onboarding completes
+        // (or requested immediately if onboarding is skipped) to avoid showing a system
+        // permission dialog on top of the onboarding window.
+        registerNotificationCategories()
         setupMenuBar()
         startMCPServer()
         checkAndShowOnboardingIfNeeded()
@@ -60,6 +63,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
             if !status.allGranted {
                 self.showOnboarding(startingAt: status.firstIncompleteStep)
             } else {
+                self.requestNotificationAuthorization()
                 self.startContinuousMonitoring()
                 self.menuBarController?.setState(.connected)
             }
@@ -74,6 +78,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
             let wc = OnboardingWindowController(monitor: permissionMonitor)
             wc.onDismiss = { [weak self] in
                 self?.onboardingWindowController = nil
+                self?.requestNotificationAuthorization()
                 self?.startContinuousMonitoring()
                 self?.updateMenuBarState()
             }
@@ -114,11 +119,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
 
     // MARK: - Notification Authorization
 
-    private func requestNotificationAuthorization() {
+    /// Registers notification categories (no dialog). Safe to call at any time.
+    private func registerNotificationCategories() {
         let center = UNUserNotificationCenter.current()
         center.delegate = self
 
-        // Register the category unconditionally BEFORE requesting authorization.
         // Categories do not require authorization — they must be registered before
         // any notification fires so the "Stop Claude" action button appears even on
         // the very first notification (before the user has responded to the auth dialog).
@@ -134,8 +139,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
             options: []
         )
         center.setNotificationCategories([category])
+    }
 
-        center.requestAuthorization(options: [.alert, .sound]) { granted, error in
+    /// Requests notification authorization (may show a system dialog).
+    /// Called after onboarding completes or immediately if onboarding is skipped.
+    func requestNotificationAuthorization() {
+        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { granted, error in
             if let error = error {
                 NSLog("Notification authorization error: \(error.localizedDescription)")
             } else if !granted {

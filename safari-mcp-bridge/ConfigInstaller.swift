@@ -11,6 +11,10 @@ enum ConfigInstaller {
 
     static let serverKey = "claude-in-safari"
 
+    /// Legacy MCP server keys from earlier development iterations.
+    /// Removed during --install to prevent conflicts with the current entry.
+    static let staleServerKeys = ["claude-safari-mcp"]
+
     /// Well-known config file paths.
     static var claudeCodeConfigPath: String {
         let home = FileManager.default.homeDirectoryForCurrentUser.path
@@ -73,6 +77,14 @@ enum ConfigInstaller {
         // Get or create mcpServers
         var servers = root["mcpServers"] as? [String: Any] ?? [:]
 
+        // Remove stale entries from earlier development iterations
+        var removedStale: [String] = []
+        for staleKey in staleServerKeys {
+            if servers.removeValue(forKey: staleKey) != nil {
+                removedStale.append(staleKey)
+            }
+        }
+
         // Set our entry
         servers[serverKey] = [
             "command": bridgePath,
@@ -88,7 +100,11 @@ enum ConfigInstaller {
                 options: [.prettyPrinted, .sortedKeys]
             )
             try data.write(to: URL(fileURLWithPath: configPath), options: .atomic)
-            return InstallResult(success: true, message: "Configured: \(configPath)")
+            var msg = "Configured: \(configPath)"
+            if !removedStale.isEmpty {
+                msg += " (removed stale: \(removedStale.joined(separator: ", ")))"
+            }
+            return InstallResult(success: true, message: msg)
         } catch {
             return InstallResult(success: false, message: "Failed to write config: \(error.localizedDescription)")
         }
