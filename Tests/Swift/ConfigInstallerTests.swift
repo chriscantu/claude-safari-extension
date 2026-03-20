@@ -115,6 +115,31 @@ final class ConfigInstallerTests: XCTestCase {
         XCTAssertNil(servers["claude-in-safari"])
     }
 
+    // T5b: uninstall also removes stale keys
+    func testUninstall_removesStaleKeys() throws {
+        let configPath = tmpDir.appendingPathComponent("claude.json").path
+        let existing = """
+        {
+          "mcpServers": {
+            "claude-safari-mcp": {"command": "/old/wrapper"},
+            "claude-in-safari": {"command": "/current/bridge"},
+            "other-server": {"command": "other"}
+          }
+        }
+        """
+        try existing.write(toFile: configPath, atomically: true, encoding: .utf8)
+
+        let result = ConfigInstaller.uninstallConfig(configPath: configPath)
+        XCTAssertTrue(result.success)
+
+        let data = try Data(contentsOf: URL(fileURLWithPath: configPath))
+        let json = try JSONSerialization.jsonObject(with: data) as! [String: Any]
+        let servers = json["mcpServers"] as! [String: Any]
+        XCTAssertNil(servers["claude-in-safari"], "Current key must be removed")
+        XCTAssertNil(servers["claude-safari-mcp"], "Stale key must also be removed")
+        XCTAssertNotNil(servers["other-server"], "Unrelated servers must be preserved")
+    }
+
     // T6: creates parent directories if needed
     func testInstall_createsParentDirectories() throws {
         let configPath = tmpDir

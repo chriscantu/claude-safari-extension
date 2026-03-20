@@ -125,6 +125,9 @@ enum ConfigInstaller {
 
             var servers = root["mcpServers"] as? [String: Any] ?? [:]
             servers.removeValue(forKey: serverKey)
+            for staleKey in staleServerKeys {
+                servers.removeValue(forKey: staleKey)
+            }
             root["mcpServers"] = servers
 
             let updated = try JSONSerialization.data(

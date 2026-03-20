@@ -143,7 +143,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
 
     /// Requests notification authorization (may show a system dialog).
     /// Called after onboarding completes or immediately if onboarding is skipped.
-    func requestNotificationAuthorization() {
+    private func requestNotificationAuthorization() {
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { granted, error in
             if let error = error {
                 NSLog("Notification authorization error: \(error.localizedDescription)")
