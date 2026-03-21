@@ -101,11 +101,20 @@ enum BridgeRelay {
             defer { buf.deallocate() }
             while true {
                 let n = Darwin.read(stdinFD, buf, bufSize)
-                if n <= 0 { break }
+                if n == 0 { break } // EOF — stdin closed normally
+                if n < 0 {
+                    if errno == EINTR { continue }
+                    fputs("Bridge: read from stdin failed: \(String(cString: strerror(errno)))\n", stderr)
+                    errorLock.lock()
+                    hadError = true
+                    errorLock.unlock()
+                    break
+                }
                 var written = 0
                 while written < n {
                     let w = Darwin.write(fd, buf.advanced(by: written), n - written)
-                    if w <= 0 {
+                    if w < 0 {
+                        if errno == EINTR { continue }
                         fputs("Bridge: write to socket failed: \(String(cString: strerror(errno)))\n", stderr)
                         errorLock.lock()
                         hadError = true
@@ -114,6 +123,7 @@ enum BridgeRelay {
                         group.leave()
                         return
                     }
+                    if w == 0 { break }
                     written += w
                 }
             }
@@ -129,11 +139,20 @@ enum BridgeRelay {
             defer { buf.deallocate() }
             while true {
                 let n = Darwin.read(fd, buf, bufSize)
-                if n <= 0 { break }
+                if n == 0 { break } // EOF — socket closed normally
+                if n < 0 {
+                    if errno == EINTR { continue }
+                    fputs("Bridge: read from socket failed: \(String(cString: strerror(errno)))\n", stderr)
+                    errorLock.lock()
+                    hadError = true
+                    errorLock.unlock()
+                    break
+                }
                 var written = 0
                 while written < n {
                     let w = Darwin.write(stdoutFD, buf.advanced(by: written), n - written)
-                    if w <= 0 {
+                    if w < 0 {
+                        if errno == EINTR { continue }
                         fputs("Bridge: write to stdout failed: \(String(cString: strerror(errno)))\n", stderr)
                         errorLock.lock()
                         hadError = true
@@ -141,6 +160,7 @@ enum BridgeRelay {
                         group.leave()
                         return
                     }
+                    if w == 0 { break }
                     written += w
                 }
             }
