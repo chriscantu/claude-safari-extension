@@ -129,6 +129,7 @@ claude-safari-extension/
 │   ├── mcp-test.py                          # MCP socket test client (handshake + tool calls)
 │   ├── validate-injected-scripts.js         # CI: syntax-check IIFE code strings in tool files
 │   ├── create-dmg.sh                        # Build notarized DMG for direct distribution
+│   ├── validate-bridge.py              # Bridge binary, config, and MCP relay validation
 │   └── bump-version.sh                      # Bump CFBundleShortVersionString and CFBundleVersion in plists
 │
 └── docs/
