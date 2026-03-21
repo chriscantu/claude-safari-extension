@@ -501,7 +501,7 @@ final class OnboardingWindowController: NSWindowController {
 
     // MARK: Done
 
-    static let examplePrompt = "Go to news.ycombinator.com and tell me what the top 5 stories are about"
+    static let examplePrompt = "Open news.ycombinator.com in Safari and tell me what the top 5 stories are about"
 
     private func buildDoneView() -> NSView {
         let root = paddedRoot()
