@@ -152,3 +152,54 @@ jobs:
           # xcodebuild exited on its own
           cat /tmp/xc-test.log
           wait $XC_PID 2>/dev/null
+
+      - name: Validate bridge binary
+        run: |
+          BRIDGE=$(find ~/Library/Developer/Xcode/DerivedData -name safari-mcp-bridge -type f 2>/dev/null | head -1)
+          if [ -z "$BRIDGE" ]; then
+            echo "::error::safari-mcp-bridge not found in build output"
+            exit 1
+          fi
+          echo "Found bridge: $BRIDGE"
+          python3 scripts/validate-bridge.py --check-binary "$BRIDGE"
+
+      - name: Validate config installer round-trip
+        run: |
+          BRIDGE=$(find ~/Library/Developer/Xcode/DerivedData -name safari-mcp-bridge -type f 2>/dev/null | head -1)
+          FAKE_HOME=$(mktemp -d)
+          mkdir -p "$FAKE_HOME/.claude"
+          mkdir -p "$FAKE_HOME/Library/Application Support/Claude"
+          HOME="$FAKE_HOME" "$BRIDGE" --install
+          python3 -c "
+          import json, sys
+          config = json.load(open('$FAKE_HOME/.claude.json'))
+          servers = config.get('mcpServers', {})
+          entry = servers.get('claude-in-safari', {})
+          cmd = entry.get('command', '')
+          if not cmd:
+              print('FAIL: no claude-in-safari entry in config')
+              sys.exit(1)
+          print(f'OK: claude-in-safari configured → {cmd}')
+          "
+          python3 -c "
+          import json, sys
+          config = json.load(open('$FAKE_HOME/Library/Application Support/Claude/claude_desktop_config.json'))
+          servers = config.get('mcpServers', {})
+          entry = servers.get('claude-in-safari', {})
+          cmd = entry.get('command', '')
+          if not cmd:
+              print('FAIL: no claude-in-safari entry in Desktop config')
+              sys.exit(1)
+          print(f'OK: Desktop claude-in-safari configured → {cmd}')
+          "
+          HOME="$FAKE_HOME" "$BRIDGE" --uninstall
+          python3 -c "
+          import json, sys
+          config = json.load(open('$FAKE_HOME/.claude.json'))
+          servers = config.get('mcpServers', {})
+          if 'claude-in-safari' in servers:
+              print('FAIL: claude-in-safari entry still present after --uninstall')
+              sys.exit(1)
+          print('OK: --uninstall removed entry')
+          "
+          rm -rf "$FAKE_HOME"
