@@ -17,13 +17,60 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Check all 4 version sources match
+        run: |
+          MANIFEST=$(python3 -c "import json; print(json.load(open('ClaudeInSafari Extension/Resources/manifest.json'))['version'])")
+          APP_PLIST=$(/usr/bin/python3 -c "
+          import plistlib
+          with open('ClaudeInSafari/Info.plist', 'rb') as f:
+              print(plistlib.load(f)['CFBundleShortVersionString'])
+          ")
+          EXT_PLIST=$(/usr/bin/python3 -c "
+          import plistlib
+          with open('ClaudeInSafari Extension/Info.plist', 'rb') as f:
+              print(plistlib.load(f)['CFBundleShortVersionString'])
+          ")
+          PROJECT_YML=$(python3 -c "
+          import re
+          matches = re.findall(r'CFBundleShortVersionString: \"(.+?)\"', open('project.yml').read())
+          versions = set(matches)
+          if len(versions) != 1:
+              print('MISMATCH')
+          else:
+              print(versions.pop())
+          ")
+
+          echo "manifest.json:              ${MANIFEST}"
+          echo "ClaudeInSafari/Info.plist:   ${APP_PLIST}"
+          echo "Extension/Info.plist:        ${EXT_PLIST}"
+          echo "project.yml:                ${PROJECT_YML}"
+
+          FAIL=0
+          if [ "$MANIFEST" != "$APP_PLIST" ]; then
+            echo "::error::Version mismatch: manifest.json (${MANIFEST}) != ClaudeInSafari/Info.plist (${APP_PLIST})"
+            FAIL=1
+          fi
+          if [ "$MANIFEST" != "$EXT_PLIST" ]; then
+            echo "::error::Version mismatch: manifest.json (${MANIFEST}) != Extension/Info.plist (${EXT_PLIST})"
+            FAIL=1
+          fi
+          if [ "$MANIFEST" != "$PROJECT_YML" ]; then
+            echo "::error::Version mismatch: manifest.json (${MANIFEST}) != project.yml (${PROJECT_YML})"
+            FAIL=1
+          fi
+          if [ "$FAIL" -eq 1 ]; then
+            echo "::error::All 4 version sources must match. Update them all to the same version."
+            exit 1
+          fi
+          echo "All 4 version sources match: ${MANIFEST}"
+
       - name: Check version is new
         run: |
           VERSION=$(python3 -c "import json; print(json.load(open('ClaudeInSafari Extension/Resources/manifest.json'))['version'])")
           TAG="v${VERSION}"
-          echo "Version in manifest.json: ${VERSION}"
+          echo "Version: ${VERSION} → Tag: ${TAG}"
           if git rev-parse "refs/tags/${TAG}" >/dev/null 2>&1; then
-            echo "::error::Tag ${TAG} already exists. Bump the version in manifest.json, both Info.plist files, and project.yml before merging."
+            echo "::error::Tag ${TAG} already exists. Bump the version before merging."
             exit 1
           else
             echo "Tag ${TAG} does not exist — version bump is valid."
