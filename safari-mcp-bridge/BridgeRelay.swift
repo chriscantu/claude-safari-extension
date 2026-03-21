@@ -83,7 +83,11 @@ enum BridgeRelay {
             exit(1)
         }
 
-        setbuf(stdout, nil) // MCP requires unbuffered output
+        // Use raw file descriptors for stdin/stdout to avoid stdio buffering issues.
+        // fwrite/fflush to stdout on GCD threads does not reliably flush when stdout
+        // is a pipe (as when spawned by Claude Code). Raw write() bypasses this entirely.
+        let stdinFD = fileno(stdin)
+        let stdoutFD = fileno(stdout)
 
         let group = DispatchGroup()
         let errorLock = NSLock()
@@ -96,7 +100,7 @@ enum BridgeRelay {
             let buf = UnsafeMutablePointer<UInt8>.allocate(capacity: bufSize)
             defer { buf.deallocate() }
             while true {
-                let n = fread(buf, 1, bufSize, stdin)
+                let n = Darwin.read(stdinFD, buf, bufSize)
                 if n <= 0 { break }
                 var written = 0
                 while written < n {
@@ -128,7 +132,7 @@ enum BridgeRelay {
                 if n <= 0 { break }
                 var written = 0
                 while written < n {
-                    let w = fwrite(buf.advanced(by: written), 1, n - written, stdout)
+                    let w = Darwin.write(stdoutFD, buf.advanced(by: written), n - written)
                     if w <= 0 {
                         fputs("Bridge: write to stdout failed: \(String(cString: strerror(errno)))\n", stderr)
                         errorLock.lock()
@@ -138,7 +142,6 @@ enum BridgeRelay {
                         return
                     }
                     written += w
-                    fflush(stdout)
                 }
             }
             group.leave()
