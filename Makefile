@@ -17,6 +17,8 @@
 #   make status         Show app/socket/extension status
 #   make clean          Kill app, remove sockets, clean DerivedData
 #   make kill           Kill the running app (without cleaning build)
+#   make validate-bridge Validate bridge binary, configs, and relay
+#   make pre-release     Full pre-release check (tests + bridge validation)
 
 SHELL := /bin/bash
 
@@ -47,7 +49,7 @@ APP_PATH     = $(BUILD_DIR)/$(APP_NAME).app
 
 .PHONY: dev build run kill test test-swift test-all send list-tools status clean help \
         health doctor queue-clean safari-quit safari-open safari-restart reload-ext functional-check dmg \
-        bridge bridge-install bridge-status
+        bridge bridge-install bridge-status validate-bridge pre-release
 
 help: ## Show this help
 	@grep -E '^[a-z_-]+:.*##' $(MAKEFILE_LIST) | awk -F ':.*## ' '{printf "  %-16s %s\n", $$1, $$2}'
@@ -180,6 +182,18 @@ bridge-status: ## Show bridge status
 		echo "ERROR: safari-mcp-bridge not found. Run 'make bridge' first."; \
 		exit 1; \
 	fi
+
+# ---------------------------------------------------------------------------
+# Bridge validation
+# ---------------------------------------------------------------------------
+
+validate-bridge: ## Validate bridge binary, configs, and MCP relay
+	@python3 scripts/validate-bridge.py
+
+pre-release: test-all validate-bridge ## Full pre-release validation (tests + bridge)
+	@echo ""
+	@echo "=== Pre-release validation passed ==="
+	@echo "Ready to tag. Run: scripts/bump-version.sh <version>"
 
 safari-quit: ## Quit Safari (tabs are preserved on restart)
 	@if pgrep -x Safari >/dev/null 2>&1; then \
