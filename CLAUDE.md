@@ -15,6 +15,7 @@ A macOS Safari Web Extension that replicates the "Claude in Chrome" browser auto
 - Run `xcodebuild test` after every change to verify tests pass
 - **One thing at a time**: always work on a single feature or fix per session; create a dedicated feature branch (`git checkout -b fix/...` or `feature/...`) before touching any code
 - **Implementation plans** live in `docs/plans/` — one file per feature, named `YYYY-MM-DD-<feature>.md`
+- **Version sync is a HARD RULE**: every PR must bump the version, and ALL 4 sources must match exactly: `ClaudeInSafari Extension/Resources/manifest.json` (`version`), `ClaudeInSafari/Info.plist` (`CFBundleShortVersionString`), `ClaudeInSafari Extension/Info.plist` (`CFBundleShortVersionString`), `project.yml` (`CFBundleShortVersionString`). CI will reject PRs where the version already has a tag.
 
 ## Key Technical Decisions
 - **MV2 manifest** with `"persistent": true` — MV2 avoids MV3's service-worker lifecycle unpredictability on macOS Safari; `persistent: true` is required on Safari 26+ because the background page never bootstraps with `false` (the event that would wake it never fires, since polling is initiated from the background itself)
