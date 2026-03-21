@@ -1,0 +1,49 @@
+name: Auto-Tag Release
+
+# Runs after CI passes on main. Reads the version from manifest.json
+# and creates a git tag if it doesn't already exist, which triggers
+# the Release workflow to build, sign, notarize, and publish a DMG.
+
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+    branches: [main]
+
+jobs:
+  auto-tag:
+    name: Tag if version changed
+    runs-on: ubuntu-latest
+    if: github.event.workflow_run.conclusion == 'success'
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Read version and check tag
+        id: version
+        run: |
+          VERSION=$(python3 -c "import json; print(json.load(open('ClaudeInSafari Extension/Resources/manifest.json'))['version'])")
+          TAG="v${VERSION}"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          if git rev-parse "refs/tags/${TAG}" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "Tag ${TAG} already exists — skipping"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            echo "Tag ${TAG} does not exist — will create"
+          fi
+
+      - name: Create tag
+        if: steps.version.outputs.exists == 'false'
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          git tag "$TAG"
+          git push origin "$TAG"
+          echo "Created and pushed tag ${TAG}"
