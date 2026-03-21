@@ -7,6 +7,28 @@ on:
     branches: [main]
 
 jobs:
+  version-check:
+    name: Version Bump Required
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check version is new
+        run: |
+          VERSION=$(python3 -c "import json; print(json.load(open('ClaudeInSafari Extension/Resources/manifest.json'))['version'])")
+          TAG="v${VERSION}"
+          echo "Version in manifest.json: ${VERSION}"
+          if git rev-parse "refs/tags/${TAG}" >/dev/null 2>&1; then
+            echo "::error::Tag ${TAG} already exists. Bump the version in manifest.json, both Info.plist files, and project.yml before merging."
+            exit 1
+          else
+            echo "Tag ${TAG} does not exist — version bump is valid."
+          fi
+
   build-and-test:
     name: Build & Test
     runs-on: macos-15
