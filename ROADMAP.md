@@ -154,6 +154,15 @@ App Store or notarized DMG distribution, onboarding UX, documentation.
 
 ---
 
+## Follow-up — Tool UX Improvements
+
+| Item | Notes |
+|------|-------|
+| `read_page` auto-pagination for large pages | HN accessibility tree is ~20K chars; users hit `max_chars` limit repeatedly. Consider auto-chunking or smarter default depth. |
+| `navigate` should auto-create MCP tab if none exists | First `navigate` call fails with "No active tab found" — user must call `tabs_create_mcp` first. Auto-create on first use. |
+
+---
+
 ## Deferred / Known Issues
 
 Issues from REVIEW.md deferred past the First Build milestone:
