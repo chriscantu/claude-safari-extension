@@ -580,6 +580,53 @@ make send TOOL=file_upload ARGS='{"paths":["/tmp/f1.txt","/tmp/f2.txt"],"ref":"m
 
 ---
 
+## 16  Bridge & Client Integration
+
+### 16.1  Automated validation
+
+```fish
+make validate-bridge
+```
+
+- [ ] Binary check passes
+- [ ] Config check passes (both CLI and Desktop)
+- [ ] Relay check passes (MCP handshake + tools/list through bridge)
+
+### 16.2  Claude Code CLI
+
+Open a new terminal and start Claude Code:
+
+```fish
+claude
+```
+
+Ask: "Use the navigate tool to open https://example.com in Safari"
+
+- [ ] Claude Code invokes the tool successfully
+- [ ] Safari navigates to example.com
+
+### 16.3  Claude Desktop
+
+Open Claude Desktop and start a new conversation.
+
+Ask: "Use the navigate tool to open https://example.com in Safari"
+
+- [ ] Claude in Safari appears in Desktop's MCP server list
+- [ ] Desktop invokes the tool successfully
+- [ ] Safari navigates to example.com
+
+### 16.4  Config consistency
+
+```fish
+/Applications/Claude\ in\ Safari.app/Contents/MacOS/safari-mcp-bridge --status
+```
+
+- [ ] Claude Code CLI shows `✓ configured`
+- [ ] Claude Desktop shows `✓ configured`
+- [ ] Both point to the same bridge binary path
+
+---
+
 ## Checklist Summary
 
 Copy this into a PR description when a full regression run is required:
@@ -602,4 +649,5 @@ Copy this into a PR description when a full regression run is required:
 - [ ] 13. Cross-tool E2E flows
 - [ ] 14. Error & edge cases
 - [ ] 15. File upload: fast-fail paths, E2E single file, E2E multiple files
+- [ ] 16. Bridge & client integration: validate-bridge, CLI test, Desktop test
 ```
