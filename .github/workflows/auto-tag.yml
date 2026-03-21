@@ -23,6 +23,10 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          # Use PAT so the tag push triggers the Release workflow.
+          # Tags pushed with the default GITHUB_TOKEN do not trigger
+          # on:push:tags workflows (GitHub Actions limitation).
+          token: ${{ secrets.RELEASE_TOKEN }}
 
       - name: Read version and check tag
         id: version
