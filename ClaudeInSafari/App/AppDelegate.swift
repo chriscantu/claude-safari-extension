@@ -28,6 +28,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
 
     func applicationWillTerminate(_ notification: Notification) {
         monitorTimer?.invalidate()
+        toolRouter?.stop()
         mcpServer?.stop()
     }
 
