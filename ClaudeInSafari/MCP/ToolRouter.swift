@@ -101,11 +101,20 @@ class ToolRouter: MCPSocketServerDelegate {
         pendingRequestsLock.unlock()
 
         for requestId in requestIds {
-            guard let fileURL = AppConstants.responseFileURL(for: requestId) else { continue }
+            guard let fileURL = AppConstants.responseFileURL(for: requestId) else {
+                NSLog("ToolRouter: checkAllPendingResponses — responseFileURL is nil for %@ (App Group unavailable)", requestId)
+                continue
+            }
             guard let data = try? Data(contentsOf: fileURL),
                   let responseString = String(data: data, encoding: .utf8) else { continue }
 
-            try? FileManager.default.removeItem(at: fileURL)
+            do {
+                try FileManager.default.removeItem(at: fileURL)
+            } catch let error as NSError where error.domain == NSCocoaErrorDomain && error.code == NSFileNoSuchFileError {
+                // Already deleted by fallback poll — not an error
+            } catch {
+                NSLog("ToolRouter: failed to delete response file for %@ in checkAllPendingResponses: %@", requestId, error.localizedDescription)
+            }
 
             pendingRequestsLock.lock()
             let pending = pendingRequests.removeValue(forKey: requestId)
@@ -121,11 +130,6 @@ class ToolRouter: MCPSocketServerDelegate {
                 )
             }
         }
-    }
-
-    /// Test-only: call checkAllPendingResponses from tests.
-    func checkAllPendingResponsesForTest() {
-        checkAllPendingResponses()
     }
 
     /// Subscribe to the cross-process Darwin notification for response delivery.

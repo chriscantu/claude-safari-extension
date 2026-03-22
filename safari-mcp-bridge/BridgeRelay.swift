@@ -136,7 +136,10 @@ enum BridgeRelay {
     /// Returns true on success. Does NOT perform tools/list (unlike verifyConnection).
     static func performHandshake(fd: Int32) -> Bool {
         var tv = timeval(tv_sec: 5, tv_usec: 0)
-        setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
+        if setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size)) != 0 {
+            fputs("bridge: handshake failed — could not set read timeout: \(String(cString: strerror(errno)))\n", stderr)
+            return false
+        }
 
         var leftover = Data()
 
@@ -149,11 +152,21 @@ enum BridgeRelay {
             }
         }
 
+        func parseJSON(_ msgData: Data) -> [String: Any]? {
+            do {
+                return try JSONSerialization.jsonObject(with: msgData) as? [String: Any]
+            } catch {
+                let raw = String(data: msgData, encoding: .utf8) ?? "<non-UTF8, \(msgData.count) bytes>"
+                fputs("bridge: handshake failed — invalid JSON from server: \(raw)\n", stderr)
+                return nil
+            }
+        }
+
         func readNextLine() -> [String: Any]? {
             if let idx = leftover.firstIndex(of: 0x0A) {
                 let msgData = leftover[leftover.startIndex..<idx]
                 leftover = Data(leftover[(idx + 1)...])
-                return try? JSONSerialization.jsonObject(with: msgData) as? [String: Any]
+                return parseJSON(msgData)
             }
             let buf = UnsafeMutablePointer<UInt8>.allocate(capacity: 65536)
             defer { buf.deallocate() }
@@ -164,20 +177,31 @@ enum BridgeRelay {
                 if let idx = leftover.firstIndex(of: 0x0A) {
                     let msgData = leftover[leftover.startIndex..<idx]
                     leftover = Data(leftover[(idx + 1)...])
-                    return try? JSONSerialization.jsonObject(with: msgData) as? [String: Any]
+                    return parseJSON(msgData)
                 }
             }
         }
 
-        guard sendLine("{\"jsonrpc\":\"2.0\",\"id\":0,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2025-11-25\",\"capabilities\":{},\"clientInfo\":{\"name\":\"safari-mcp-bridge\",\"version\":\"1.0.0\"}}}") else { return false }
-        guard readNextLine() != nil else { return false }
+        guard sendLine("{\"jsonrpc\":\"2.0\",\"id\":0,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2025-11-25\",\"capabilities\":{},\"clientInfo\":{\"name\":\"safari-mcp-bridge\",\"version\":\"1.0.0\"}}}") else {
+            fputs("bridge: handshake failed — could not send initialize request\n", stderr)
+            return false
+        }
+        guard readNextLine() != nil else {
+            fputs("bridge: handshake failed — no response to initialize (timeout or socket closed)\n", stderr)
+            return false
+        }
 
-        guard sendLine("{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}") else { return false }
+        guard sendLine("{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}") else {
+            fputs("bridge: handshake failed — could not send initialized notification\n", stderr)
+            return false
+        }
         usleep(50_000)
 
         // Remove read timeout for relay phase
         tv = timeval(tv_sec: 0, tv_usec: 0)
-        setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
+        if setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size)) != 0 {
+            fputs("bridge: warning — could not clear read timeout: \(String(cString: strerror(errno)))\n", stderr)
+        }
 
         fputs("bridge: session initialized\n", stderr)
         return true

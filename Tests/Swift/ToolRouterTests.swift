@@ -1111,7 +1111,7 @@ final class ToolRouterDispatchTests: XCTestCase {
         try data.write(to: responseFile, options: .atomic)
         addTeardownBlock { try? FileManager.default.removeItem(at: responseFile) }
 
-        router.checkAllPendingResponsesForTest()
+        router.checkAllPendingResponses()
 
         XCTAssertFalse(FileManager.default.fileExists(atPath: responseFile.path),
                         "Response file should be consumed")
@@ -1147,10 +1147,44 @@ final class ToolRouterDispatchTests: XCTestCase {
             addTeardownBlock { try? FileManager.default.removeItem(at: file) }
         }
 
-        router.checkAllPendingResponsesForTest()
+        router.checkAllPendingResponses()
 
         XCTAssertFalse(FileManager.default.fileExists(atPath: dir.appendingPathComponent("multi-1.json").path))
         XCTAssertFalse(FileManager.default.fileExists(atPath: dir.appendingPathComponent("multi-2.json").path))
         XCTAssertEqual(mockServer.sentCount(), 2)
+    }
+
+    func testCheckAllPendingResponses_calledTwice_deliversOnlyOnce() throws {
+        guard let dir = AppConstants.responsesDirectoryURL else {
+            throw XCTSkip("App Group unavailable in test environment")
+        }
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+
+        let mockServer = MockMCPSocketServer()
+        let router = ToolRouter(
+            screenshotService: ScreenshotService(),
+            gifService: GifService(),
+            fileService: FileService()
+        )
+        router.setServer(mockServer)
+
+        let requestId = "double-delivery-guard"
+        router.injectPendingRequest(requestId: requestId, clientId: "test-client", jsonrpcId: 60)
+
+        let responseFile = dir.appendingPathComponent("\(requestId).json")
+        let response: [String: Any] = [
+            "requestId": requestId,
+            "result": ["content": [["type": "text", "text": "once only"]]]
+        ]
+        let data = try JSONSerialization.data(withJSONObject: response)
+        try data.write(to: responseFile, options: .atomic)
+        addTeardownBlock { try? FileManager.default.removeItem(at: responseFile) }
+
+        // Call twice — simulates Darwin notification and fallback poll racing
+        router.checkAllPendingResponses()
+        router.checkAllPendingResponses()
+
+        // Only one MCP response should have been sent
+        XCTAssertEqual(mockServer.sentCount(), 1, "Double call should deliver only once")
     }
 }
