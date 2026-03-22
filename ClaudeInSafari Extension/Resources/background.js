@@ -148,8 +148,8 @@ async function pollForRequests() {
         }
 
         isActive = true;
-        console.log("Poll: picked up request after " + (idleStreak * POLL_INTERVAL_MS) + "ms idle (interval was " +
-            Math.min(POLL_INTERVAL_MS * Math.pow(2, idleStreak), POLL_IDLE_INTERVAL_MS) + "ms)");
+        console.log("Poll: picked up request (idle streak " + idleStreak + ", last interval " +
+            Math.min(POLL_INTERVAL_MS * Math.pow(2, Math.max(0, idleStreak - 1)), POLL_IDLE_INTERVAL_MS) + "ms)");
         idleStreak = 0;
 
         // Phase 2: parse the tool request payload

@@ -441,8 +441,7 @@ describe("background.js poll loop", () => {
 
         // With 500ms cap: polls at t=0,200,600,1100,1600,2100,2600 = 7 polls by 3000ms
         // With 5000ms cap: polls at t=0,200,600,1400,3000 = 5 polls by 3000ms
-        // Require at least 6 polls to distinguish 500ms cap from 5000ms cap
-        expect(pollCalls.length).toBeGreaterThanOrEqual(6);
+        expect(pollCalls.length).toBeGreaterThanOrEqual(7);
     });
 
     // T13 — extension_ready: sends generation marker on load (Spec 023 H2)
