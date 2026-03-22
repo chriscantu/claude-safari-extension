@@ -241,10 +241,20 @@ enum BridgeRelay {
             defer { buf.deallocate() }
             while true {
                 let n = Darwin.read(fd, buf, bufSize)
-                if n == 0 { break } // EOF — socket closed normally
+                if n == 0 {
+                    // Socket closed — shutdown socket writes so the stdin→socket thread's
+                    // next write(fd, ...) fails immediately with EPIPE instead of buffering.
+                    // Note: the stdin→socket thread may still be blocked on read(stdinFD) —
+                    // it will unblock when the MCP client sends its next request, at which
+                    // point the write fails and the thread exits. This is by design: the
+                    // reconnect happens on the next MCP request, not instantly.
+                    shutdown(fd, SHUT_RDWR)
+                    break
+                }
                 if n < 0 {
                     if errno == EINTR { continue }
                     fputs("Bridge: read from socket failed: \(String(cString: strerror(errno)))\n", stderr)
+                    shutdown(fd, SHUT_RDWR)
                     break
                 }
                 var written = 0
@@ -253,6 +263,7 @@ enum BridgeRelay {
                     if w < 0 {
                         if errno == EINTR { continue }
                         fputs("Bridge: write to stdout failed: \(String(cString: strerror(errno)))\n", stderr)
+                        shutdown(fd, SHUT_RDWR)
                         group.leave()
                         return
                     }
