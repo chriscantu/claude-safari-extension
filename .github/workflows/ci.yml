@@ -170,16 +170,34 @@ jobs:
         run: |
           set -euo pipefail
           BRIDGE="${{ steps.find-bridge.outputs.bridge_path }}"
-          FAKE_HOME=$(mktemp -d)
-          trap 'rm -rf "$FAKE_HOME"' EXIT
-          mkdir -p "$FAKE_HOME/.claude"
-          mkdir -p "$FAKE_HOME/Library/Application Support/Claude"
+          # Swift's FileManager.homeDirectoryForCurrentUser ignores $HOME env var
+          # on macOS, so we must use the real home directory. Create the detection
+          # directories the bridge looks for, and clean up after.
+          REAL_HOME=$(python3 -c "from pathlib import Path; print(Path.home())")
+          CLI_DIR="$REAL_HOME/.claude"
+          DESKTOP_DIR="$REAL_HOME/Library/Application Support/Claude"
+          CLI_CONFIG="$REAL_HOME/.claude.json"
+          DESKTOP_CONFIG="$DESKTOP_DIR/claude_desktop_config.json"
+          # Save originals if they exist
+          [ -f "$CLI_CONFIG" ] && cp "$CLI_CONFIG" "$CLI_CONFIG.bak" || true
+          [ -f "$DESKTOP_CONFIG" ] && cp "$DESKTOP_CONFIG" "$DESKTOP_CONFIG.bak" || true
+          # Ensure detection directories exist
+          mkdir -p "$CLI_DIR"
+          mkdir -p "$DESKTOP_DIR"
+          trap '
+            # Restore or remove config files
+            if [ -f "$CLI_CONFIG.bak" ]; then mv "$CLI_CONFIG.bak" "$CLI_CONFIG"; else rm -f "$CLI_CONFIG"; fi
+            if [ -f "$DESKTOP_CONFIG.bak" ]; then mv "$DESKTOP_CONFIG.bak" "$DESKTOP_CONFIG"; else rm -f "$DESKTOP_CONFIG"; fi
+          ' EXIT
           # Install and verify both configs
-          HOME="$FAKE_HOME" "$BRIDGE" --install
-          FAKE_HOME="$FAKE_HOME" python3 -c "
-          import json, sys, os
-          home = os.environ['FAKE_HOME']
-          for name, path in [('CLI', f'{home}/.claude.json'), ('Desktop', f'{home}/Library/Application Support/Claude/claude_desktop_config.json')]:
+          "$BRIDGE" --install
+          python3 -c "
+          import json, sys
+          configs = [
+              ('CLI', '$CLI_CONFIG'),
+              ('Desktop', '$DESKTOP_CONFIG'),
+          ]
+          for name, path in configs:
               config = json.load(open(path))
               cmd = config.get('mcpServers', {}).get('claude-in-safari', {}).get('command', '')
               if not cmd:
@@ -188,11 +206,14 @@ jobs:
               print(f'OK: {name} claude-in-safari configured → {cmd}')
           "
           # Uninstall and verify both configs are cleaned up
-          HOME="$FAKE_HOME" "$BRIDGE" --uninstall
-          FAKE_HOME="$FAKE_HOME" python3 -c "
-          import json, sys, os
-          home = os.environ['FAKE_HOME']
-          for name, path in [('CLI', f'{home}/.claude.json'), ('Desktop', f'{home}/Library/Application Support/Claude/claude_desktop_config.json')]:
+          "$BRIDGE" --uninstall
+          python3 -c "
+          import json, sys
+          configs = [
+              ('CLI', '$CLI_CONFIG'),
+              ('Desktop', '$DESKTOP_CONFIG'),
+          ]
+          for name, path in configs:
               config = json.load(open(path))
               if 'claude-in-safari' in config.get('mcpServers', {}):
                   print(f'FAIL: claude-in-safari still present in {name} config after --uninstall')
