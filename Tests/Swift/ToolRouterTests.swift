@@ -964,12 +964,15 @@ final class ToolRouterDispatchTests: XCTestCase {
         let requestId = "nil-gen-test"
         router.injectPendingRequest(requestId: requestId, clientId: "test-client", jsonrpcId: 43)
 
-        router.pollForExtensionResponse(requestId: requestId, deadline: Date().addingTimeInterval(0.15),
+        // Deadline shorter than fallbackPollIntervalSeconds (0.5s), so the deadline
+        // expires on the first recursive poll invocation. Wait > deadline + poll interval
+        // to ensure the timeout error is delivered before we assert.
+        router.pollForExtensionResponse(requestId: requestId, deadline: Date().addingTimeInterval(0.1),
                                                 generationSnapshot: nil)
 
         let expectation = XCTestExpectation(description: "Poll times out normally")
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { expectation.fulfill() }
-        wait(for: [expectation], timeout: 1.0)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) { expectation.fulfill() }
+        wait(for: [expectation], timeout: 2.0)
 
         let json = mockServer.lastSentJSON()
         let errorMsg = (json?["error"] as? [String: Any])?["message"] as? String ?? ""
@@ -1070,5 +1073,12 @@ final class ToolRouterDispatchTests: XCTestCase {
         ]
         XCTAssertEqual(ToolRouter.executeScriptToolsForTesting, expected,
                        "executeScriptTools is out of sync — update it when adding new executeScript-based tools")
+    }
+
+    // MARK: - Fallback Poll Interval (Spec 029 Change 3)
+
+    func testPollForExtensionResponse_fallbackInterval_is500ms() throws {
+        XCTAssertEqual(ToolRouter.fallbackPollIntervalSeconds, 0.5,
+                       "Fallback poll should be 500ms, not 50ms")
     }
 }

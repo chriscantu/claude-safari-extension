@@ -117,6 +117,10 @@ class ToolRouter: MCPSocketServerDelegate {
     /// Minimum interval (seconds) between successive automation notifications.
     private static let notificationDebounceInterval: TimeInterval = 10
 
+    /// Fallback poll interval for response file checking (seconds).
+    /// 500ms: belt-and-suspenders behind Darwin notification (Spec 029 Change 3).
+    static let fallbackPollIntervalSeconds: TimeInterval = 0.5
+
     /// Date of the last automation notification. Internal for testability (manipulated in tests).
     /// All reads and writes — including in test code — must be performed under `pendingRequestsLock`.
     var lastNotificationDate: Date? = nil
@@ -827,6 +831,7 @@ class ToolRouter: MCPSocketServerDelegate {
             let toolCtx = pendingToolContext.removeValue(forKey: requestId)
             pendingRequestsLock.unlock()
             if let pending = pending {
+                NSLog("ToolRouter: response for %@ delivered via fallback poll", requestId)
                 deliverExtensionResponse(
                     responseString, id: pending.jsonrpcId, to: pending.clientId,
                     toolName: toolCtx?.toolName ?? "",
@@ -858,7 +863,7 @@ class ToolRouter: MCPSocketServerDelegate {
         pendingRequestsLock.unlock()
         guard isActive else { return }
 
-        DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + 0.05) { [weak self] in
+        DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + Self.fallbackPollIntervalSeconds) { [weak self] in
             self?.pollForExtensionResponse(requestId: requestId, deadline: deadline,
                                             generationSnapshot: generationSnapshot)
         }
