@@ -81,8 +81,15 @@ enum BridgeRelay {
                 do {
                     fd = try connectToSocket(at: path)
                     break // connected successfully
+                } catch let error as BridgeError {
+                    if case .socketCreationFailed(let code) = error {
+                        // Non-transient local error (e.g. EMFILE) — fast-fail
+                        fputs("{\"error\": \"Failed to create socket: \(String(cString: strerror(code)))\"}\n", stderr)
+                        exit(1)
+                    }
+                    // connectionFailed — stale socket or app still starting, retry
                 } catch {
-                    // Socket file exists but connection failed (stale or app still starting)
+                    // Unexpected error — retry
                 }
             }
 
@@ -92,15 +99,15 @@ enum BridgeRelay {
                 waited = true
             }
 
-            elapsed += Int(socketPollInterval)
             if elapsed >= socketWaitTimeout {
                 break
             }
             sleep(socketPollInterval)
+            elapsed += Int(socketPollInterval)
         }
 
         guard fd >= 0 else {
-            fputs("{\"error\": \"Claude in Safari is not running after waiting \(socketWaitTimeout)s. Launch the app and try again.\"}\n", stderr)
+            fputs("{\"error\": \"Claude in Safari is not running after waiting up to \(socketWaitTimeout)s. Launch the app and try again.\"}\n", stderr)
             exit(1)
         }
 
