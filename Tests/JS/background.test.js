@@ -165,7 +165,7 @@ describe("background.js poll loop", () => {
         loadBackground({ browser });
 
         await Promise.resolve();
-        // After idle poll, isActive=false → POLL_IDLE_INTERVAL_MS (5000) scheduled
+        // After idle poll, isActive=false → POLL_IDLE_INTERVAL_MS (500) scheduled
         expect(jest.getTimerCount()).toBeGreaterThan(0);
     });
 
