@@ -607,6 +607,10 @@ Ask: "Use the navigate tool to open https://example.com in Safari"
 
 ### 16.3  Claude Desktop
 
+**Startup order:** Claude in Safari must be running *before* Desktop tries to connect.
+The bridge retries for 30s, but if the app isn't running at all, Desktop will mark the
+server as disconnected. If this happens, restart Desktop after launching the app.
+
 Open Claude Desktop and start a new conversation.
 
 Ask: "Use the navigate tool to open https://example.com in Safari"

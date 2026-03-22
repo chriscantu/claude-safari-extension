@@ -60,10 +60,29 @@ enum BridgeRelay {
         return fd
     }
 
+    /// Maximum time (seconds) to wait for the app's socket to appear.
+    /// Covers the case where Claude Desktop launches the bridge before
+    /// the Claude in Safari app has finished starting.
+    static let socketWaitTimeout: Int = 30
+    static let socketPollInterval: UInt32 = 2 // seconds
+
     /// Runs the stdio↔socket relay loop. Terminates the process when either side closes.
     static func run() -> Never {
-        guard let socketPath = findNewestSocket(in: socketDirectory) else {
-            fputs("{\"error\": \"Claude in Safari is not running. Launch the app and try again.\"}\n", stderr)
+        // Wait for the socket to appear, retrying periodically.
+        // Claude Desktop may launch the bridge before the app is fully running.
+        var socketPath: String? = findNewestSocket(in: socketDirectory)
+        if socketPath == nil {
+            fputs("Waiting for Claude in Safari to start...\n", stderr)
+            var elapsed: Int = 0
+            while elapsed < socketWaitTimeout {
+                sleep(socketPollInterval)
+                elapsed += Int(socketPollInterval)
+                socketPath = findNewestSocket(in: socketDirectory)
+                if socketPath != nil { break }
+            }
+        }
+        guard let socketPath else {
+            fputs("{\"error\": \"Claude in Safari is not running after waiting \(socketWaitTimeout)s. Launch the app and try again.\"}\n", stderr)
             exit(1)
         }
 
