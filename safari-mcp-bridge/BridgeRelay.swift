@@ -60,27 +60,38 @@ enum BridgeRelay {
         return fd
     }
 
-    /// Maximum time (seconds) to wait for a connectable socket.
+    /// Maximum time (milliseconds) to wait for a connectable socket.
     /// Covers the case where an MCP client launches the bridge before
     /// the Claude in Safari app has finished starting, or when a stale
     /// socket file exists from a previous session.
-    static let socketWaitTimeout: Int = 30
-    static let socketPollInterval: UInt32 = 2 // seconds
+    static let socketWaitTimeoutMs: UInt64 = 30_000
+    static let backoffBaseUs: UInt64 = 100_000  // 100ms in microseconds
+    static let backoffMaxUs: UInt64 = 2_000_000 // 2s in microseconds
 
-    /// Runs the stdio↔socket relay loop. Terminates the process when either side closes.
-    static func run() -> Never {
-        // Wait for a connectable socket, retrying both discovery and connection.
-        // MCP clients (Claude Code, Claude Desktop) may launch the bridge before
-        // the app is fully running, or a stale socket file may exist from a crash.
-        var fd: Int32 = -1
+    /// Returns the exponential backoff delay in microseconds for the given attempt number.
+    /// Doubles from backoffBaseUs up to backoffMaxUs. Attempt 0 → 100ms, 1 → 200ms, ..., 5+ → 2s.
+    static func backoffDelay(attempt: Int) -> UInt64 {
+        min(backoffBaseUs * (1 << UInt64(min(attempt, 20))), backoffMaxUs)
+    }
+
+    /// Discovers and connects to the MCP socket with exponential backoff.
+    /// Blocks until a connectable socket is found or socketWaitTimeoutMs elapses.
+    /// Logs the connection time on success.
+    /// Returns the connected file descriptor, or -1 on timeout/failure.
+    static func discoverSocket(logPrefix: String = "bridge") -> Int32 {
         var waited = false
-        var elapsed: Int = 0
+        var attempt = 0
+        let startUs = clock_gettime_nsec_np(CLOCK_MONOTONIC) / 1_000 // ns → µs
+        let timeoutUs = socketWaitTimeoutMs * 1_000                   // ms → µs
 
         while true {
             if let path = findNewestSocket(in: socketDirectory) {
                 do {
-                    fd = try connectToSocket(at: path)
-                    break // connected successfully
+                    let fd = try connectToSocket(at: path)
+                    let nowUs = clock_gettime_nsec_np(CLOCK_MONOTONIC) / 1_000
+                    let elapsedMs = (nowUs - startUs) / 1_000
+                    fputs("\(logPrefix): connected in \(elapsedMs)ms (attempt \(attempt))\n", stderr)
+                    return fd
                 } catch let error as BridgeError {
                     if case .socketCreationFailed(let code) = error {
                         // Non-transient local error (e.g. EMFILE) — fast-fail
@@ -99,15 +110,27 @@ enum BridgeRelay {
                 waited = true
             }
 
-            if elapsed >= socketWaitTimeout {
+            let nowUs = clock_gettime_nsec_np(CLOCK_MONOTONIC) / 1_000
+            if nowUs - startUs >= timeoutUs {
                 break
             }
-            sleep(socketPollInterval)
-            elapsed += Int(socketPollInterval)
+
+            usleep(UInt32(backoffDelay(attempt: attempt)))
+            attempt += 1
         }
 
+        return -1
+    }
+
+    /// Runs the stdio↔socket relay loop. Terminates the process when either side closes.
+    static func run() -> Never {
+        // Wait for a connectable socket, retrying both discovery and connection.
+        // MCP clients (Claude Code, Claude Desktop) may launch the bridge before
+        // the app is fully running, or a stale socket file may exist from a crash.
+        let fd = discoverSocket()
+
         guard fd >= 0 else {
-            fputs("{\"error\": \"Claude in Safari is not running after waiting up to \(socketWaitTimeout)s. Launch the app and try again.\"}\n", stderr)
+            fputs("{\"error\": \"Claude in Safari is not running after waiting up to \(socketWaitTimeoutMs / 1000)s. Launch the app and try again.\"}\n", stderr)
             exit(1)
         }
 
