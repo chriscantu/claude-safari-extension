@@ -76,6 +76,11 @@ class SafariWebExtensionHandler: NSObject, NSExtensionRequestHandling {
             return
         }
 
+        // Spec 029 Change 3: Post Darwin notification to wake ToolRouter immediately.
+        let darwinCenter = CFNotificationCenterGetDarwinNotifyCenter()
+        let notifName = "com.chriscantu.claudeinsafari.response-ready" as CFString
+        CFNotificationCenterPostNotification(darwinCenter, CFNotificationName(notifName), nil, nil, true)
+
         respond(with: ["status": "ok"], context: context)
     }
 

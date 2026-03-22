@@ -81,6 +81,15 @@ class ToolRouter: MCPSocketServerDelegate {
         }
 
         NSLog("ToolRouter: startup cleanup complete")
+
+        // POC: verify Darwin notification is receivable from appex process
+        let darwinCenter = CFNotificationCenterGetDarwinNotifyCenter()
+        let notifName = "com.chriscantu.claudeinsafari.response-ready" as CFString
+        let selfPtr = Unmanaged.passUnretained(self).toOpaque()
+        CFNotificationCenterAddObserver(darwinCenter, selfPtr, { _, _, _, _, _ in
+            NSLog("ToolRouter: Darwin notification received from appex - POC passed")
+        }, notifName, nil, .deliverImmediately)
+        NSLog("ToolRouter: Darwin notification POC observer registered")
     }
 
     /// Read the current extension generation marker from the App Group file.
