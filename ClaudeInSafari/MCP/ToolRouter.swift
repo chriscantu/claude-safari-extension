@@ -82,14 +82,7 @@ class ToolRouter: MCPSocketServerDelegate {
 
         NSLog("ToolRouter: startup cleanup complete")
 
-        // POC: verify Darwin notification is receivable from appex process
-        let darwinCenter = CFNotificationCenterGetDarwinNotifyCenter()
-        let notifName = "com.chriscantu.claudeinsafari.response-ready" as CFString
-        let selfPtr = Unmanaged.passUnretained(self).toOpaque()
-        CFNotificationCenterAddObserver(darwinCenter, selfPtr, { _, _, _, _, _ in
-            NSLog("ToolRouter: Darwin notification received from appex - POC passed")
-        }, notifName, nil, .deliverImmediately)
-        NSLog("ToolRouter: Darwin notification POC observer registered")
+        registerDarwinObserver()
     }
 
     /// Read the current extension generation marker from the App Group file.
@@ -98,6 +91,75 @@ class ToolRouter: MCPSocketServerDelegate {
         guard let url = AppConstants.extensionGenerationURL,
               let data = try? Data(contentsOf: url) else { return nil }
         return String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// Check all pending requests for available response files and deliver any that exist.
+    /// Called by the Darwin notification callback and the fallback poll timer.
+    func checkAllPendingResponses() {
+        pendingRequestsLock.lock()
+        let requestIds = Array(pendingRequests.keys)
+        pendingRequestsLock.unlock()
+
+        for requestId in requestIds {
+            guard let fileURL = AppConstants.responseFileURL(for: requestId) else { continue }
+            guard let data = try? Data(contentsOf: fileURL),
+                  let responseString = String(data: data, encoding: .utf8) else { continue }
+
+            try? FileManager.default.removeItem(at: fileURL)
+
+            pendingRequestsLock.lock()
+            let pending = pendingRequests.removeValue(forKey: requestId)
+            let toolCtx = pendingToolContext.removeValue(forKey: requestId)
+            pendingRequestsLock.unlock()
+
+            if let pending = pending {
+                NSLog("ToolRouter: response for %@ delivered via notification", requestId)
+                deliverExtensionResponse(
+                    responseString, id: pending.jsonrpcId, to: pending.clientId,
+                    toolName: toolCtx?.toolName ?? "",
+                    arguments: toolCtx?.arguments ?? [:]
+                )
+            }
+        }
+    }
+
+    /// Test-only: call checkAllPendingResponses from tests.
+    func checkAllPendingResponsesForTest() {
+        checkAllPendingResponses()
+    }
+
+    /// Subscribe to the cross-process Darwin notification for response delivery.
+    private func registerDarwinObserver() {
+        let center = CFNotificationCenterGetDarwinNotifyCenter()
+        let name = "com.chriscantu.claudeinsafari.response-ready" as CFString
+        darwinObserverPtr = Unmanaged.passUnretained(self).toOpaque()
+
+        CFNotificationCenterAddObserver(
+            center, darwinObserverPtr,
+            { _, observer, _, _, _ in
+                guard let observer = observer else { return }
+                let router = Unmanaged<ToolRouter>.fromOpaque(observer).takeUnretainedValue()
+                router.responseQueue.async {
+                    router.checkAllPendingResponses()
+                }
+            },
+            name, nil, .deliverImmediately
+        )
+        NSLog("ToolRouter: Darwin notification observer registered")
+    }
+
+    /// Unsubscribe from the Darwin notification. Called from stop(), not deinit.
+    private func removeDarwinObserver() {
+        guard let ptr = darwinObserverPtr else { return }
+        let center = CFNotificationCenterGetDarwinNotifyCenter()
+        CFNotificationCenterRemoveObserver(center, ptr, nil, nil)
+        darwinObserverPtr = nil
+        NSLog("ToolRouter: Darwin notification observer removed")
+    }
+
+    /// Tear down: remove Darwin observer.
+    func stop() {
+        removeDarwinObserver()
     }
 
     /// Staging set for native tools whose handler branch is not yet wired up in handleToolCall().
@@ -112,6 +174,12 @@ class ToolRouter: MCPSocketServerDelegate {
     /// All reads and writes must be performed under pendingRequestsLock.
     private var pendingToolContext = [String: (toolName: String, arguments: [String: Any])]()
     private let pendingRequestsLock = NSLock()
+
+    /// Serial queue for Darwin notification callbacks.
+    private let responseQueue = DispatchQueue(label: "com.chriscantu.claudeinsafari.response")
+
+    /// Opaque pointer to self for Darwin notification registration/removal.
+    private var darwinObserverPtr: UnsafeMutableRawPointer?
 
     // MARK: - Notification state
     /// Minimum interval (seconds) between successive automation notifications.
