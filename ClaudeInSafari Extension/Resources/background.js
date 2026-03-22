@@ -22,7 +22,7 @@
  */
 
 const POLL_INTERVAL_MS = 100;
-const POLL_IDLE_INTERVAL_MS = 5000;
+const POLL_IDLE_INTERVAL_MS = 500;
 let isActive = false;
 let pollTimer = null;
 let idleStreak = 0;
@@ -148,6 +148,8 @@ async function pollForRequests() {
         }
 
         isActive = true;
+        console.log("Poll: picked up request after " + (idleStreak * POLL_INTERVAL_MS) + "ms idle (interval was " +
+            Math.min(POLL_INTERVAL_MS * Math.pow(2, idleStreak), POLL_IDLE_INTERVAL_MS) + "ms)");
         idleStreak = 0;
 
         // Phase 2: parse the tool request payload

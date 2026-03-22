@@ -19,7 +19,7 @@
  *   T8  — Phase 3 error (executeTool throws): error response sent, loop continues
  *   T9  — Phase 4 error (send fails): console.error called, loop continues
  *   T10 — poll schedule: uses POLL_INTERVAL_MS (100) when active
- *   T11 — poll schedule: uses POLL_IDLE_INTERVAL_MS (5000) when idle
+ *   T11 — poll schedule: uses POLL_IDLE_INTERVAL_MS (500) when idle
  *   T12 — alarms guard: browser.alarms not created when browser.alarms is undefined
  */
 
@@ -308,7 +308,7 @@ describe("background.js poll loop", () => {
         expect(timerCount).toBeGreaterThan(0);
     });
 
-    test("T11 — idle poll: isActive=false after no tool_request", async () => {
+    test("T11 — idle poll: isActive=false after no tool_request, POLL_IDLE_INTERVAL_MS=500", async () => {
         const browser = makeBrowserMock({
             nativeResponses: [{ type: "idle" }],
         });
@@ -417,6 +417,32 @@ describe("background.js poll loop", () => {
         expect(pruneStaleGroups).toHaveBeenCalledTimes(1);
 
         delete globalThis.pruneStaleGroups;
+    });
+
+    // T17 — idle backoff cap: POLL_IDLE_INTERVAL_MS caps the backoff at 500ms (Spec 029 Change 1)
+    // Divergence point: at t=3000ms
+    //   - With old 5000ms cap: polls fire at 0, 200, 600, 1400, 3000 → 5 total
+    //   - With new 500ms cap:  polls fire at 0, 200, 600, 1100, 1600, 2100, 2600, 3100 → 8 total
+    // So at 3000ms the 500ms-cap build must have >5 polls.
+    test("T17 — idle backoff caps at 500ms, not 5000ms", async () => {
+        const mock = makeBrowserMock({
+            nativeResponses: Array(20).fill({ type: "idle" }),
+        });
+        loadBackground({ browser: mock });
+
+        // First idle poll fires immediately
+        await Promise.resolve();
+
+        // Advance 3000ms — with 500ms cap more polls should fire than with 5000ms cap
+        await jest.advanceTimersByTimeAsync(3000);
+
+        const pollCalls = mock.runtime.sendNativeMessage.mock.calls
+            .filter(([, msg]) => msg.type === "poll");
+
+        // With 500ms cap: polls at t=0,200,600,1100,1600,2100,2600 = 7 polls by 3000ms
+        // With 5000ms cap: polls at t=0,200,600,1400,3000 = 5 polls by 3000ms
+        // Require at least 6 polls to distinguish 500ms cap from 5000ms cap
+        expect(pollCalls.length).toBeGreaterThanOrEqual(6);
     });
 
     // T13 — extension_ready: sends generation marker on load (Spec 023 H2)
