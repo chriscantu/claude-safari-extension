@@ -115,7 +115,7 @@ enum BridgeRelay {
                 break
             }
 
-            usleep(UInt32(backoffDelay(attempt: attempt)))
+            usleep(UInt32(min(backoffDelay(attempt: attempt), UInt64(UInt32.max))))
             attempt += 1
         }
 
