@@ -66,5 +66,16 @@ enum StatusReporter {
                 print("\(name): — config file not found (\(path))")
             }
         }
+
+        print("")
+
+        // Session info
+        if let start = BridgeRelay.bridgeSessionStart {
+            let uptime = Int(Date().timeIntervalSince(start))
+            print("Session uptime: \(uptime)s")
+            print("Reconnections: \(BridgeRelay.bridgeReconnectCount)")
+        } else {
+            print("Session: not active (--status shows runtime metrics only when relaying)")
+        }
     }
 }
