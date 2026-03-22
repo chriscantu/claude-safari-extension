@@ -195,7 +195,10 @@ enum BridgeRelay {
             fputs("bridge: handshake failed — could not send initialized notification\n", stderr)
             return false
         }
-        usleep(50_000)
+        // No sleep needed here — unlike verifyConnection (which sends tools/list next),
+        // the relay just forwards whatever the MCP client sends. The server processes
+        // notifications/initialized asynchronously; the first real request from the
+        // client serves as the implicit readiness signal.
 
         // Remove read timeout for relay phase
         tv = timeval(tv_sec: 0, tv_usec: 0)
