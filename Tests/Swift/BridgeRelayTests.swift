@@ -104,4 +104,19 @@ final class BridgeRelayTests: XCTestCase {
         let delay = BridgeRelay.backoffDelay(attempt: 99)
         XCTAssertEqual(delay, BridgeRelay.backoffMaxUs, "Very large attempt should cap at max")
     }
+
+    func testPerformHandshake_returnsFalseForBadFd() {
+        // performHandshake should return false when given an invalid fd
+        // (simulates what happens when the app dies mid-reconnect)
+        let result = BridgeRelay.performHandshake(fd: -1)
+        XCTAssertFalse(result, "performHandshake should fail gracefully on invalid fd")
+    }
+
+    func testSessionMetrics_initialState() {
+        // Session tracking vars start at nil/0 before run() is called
+        XCTAssertNil(BridgeRelay.bridgeSessionStart, "Session start should be nil before run()")
+        // Note: bridgeReconnectCount may be non-zero if other tests have run,
+        // so we just verify it's accessible and is an Int
+        _ = BridgeRelay.bridgeReconnectCount
+    }
 }
