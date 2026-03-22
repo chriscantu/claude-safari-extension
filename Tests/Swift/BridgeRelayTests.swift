@@ -92,4 +92,16 @@ final class BridgeRelayTests: XCTestCase {
         let result = BridgeRelay.findNewestSocket(in: tmpDir.path)
         XCTAssertNil(result)
     }
+
+    // MARK: - Auto-Reconnect (Spec 029 Change 4)
+
+    func testVerifyConnection_returnsNilForNonexistentSocket() throws {
+        let result = BridgeRelay.verifyConnection(socketPath: "/tmp/nonexistent-\(UUID().uuidString).sock")
+        XCTAssertNil(result, "Should return nil when socket does not exist")
+    }
+
+    func testBackoffDelay_largeAttemptDoesNotOverflow() {
+        let delay = BridgeRelay.backoffDelay(attempt: 99)
+        XCTAssertEqual(delay, BridgeRelay.backoffMaxUs, "Very large attempt should cap at max")
+    }
 }

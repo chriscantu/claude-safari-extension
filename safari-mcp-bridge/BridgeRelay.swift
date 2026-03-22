@@ -8,6 +8,16 @@ let bridgeAppGroupId = "group.com.chriscantu.claudeinsafari"
 /// Discovers the MCP socket and relays stdin↔socket using newline-delimited JSON.
 enum BridgeRelay {
 
+    /// Reason the relay loop exited.
+    enum RelayExitReason {
+        case stdinEOF
+        case socketError
+    }
+
+    /// Session metrics — written by run(), read by StatusReporter.
+    static var bridgeSessionStart: Date?
+    static var bridgeReconnectCount: Int = 0
+
     /// App Group container socket directory path.
     /// Uses a hardcoded path pattern rather than FileManager.containerURL(forSecurityApplicationGroupIdentifier:)
     /// because that API returns nil without the app group entitlement. The bridge binary intentionally
@@ -122,27 +132,62 @@ enum BridgeRelay {
         return -1
     }
 
-    /// Runs the stdio↔socket relay loop. Terminates the process when either side closes.
-    static func run() -> Never {
-        // Wait for a connectable socket, retrying both discovery and connection.
-        // MCP clients (Claude Code, Claude Desktop) may launch the bridge before
-        // the app is fully running, or a stale socket file may exist from a crash.
-        let fd = discoverSocket()
+    /// Perform MCP initialize + notifications/initialized handshake on the given fd.
+    /// Returns true on success. Does NOT perform tools/list (unlike verifyConnection).
+    static func performHandshake(fd: Int32) -> Bool {
+        var tv = timeval(tv_sec: 5, tv_usec: 0)
+        setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
 
-        guard fd >= 0 else {
-            fputs("{\"error\": \"Claude in Safari is not running after waiting up to \(socketWaitTimeoutMs / 1000)s. Launch the app and try again.\"}\n", stderr)
-            exit(1)
+        var leftover = Data()
+
+        func sendLine(_ json: String) -> Bool {
+            let data = (json + "\n").data(using: .utf8)!
+            return data.withUnsafeBytes { ptr -> Bool in
+                guard let base = ptr.baseAddress else { return false }
+                let w = Darwin.write(fd, base, data.count)
+                return w == data.count
+            }
         }
 
-        // Use raw file descriptors for stdin/stdout to avoid stdio buffering issues.
-        // fwrite/fflush to stdout on GCD threads does not reliably flush when stdout
-        // is a pipe (as when spawned by Claude Code). Raw write() bypasses this entirely.
-        let stdinFD = fileno(stdin)
-        let stdoutFD = fileno(stdout)
+        func readNextLine() -> [String: Any]? {
+            if let idx = leftover.firstIndex(of: 0x0A) {
+                let msgData = leftover[leftover.startIndex..<idx]
+                leftover = Data(leftover[(idx + 1)...])
+                return try? JSONSerialization.jsonObject(with: msgData) as? [String: Any]
+            }
+            let buf = UnsafeMutablePointer<UInt8>.allocate(capacity: 65536)
+            defer { buf.deallocate() }
+            while true {
+                let n = Darwin.read(fd, buf, 65536)
+                if n <= 0 { return nil }
+                leftover.append(buf, count: n)
+                if let idx = leftover.firstIndex(of: 0x0A) {
+                    let msgData = leftover[leftover.startIndex..<idx]
+                    leftover = Data(leftover[(idx + 1)...])
+                    return try? JSONSerialization.jsonObject(with: msgData) as? [String: Any]
+                }
+            }
+        }
 
+        guard sendLine("{\"jsonrpc\":\"2.0\",\"id\":0,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2025-11-25\",\"capabilities\":{},\"clientInfo\":{\"name\":\"safari-mcp-bridge\",\"version\":\"1.0.0\"}}}") else { return false }
+        guard readNextLine() != nil else { return false }
+
+        guard sendLine("{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}") else { return false }
+        usleep(50_000)
+
+        // Remove read timeout for relay phase
+        tv = timeval(tv_sec: 0, tv_usec: 0)
+        setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
+
+        fputs("bridge: session initialized\n", stderr)
+        return true
+    }
+
+    /// Run the stdin↔socket relay. Returns the reason it stopped.
+    private static func relay(stdinFD: Int32, stdoutFD: Int32, socketFD fd: Int32) -> RelayExitReason {
         let group = DispatchGroup()
-        let errorLock = NSLock()
-        var hadError = false
+        let lock = NSLock()
+        var exitReason: RelayExitReason = .socketError // default if socket side dies
 
         // stdin → socket
         group.enter()
@@ -152,13 +197,19 @@ enum BridgeRelay {
             defer { buf.deallocate() }
             while true {
                 let n = Darwin.read(stdinFD, buf, bufSize)
-                if n == 0 { break } // EOF — stdin closed normally
+                if n == 0 {
+                    // EOF — stdin closed normally
+                    lock.lock()
+                    exitReason = .stdinEOF
+                    lock.unlock()
+                    break
+                }
                 if n < 0 {
                     if errno == EINTR { continue }
                     fputs("Bridge: read from stdin failed: \(String(cString: strerror(errno)))\n", stderr)
-                    errorLock.lock()
-                    hadError = true
-                    errorLock.unlock()
+                    lock.lock()
+                    exitReason = .stdinEOF // treat stdin error as client done
+                    lock.unlock()
                     break
                 }
                 var written = 0
@@ -167,9 +218,9 @@ enum BridgeRelay {
                     if w < 0 {
                         if errno == EINTR { continue }
                         fputs("Bridge: write to socket failed: \(String(cString: strerror(errno)))\n", stderr)
-                        errorLock.lock()
-                        hadError = true
-                        errorLock.unlock()
+                        lock.lock()
+                        exitReason = .socketError
+                        lock.unlock()
                         shutdown(fd, SHUT_WR) // unblock socket→stdout read
                         group.leave()
                         return
@@ -194,9 +245,6 @@ enum BridgeRelay {
                 if n < 0 {
                     if errno == EINTR { continue }
                     fputs("Bridge: read from socket failed: \(String(cString: strerror(errno)))\n", stderr)
-                    errorLock.lock()
-                    hadError = true
-                    errorLock.unlock()
                     break
                 }
                 var written = 0
@@ -205,9 +253,6 @@ enum BridgeRelay {
                     if w < 0 {
                         if errno == EINTR { continue }
                         fputs("Bridge: write to stdout failed: \(String(cString: strerror(errno)))\n", stderr)
-                        errorLock.lock()
-                        hadError = true
-                        errorLock.unlock()
                         group.leave()
                         return
                     }
@@ -219,11 +264,66 @@ enum BridgeRelay {
         }
 
         group.wait()
-        close(fd)
-        errorLock.lock()
-        let exitCode: Int32 = hadError ? 1 : 0
-        errorLock.unlock()
-        exit(exitCode)
+        return exitReason
+    }
+
+    /// Runs the stdio↔socket relay loop with auto-reconnect on socket errors.
+    /// Terminates the process on stdin EOF or unrecoverable failure.
+    static func run() -> Never {
+        // Wait for a connectable socket, retrying both discovery and connection.
+        // MCP clients (Claude Code, Claude Desktop) may launch the bridge before
+        // the app is fully running, or a stale socket file may exist from a crash.
+        var fd = discoverSocket()
+
+        guard fd >= 0 else {
+            fputs("{\"error\": \"Claude in Safari is not running after waiting up to \(socketWaitTimeoutMs / 1000)s. Launch the app and try again.\"}\n", stderr)
+            exit(1)
+        }
+
+        // Initial MCP handshake
+        if !performHandshake(fd: fd) {
+            fputs("{\"error\": \"MCP handshake failed after initial connection.\"}\n", stderr)
+            close(fd)
+            exit(1)
+        }
+
+        BridgeRelay.bridgeSessionStart = Date()
+
+        // Use raw file descriptors for stdin/stdout to avoid stdio buffering issues.
+        // fwrite/fflush to stdout on GCD threads does not reliably flush when stdout
+        // is a pipe (as when spawned by Claude Code). Raw write() bypasses this entirely.
+        let stdinFD = fileno(stdin)
+        let stdoutFD = fileno(stdout)
+
+        // Outer reconnect loop
+        while true {
+            let exitReason = relay(stdinFD: stdinFD, stdoutFD: stdoutFD, socketFD: fd)
+
+            switch exitReason {
+            case .stdinEOF:
+                close(fd)
+                exit(0)
+
+            case .socketError:
+                close(fd)
+                fputs("bridge: connection lost, reconnecting...\n", stderr)
+                BridgeRelay.bridgeReconnectCount += 1
+
+                fd = discoverSocket(logPrefix: "bridge")
+                guard fd >= 0 else {
+                    fputs("bridge: reconnect failed after \(socketWaitTimeoutMs / 1000)s, exiting\n", stderr)
+                    exit(1)
+                }
+
+                guard performHandshake(fd: fd) else {
+                    fputs("bridge: MCP re-initialization failed after reconnect, exiting\n", stderr)
+                    close(fd)
+                    exit(1)
+                }
+
+                fputs("bridge: reconnected and session re-initialized\n", stderr)
+            }
+        }
     }
 
     /// Performs a full MCP handshake (initialize + tools/list) and returns the tool count.
