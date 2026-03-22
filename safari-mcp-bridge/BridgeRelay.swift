@@ -60,45 +60,47 @@ enum BridgeRelay {
         return fd
     }
 
-    /// Maximum time (seconds) to wait for the app's socket to appear.
-    /// Covers the case where Claude Desktop launches the bridge before
-    /// the Claude in Safari app has finished starting.
+    /// Maximum time (seconds) to wait for a connectable socket.
+    /// Covers the case where an MCP client launches the bridge before
+    /// the Claude in Safari app has finished starting, or when a stale
+    /// socket file exists from a previous session.
     static let socketWaitTimeout: Int = 30
     static let socketPollInterval: UInt32 = 2 // seconds
 
     /// Runs the stdio↔socket relay loop. Terminates the process when either side closes.
     static func run() -> Never {
-        // Wait for the socket to appear, retrying periodically.
-        // Claude Desktop may launch the bridge before the app is fully running.
-        var socketPath: String? = findNewestSocket(in: socketDirectory)
-        if socketPath == nil {
-            fputs("Waiting for Claude in Safari to start...\n", stderr)
-            var elapsed: Int = 0
-            while elapsed < socketWaitTimeout {
-                sleep(socketPollInterval)
-                elapsed += Int(socketPollInterval)
-                socketPath = findNewestSocket(in: socketDirectory)
-                if socketPath != nil { break }
+        // Wait for a connectable socket, retrying both discovery and connection.
+        // MCP clients (Claude Code, Claude Desktop) may launch the bridge before
+        // the app is fully running, or a stale socket file may exist from a crash.
+        var fd: Int32 = -1
+        var waited = false
+        var elapsed: Int = 0
+
+        while true {
+            if let path = findNewestSocket(in: socketDirectory) {
+                do {
+                    fd = try connectToSocket(at: path)
+                    break // connected successfully
+                } catch {
+                    // Socket file exists but connection failed (stale or app still starting)
+                }
             }
-        }
-        guard let socketPath else {
-            fputs("{\"error\": \"Claude in Safari is not running after waiting \(socketWaitTimeout)s. Launch the app and try again.\"}\n", stderr)
-            exit(1)
+
+            // First failure — print waiting message
+            if !waited {
+                fputs("Waiting for Claude in Safari to start...\n", stderr)
+                waited = true
+            }
+
+            elapsed += Int(socketPollInterval)
+            if elapsed >= socketWaitTimeout {
+                break
+            }
+            sleep(socketPollInterval)
         }
 
-        let fd: Int32
-        do {
-            fd = try connectToSocket(at: socketPath)
-        } catch let error as BridgeError {
-            switch error {
-            case .socketCreationFailed(let code):
-                fputs("{\"error\": \"Failed to create socket: \(String(cString: strerror(code)))\"}\n", stderr)
-            case .connectionFailed(let code):
-                fputs("{\"error\": \"Socket connection failed: \(String(cString: strerror(code))). Restart Claude in Safari.\"}\n", stderr)
-            }
-            exit(1)
-        } catch {
-            fputs("{\"error\": \"Unexpected error: \(error.localizedDescription)\"}\n", stderr)
+        guard fd >= 0 else {
+            fputs("{\"error\": \"Claude in Safari is not running after waiting \(socketWaitTimeout)s. Launch the app and try again.\"}\n", stderr)
             exit(1)
         }
 
@@ -204,7 +206,7 @@ enum BridgeRelay {
         setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
 
         // Shared read buffer — carries leftover bytes across calls in case the server
-        // delivers multiple newline-delimited messages in one TCP segment.
+        // delivers multiple newline-delimited messages in a single read.
         var leftover = Data()
 
         func sendLine(_ json: String) -> Bool {

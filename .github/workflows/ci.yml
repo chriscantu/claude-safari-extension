@@ -154,52 +154,48 @@ jobs:
           wait $XC_PID 2>/dev/null
 
       - name: Validate bridge binary
+        id: find-bridge
         run: |
-          BRIDGE=$(find ~/Library/Developer/Xcode/DerivedData -name safari-mcp-bridge -type f 2>/dev/null | head -1)
+          set -euo pipefail
+          BRIDGE=$(find ~/Library/Developer/Xcode/DerivedData -path "*/Build/Products/*/safari-mcp-bridge" -type f 2>/dev/null | head -1)
           if [ -z "$BRIDGE" ]; then
             echo "::error::safari-mcp-bridge not found in build output"
             exit 1
           fi
           echo "Found bridge: $BRIDGE"
+          echo "bridge_path=$BRIDGE" >> "$GITHUB_OUTPUT"
           python3 scripts/validate-bridge.py --check-binary "$BRIDGE"
 
       - name: Validate config installer round-trip
         run: |
-          BRIDGE=$(find ~/Library/Developer/Xcode/DerivedData -name safari-mcp-bridge -type f 2>/dev/null | head -1)
+          set -euo pipefail
+          BRIDGE="${{ steps.find-bridge.outputs.bridge_path }}"
           FAKE_HOME=$(mktemp -d)
+          trap 'rm -rf "$FAKE_HOME"' EXIT
           mkdir -p "$FAKE_HOME/.claude"
           mkdir -p "$FAKE_HOME/Library/Application Support/Claude"
+          # Install and verify both configs
           HOME="$FAKE_HOME" "$BRIDGE" --install
-          python3 -c "
-          import json, sys
-          config = json.load(open('$FAKE_HOME/.claude.json'))
-          servers = config.get('mcpServers', {})
-          entry = servers.get('claude-in-safari', {})
-          cmd = entry.get('command', '')
-          if not cmd:
-              print('FAIL: no claude-in-safari entry in config')
-              sys.exit(1)
-          print(f'OK: claude-in-safari configured → {cmd}')
+          FAKE_HOME="$FAKE_HOME" python3 -c "
+          import json, sys, os
+          home = os.environ['FAKE_HOME']
+          for name, path in [('CLI', f'{home}/.claude.json'), ('Desktop', f'{home}/Library/Application Support/Claude/claude_desktop_config.json')]:
+              config = json.load(open(path))
+              cmd = config.get('mcpServers', {}).get('claude-in-safari', {}).get('command', '')
+              if not cmd:
+                  print(f'FAIL: no claude-in-safari entry in {name} config')
+                  sys.exit(1)
+              print(f'OK: {name} claude-in-safari configured → {cmd}')
           "
-          python3 -c "
-          import json, sys
-          config = json.load(open('$FAKE_HOME/Library/Application Support/Claude/claude_desktop_config.json'))
-          servers = config.get('mcpServers', {})
-          entry = servers.get('claude-in-safari', {})
-          cmd = entry.get('command', '')
-          if not cmd:
-              print('FAIL: no claude-in-safari entry in Desktop config')
-              sys.exit(1)
-          print(f'OK: Desktop claude-in-safari configured → {cmd}')
-          "
+          # Uninstall and verify both configs are cleaned up
           HOME="$FAKE_HOME" "$BRIDGE" --uninstall
-          python3 -c "
-          import json, sys
-          config = json.load(open('$FAKE_HOME/.claude.json'))
-          servers = config.get('mcpServers', {})
-          if 'claude-in-safari' in servers:
-              print('FAIL: claude-in-safari entry still present after --uninstall')
-              sys.exit(1)
-          print('OK: --uninstall removed entry')
+          FAKE_HOME="$FAKE_HOME" python3 -c "
+          import json, sys, os
+          home = os.environ['FAKE_HOME']
+          for name, path in [('CLI', f'{home}/.claude.json'), ('Desktop', f'{home}/Library/Application Support/Claude/claude_desktop_config.json')]:
+              config = json.load(open(path))
+              if 'claude-in-safari' in config.get('mcpServers', {}):
+                  print(f'FAIL: claude-in-safari still present in {name} config after --uninstall')
+                  sys.exit(1)
+              print(f'OK: {name} --uninstall removed entry')
           "
-          rm -rf "$FAKE_HOME"

@@ -72,7 +72,7 @@ def read_bridge_path_from_config():
             cmd = config.get("mcpServers", {}).get(MCP_SERVER_KEY, {}).get("command")
             if cmd:
                 return cmd
-        except (json.JSONDecodeError, KeyError):
+        except json.JSONDecodeError:
             continue
     return None
 
@@ -187,11 +187,16 @@ def check_config():
     return errors
 
 
+class _BridgeDied(Exception):
+    """Raised when the bridge process dies or sends invalid data."""
+    pass
+
+
 # --- Check: Relay ---
 
 def check_relay(bridge_path=None):
     """Spawn the bridge as a subprocess and perform MCP handshake over stdio."""
-    header("Relay: spawning bridge as subprocess (simulating Claude Desktop)")
+    header("Relay: spawning bridge as subprocess (simulating MCP client)")
 
     # Resolve bridge path
     if not bridge_path:
@@ -225,7 +230,7 @@ def check_relay(bridge_path=None):
             [bridge_path],
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
         )
     except OSError as e:
         fail(f"failed to launch bridge: {e}")
@@ -234,15 +239,18 @@ def check_relay(bridge_path=None):
 
     errors = 0
     # Shared buffer across recv() calls — prevents data loss when the bridge
-    # sends multiple newline-delimited messages in one TCP segment.
+    # sends multiple newline-delimited messages in a single read.
     leftover = b""
 
     try:
         # Helper: send newline-delimited JSON
         def send(msg):
-            data = (json.dumps(msg) + "\n").encode("utf-8")
-            proc.stdin.write(data)
-            proc.stdin.flush()
+            try:
+                data = (json.dumps(msg) + "\n").encode("utf-8")
+                proc.stdin.write(data)
+                proc.stdin.flush()
+            except (BrokenPipeError, OSError) as e:
+                raise _BridgeDied(f"bridge process died or closed stdin: {e}")
 
         # Helper: read one newline-delimited JSON response (with timeout)
         def recv(timeout_sec=10):
@@ -250,7 +258,10 @@ def check_relay(bridge_path=None):
             # Check leftover from previous read first
             if b"\n" in leftover:
                 line, leftover = leftover.split(b"\n", 1)
-                return json.loads(line.decode("utf-8"))
+                try:
+                    return json.loads(line.decode("utf-8"))
+                except (json.JSONDecodeError, UnicodeDecodeError) as e:
+                    raise _BridgeDied(f"bridge sent invalid response: {e}")
             deadline = time.time() + timeout_sec
             while time.time() < deadline:
                 remaining = deadline - time.time()
@@ -264,59 +275,17 @@ def check_relay(bridge_path=None):
                     leftover += chunk
                     if b"\n" in leftover:
                         line, leftover = leftover.split(b"\n", 1)
-                        return json.loads(line.decode("utf-8"))
+                        try:
+                            return json.loads(line.decode("utf-8"))
+                        except (json.JSONDecodeError, UnicodeDecodeError) as e:
+                            raise _BridgeDied(f"bridge sent invalid response: {e}")
             return None
 
-        # Step 1: MCP initialize
-        send({
-            "jsonrpc": "2.0",
-            "id": 0,
-            "method": "initialize",
-            "params": {
-                "protocolVersion": "2025-11-25",
-                "capabilities": {},
-                "clientInfo": {"name": "validate-bridge", "version": "1.0.0"},
-            },
-        })
-        resp = recv()
-        if not resp or "result" not in resp:
-            fail("MCP initialize failed — no response from bridge")
+        try:
+            errors = _run_protocol_exchange(send, recv)
+        except _BridgeDied as e:
+            fail(str(e))
             return 1
-
-        result = resp.get("result", {})
-        server_info = result.get("serverInfo", {})
-        proto = result.get("protocolVersion", "?")
-        if not server_info.get("name"):
-            fail("MCP initialize response missing serverInfo")
-            errors += 1
-        else:
-            ok(f"MCP initialize handshake (server: {server_info['name']} v{server_info.get('version', '?')}, protocol: {proto})")
-
-        # Step 2: notifications/initialized
-        send({
-            "jsonrpc": "2.0",
-            "method": "notifications/initialized",
-        })
-        time.sleep(0.1)
-
-        # Step 3: tools/list
-        send({
-            "jsonrpc": "2.0",
-            "id": 1,
-            "method": "tools/list",
-            "params": {},
-        })
-        resp = recv()
-        if not resp or "result" not in resp:
-            fail("tools/list failed — no response from bridge")
-            return 1
-
-        tools = resp.get("result", {}).get("tools", [])
-        if not tools:
-            fail("tools/list returned empty tool list")
-            errors += 1
-        else:
-            ok(f"tools/list returned {len(tools)} tools")
 
     finally:
         proc.stdin.close()
@@ -325,6 +294,64 @@ def check_relay(bridge_path=None):
         except subprocess.TimeoutExpired:
             proc.kill()
             proc.wait()
+
+    return errors
+
+
+def _run_protocol_exchange(send, recv):
+    """Execute the MCP handshake and tools/list. Raises _BridgeDied on bridge failures."""
+    errors = 0
+
+    # Step 1: MCP initialize
+    send({
+        "jsonrpc": "2.0",
+        "id": 0,
+        "method": "initialize",
+        "params": {
+            "protocolVersion": "2025-11-25",
+            "capabilities": {},
+            "clientInfo": {"name": "validate-bridge", "version": "1.0.0"},
+        },
+    })
+    resp = recv()
+    if not resp or "result" not in resp:
+        fail("MCP initialize failed — no response from bridge")
+        return 1
+
+    result = resp.get("result", {})
+    server_info = result.get("serverInfo", {})
+    proto = result.get("protocolVersion", "?")
+    if not server_info.get("name"):
+        fail("MCP initialize response missing serverInfo")
+        errors += 1
+    else:
+        ok(f"MCP initialize handshake (server: {server_info['name']} v{server_info.get('version', '?')}, protocol: {proto})")
+
+    # Step 2: notifications/initialized
+    send({
+        "jsonrpc": "2.0",
+        "method": "notifications/initialized",
+    })
+    time.sleep(0.1)
+
+    # Step 3: tools/list
+    send({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "tools/list",
+        "params": {},
+    })
+    resp = recv()
+    if not resp or "result" not in resp:
+        fail("tools/list failed — no response from bridge")
+        return 1
+
+    tools = resp.get("result", {}).get("tools", [])
+    if not tools:
+        fail("tools/list returned empty tool list")
+        errors += 1
+    else:
+        ok(f"tools/list returned {len(tools)} tools")
 
     return errors
 
