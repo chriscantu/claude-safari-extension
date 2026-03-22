@@ -134,6 +134,7 @@ class ToolRouter: MCPSocketServerDelegate {
 
     /// Subscribe to the cross-process Darwin notification for response delivery.
     private func registerDarwinObserver() {
+        guard darwinObserverPtr == nil else { return }
         let center = CFNotificationCenterGetDarwinNotifyCenter()
         let name = "com.chriscantu.claudeinsafari.response-ready" as CFString
         darwinObserverPtr = Unmanaged.passUnretained(self).toOpaque()
