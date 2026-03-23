@@ -27,4 +27,11 @@ for PLIST in "$APP_PLIST" "$EXT_PLIST"; do
     /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $NEW_BUILD" "$PLIST"
 done
 
+# Update manifest.json
+MANIFEST="ClaudeInSafari Extension/Resources/manifest.json"
+sed -i '' "s/\"version\": \"$CURRENT\"/\"version\": \"$NEW_VERSION\"/" "$MANIFEST"
+
+# Update project.yml (both occurrences)
+sed -i '' "s/CFBundleShortVersionString: \"$CURRENT\"/CFBundleShortVersionString: \"$NEW_VERSION\"/" project.yml
+
 echo "$NEW_VERSION"
