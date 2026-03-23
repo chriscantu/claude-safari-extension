@@ -32,3 +32,6 @@ node_modules/
 *.profraw
 .worktrees/
 .superpowers/
+
+# Python
+__pycache__/
