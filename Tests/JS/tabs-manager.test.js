@@ -69,6 +69,21 @@ beforeEach(() => {
 });
 
 // ---------------------------------------------------------------------------
+// Startup guard — fail-fast on missing globalThis.TAB_GONE_PATTERN
+// ---------------------------------------------------------------------------
+
+describe("startup guard", () => {
+    test("throws if TAB_GONE_PATTERN is not set on globalThis (load-order regression)", () => {
+        jest.resetModules();
+        // beforeEach installs it; we explicitly remove it here to exercise the guard.
+        delete globalThis.TAB_GONE_PATTERN;
+        expect(() =>
+            require("../../ClaudeInSafari Extension/Resources/tools/tabs-manager.js")
+        ).toThrow(/tool-registry\.js must be loaded before tabs-manager\.js/);
+    });
+});
+
+// ---------------------------------------------------------------------------
 // Module loader helper — re-requires module fresh per test
 // ---------------------------------------------------------------------------
 
