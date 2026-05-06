@@ -296,41 +296,6 @@ describe("pruneStaleGroups", () => {
         expect(state).toBeUndefined();
     });
 
-    test("T_concurrent: interleaved tabs_create_mcp calls do not lose tabs (lock serializes RMW)", async () => {
-        // Mock browser.tabs.create with a yield so two concurrent handlers
-        // would interleave in the absence of a lock. Without serialization,
-        // both readState() observe nextTabId=1 and writeState() in sequence,
-        // producing one tab. With the lock, both succeed and produce two.
-        const bm = setup({ nextRealTabId: 700 });
-        let createCount = 0;
-        bm.tabs.create = jest.fn(async () => {
-            createCount++;
-            const id = 699 + createCount;
-            await new Promise((r) => setTimeout(r, 0));
-            return { id, url: "about:blank", title: "New Tab" };
-        });
-        const registrations = {};
-        jest.resetModules();
-        globalThis.browser = bm;
-        globalThis.registerTool = (name, handler) => { registrations[name] = handler; };
-        require("../../ClaudeInSafari Extension/Resources/tools/tabs-manager.js");
-
-        await Promise.all([
-            registrations["tabs_create_mcp"]({}),
-            registrations["tabs_create_mcp"]({}),
-        ]);
-
-        const state = bm.storage.session._raw.__claudeTabGroups;
-        const groupIds = Object.keys(state.groups);
-        expect(groupIds.length).toBe(1);
-        const tabs = state.groups[groupIds[0]].tabs;
-        // Both virtual tabs must persist — would be 1 without the lock.
-        expect(Object.keys(tabs).length).toBe(2);
-        // Distinct virtual IDs and distinct real IDs.
-        const realIds = Object.values(tabs).map((t) => t.realTabId);
-        expect(new Set(realIds).size).toBe(2);
-    });
-
     test("T_prune4: preserves groups with all live tabs", async () => {
         const bm = setup({
             existingRealTabs: {
@@ -356,5 +321,54 @@ describe("pruneStaleGroups", () => {
 
         const state = bm.storage.session._raw.__claudeTabGroups;
         expect(Object.keys(state.groups["1"].tabs)).toEqual(["1", "2"]);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// withTabGroupLock — concurrency / serialization
+// ---------------------------------------------------------------------------
+
+describe("withTabGroupLock", () => {
+    afterEach(() => {
+        jest.resetModules();
+        delete globalThis.browser;
+        delete globalThis.registerTool;
+        delete globalThis.pruneStaleGroups;
+        delete globalThis.resolveTab;
+    });
+
+    test("T_concurrent: interleaved tabs_create_mcp calls do not lose tabs (lock serializes RMW)", async () => {
+        // Mock browser.tabs.create with a yield so two concurrent handlers
+        // would interleave in the absence of a lock. Without serialization,
+        // both readState() observe nextTabId=1 and writeState() in sequence,
+        // producing one tab. With the lock, both succeed and produce two.
+        const bm = makeBrowserMock({ nextRealTabId: 700 });
+        let createCount = 0;
+        bm.tabs.create = jest.fn(async () => {
+            createCount++;
+            const id = 699 + createCount;
+            await new Promise((r) => setTimeout(r, 0));
+            return { id, url: "about:blank", title: "New Tab" };
+        });
+        jest.resetModules();
+        globalThis.browser = bm;
+        const registrations = {};
+        globalThis.registerTool = (name, handler) => { registrations[name] = handler; };
+        require("../../ClaudeInSafari Extension/Resources/tools/tabs-manager.js");
+
+        await Promise.all([
+            registrations["tabs_create_mcp"]({}),
+            registrations["tabs_create_mcp"]({}),
+        ]);
+
+        const state = bm.storage.session._raw.__claudeTabGroups;
+        const groupIds = Object.keys(state.groups);
+        expect(groupIds.length).toBe(1);
+        const tabs = state.groups[groupIds[0]].tabs;
+        // Both virtual tabs must persist — would be 1 without the lock.
+        expect(Object.keys(tabs).length).toBe(2);
+        // Distinct virtual IDs and distinct real IDs.
+        const realIds = Object.values(tabs).map((t) => t.realTabId);
+        expect(new Set(realIds).size).toBe(2);
     });
 });

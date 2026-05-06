@@ -8,6 +8,12 @@
 
 const STORAGE_KEY = "__claudeTabGroups";
 
+// User-facing strings and tab defaults — kept module-local rather than in a
+// shared file because tabs-manager.js is the only producer.
+const ABOUT_BLANK = "about:blank";
+const DEFAULT_TAB_TITLE = "New Tab";
+const NO_GROUP_MESSAGE = "No MCP tab group exists. Use tabs_create_mcp to create a new tab.";
+
 // ---------------------------------------------------------------------------
 // Storage helpers
 // ---------------------------------------------------------------------------
@@ -195,9 +201,7 @@ async function handleTabsContextMcp(args) {
 
         if (groupId === null) {
             if (!createIfEmpty) {
-                return withTabGroupLock.skipWrite(
-                    "No MCP tab group exists. Use tabs_create_mcp to create a new tab."
-                );
+                return withTabGroupLock.skipWrite(NO_GROUP_MESSAGE);
             }
             groupId = String(state.nextGroupId++);
             state.groups[groupId] = { tabs: {} };
@@ -235,7 +239,7 @@ async function handleTabsCreateMcp(_args) {
 
         let newTab;
         try {
-            newTab = await browser.tabs.create({ url: "about:blank", active: true });
+            newTab = await browser.tabs.create({ url: ABOUT_BLANK, active: true });
         } catch (err) {
             throw new Error(err.message || String(err));
         }
@@ -243,8 +247,8 @@ async function handleTabsCreateMcp(_args) {
         const virtualTabId = state.nextTabId++;
         state.groups[groupId].tabs[virtualTabId] = {
             realTabId: newTab.id,
-            url: newTab.url || "about:blank",
-            title: newTab.title || "New Tab",
+            url: newTab.url || ABOUT_BLANK,
+            title: newTab.title || DEFAULT_TAB_TITLE,
             isStale: false,
         };
 
@@ -260,43 +264,71 @@ async function handleTabsCreateMcp(_args) {
 // ---------------------------------------------------------------------------
 
 /**
+ * Flatten the (group, vtid, entry) triples in state.groups into a single list.
+ */
+function flattenTabEntries(groups) {
+    return Object.entries(groups).flatMap(([groupId, group]) =>
+        Object.entries(group.tabs).map(([vtid, entry]) => ({ groupId, vtid, entry }))
+    );
+}
+
+/**
+ * Identify tab entries whose real tab no longer exists.
+ * Read-only — does not mutate state. Safe to run outside the lock so that
+ * the (potentially N sequential `browser.tabs.get`) probe phase does not
+ * block concurrent tool calls.
+ */
+async function findStaleEntries(state) {
+    const stale = [];
+    for (const { groupId, vtid, entry } of flattenTabEntries(state.groups)) {
+        if (typeof entry.realTabId !== "number") {
+            console.warn(`prune: corrupt entry vtid=${vtid} in group=${groupId}`);
+            stale.push({ groupId, vtid });
+            continue;
+        }
+        try {
+            await browser.tabs.get(entry.realTabId);
+        } catch (_) {
+            stale.push({ groupId, vtid });
+        }
+    }
+    return stale;
+}
+
+/**
+ * Apply removals from a previously-collected stale list. Each deletion is
+ * guarded by an existence check, so concurrent additions to other vtids
+ * between scan and apply are preserved.
+ */
+function applyStaleRemovals(state, staleEntries) {
+    for (const { groupId, vtid } of staleEntries) {
+        const group = state.groups[groupId];
+        if (!group) continue;
+        delete group.tabs[vtid];
+        if (Object.keys(group.tabs).length === 0) {
+            delete state.groups[groupId];
+        }
+    }
+}
+
+/**
  * Remove tab entries whose real tab no longer exists.
  * Delete groups that become empty after pruning.
  * Called periodically from background.js on a 60-second interval.
+ *
+ * Two-phase: probe outside the lock (so tool calls aren't queued behind N
+ * sequential `browser.tabs.get` calls), then re-read fresh state under the
+ * lock and apply removals.
  */
 async function pruneStaleGroups() {
+    const snapshot = await readState();
+    if (!snapshot.groups || Object.keys(snapshot.groups).length === 0) return;
+
+    const staleEntries = await findStaleEntries(snapshot);
+    if (staleEntries.length === 0) return;
+
     await withTabGroupLock(async (state) => {
-        if (!state.groups || Object.keys(state.groups).length === 0) {
-            return withTabGroupLock.skipWrite(undefined);
-        }
-
-        const staleEntries = [];
-        for (const [groupId, group] of Object.entries(state.groups)) {
-            for (const [vtid, entry] of Object.entries(group.tabs)) {
-                if (typeof entry.realTabId !== "number") {
-                    console.warn("prune: corrupt entry vtid=" + vtid + " in group=" + groupId);
-                    staleEntries.push({ groupId, vtid });
-                    continue;
-                }
-                try {
-                    await browser.tabs.get(entry.realTabId);
-                } catch (_) {
-                    staleEntries.push({ groupId, vtid });
-                }
-            }
-        }
-        if (staleEntries.length === 0) {
-            return withTabGroupLock.skipWrite(undefined);
-        }
-
-        for (const { groupId, vtid } of staleEntries) {
-            if (state.groups[groupId]?.tabs[vtid]) {
-                delete state.groups[groupId].tabs[vtid];
-            }
-            if (state.groups[groupId] && Object.keys(state.groups[groupId].tabs).length === 0) {
-                delete state.groups[groupId];
-            }
-        }
+        applyStaleRemovals(state, staleEntries);
     });
 }
 

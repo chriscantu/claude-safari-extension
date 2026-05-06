@@ -60,7 +60,9 @@ Contract:
 - To skip the write (read-only path or explicit "do not commit"), return `withTabGroupLock.skipWrite(returnValue)`.
 - Throwing from inside the callback releases the lock (via `finally`) and propagates the error; partial mutations are NOT persisted.
 
-All four mutation sites (`handleTabsContextMcp`, `handleTabsCreateMcp`, `resolveTab`'s stale-mark path, `pruneStaleGroups`) route through the helper. The two-phase manual mitigation in `pruneStaleGroups` is removed — the lock provides the same guarantee uniformly.
+All four mutation sites (`handleTabsContextMcp`, `handleTabsCreateMcp`, `resolveTab`'s stale-mark path, `pruneStaleGroups`) route through the helper.
+
+`pruneStaleGroups` keeps a two-phase shape, but for a different reason than the original: the probe phase (N sequential `browser.tabs.get` calls) runs **outside** the lock so concurrent tool calls aren't queued behind it. The mutation phase (`applyStaleRemovals`) runs inside the lock. Each deletion is guarded by a fresh existence check, so concurrent additions to other vtids between scan and apply are preserved.
 
 ## Tests
 
