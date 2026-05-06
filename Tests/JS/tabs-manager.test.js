@@ -662,4 +662,81 @@ describe("withTabGroupLock", () => {
         // Live entry preserved.
         expect(state.groups["1"].tabs["1"]).toBeDefined();
     });
+
+    test("T_context_ghost_group: handleTabsContextMcp tolerates target group disappearing between phase 1 and phase 3", async () => {
+        // Phase-1 read sees group "1" with one tab. Phase-3 re-read (after the
+        // out-of-lock probe phase) sees no groups — concurrent prune removed it.
+        // The `if (!group)` guard in Phase 3 must surface NO_GROUP_MESSAGE
+        // instead of a TypeError on `state.groups[init.groupId].tabs`.
+        const bm = makeBrowserMock({
+            existingRealTabs: { 50: { id: 50, url: "https://x.com", title: "X" } },
+        });
+        const phase1State = {
+            __claudeTabGroups: {
+                nextGroupId: 2, nextTabId: 2,
+                groups: {
+                    "1": {
+                        tabs: {
+                            "1": { realTabId: 50, url: "https://x.com", title: "X", isStale: false },
+                        },
+                    },
+                },
+            },
+        };
+        const ghosted = {
+            __claudeTabGroups: { nextGroupId: 2, nextTabId: 2, groups: {} },
+        };
+        let getCalls = 0;
+        bm.storage.session.get = jest.fn(async () => {
+            getCalls++;
+            // Phase 1 reads the populated state; later reads see the ghost.
+            return getCalls === 1 ? { ...phase1State } : { ...ghosted };
+        });
+
+        jest.resetModules();
+        globalThis.browser = bm;
+        const registrations = {};
+        globalThis.registerTool = (name, handler) => { registrations[name] = handler; };
+        require("../../ClaudeInSafari Extension/Resources/tools/tabs-manager.js");
+
+        const result = await registrations["tabs_context_mcp"]({});
+        expect(result).toBe("No MCP tab group exists. Use tabs_create_mcp to create a new tab.");
+    });
+
+    test("T_context_transient_probe: handleTabsContextMcp transient probe preserves prior isStale", async () => {
+        // Tab starts with isStale: true. Probe rejects with a non-TAB_GONE_PATTERN
+        // error. The phase-2 transient branch must NOT push an update, and phase 3
+        // must leave isStale unchanged (not flipped to false).
+        const bm = makeBrowserMock({
+            existingRealTabs: {},
+            storageData: {
+                __claudeTabGroups: {
+                    nextGroupId: 2, nextTabId: 2,
+                    groups: {
+                        "1": {
+                            tabs: {
+                                "1": { realTabId: 60, url: "https://y.com", title: "Y", isStale: true },
+                            },
+                        },
+                    },
+                },
+            },
+        });
+        bm.tabs.get = jest.fn(async () => {
+            throw new Error("Extension context invalidated");
+        });
+
+        jest.resetModules();
+        globalThis.browser = bm;
+        const registrations = {};
+        globalThis.registerTool = (name, handler) => { registrations[name] = handler; };
+        require("../../ClaudeInSafari Extension/Resources/tools/tabs-manager.js");
+
+        const result = await registrations["tabs_context_mcp"]({});
+        // Output reflects preserved staleness (the [STALE] tag was already set).
+        expect(result).toContain("[STALE]");
+        // isStale flag in storage was NOT flipped by the transient probe.
+        const after = bm.storage.session._raw.__claudeTabGroups;
+        expect(after.groups["1"].tabs["1"].isStale).toBe(true);
+    });
 });
