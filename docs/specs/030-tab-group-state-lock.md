@@ -85,6 +85,8 @@ In `resolveTab`, a transient probe surfaces the original error to the caller (wr
 
 `applyStaleRemovals` deletes the tombstoned vtid unconditionally (after an existence guard). This is safe under Safari's empirical behavior of monotonically increasing per-session tab IDs. If a future Safari behavior reuses real tab IDs within a session, scan→apply must run inside a single locked region.
 
+The same monotonic assumption underpins `handleTabsContextMcp`'s phase-3 update policy: only flip entries TO `isStale: true`, never back to `false`. A phase-2 `live` probe result must NOT clear a stale mark set by a concurrent `resolveTab` between phases — under monotonic IDs, a closed tab does not become live again. This also lets phase 3 take the `skipWrite` path when no flag flipped (the hot-path all-live case), avoiding storage churn on every `tabs_context_mcp` call.
+
 ## Tests
 
 - `T_concurrent` — two parallel `tabs_create_mcp` calls produce two distinct virtual tabs and two distinct real tabs in one group. Without the lock, `nextTabId++` races and one tab is lost.
@@ -97,6 +99,9 @@ In `resolveTab`, a transient probe surfaces the original error to the caller (wr
 - `T_resolveTab_transient` — non-`TAB_GONE_PATTERN` rejection through `resolveTab` does NOT flip `isStale`, does NOT write storage, and surfaces the underlying error message to the caller.
 - `T_prune_ghost_group` — `applyStaleRemovals` tolerates a group disappearing between phase-1 snapshot and phase-3 lock acquisition (the `if (!group) continue` guard).
 - `T_prune_corrupt` — `findStaleEntries` flags entries with non-numeric `realTabId` for removal so corrupt records don't accumulate.
+- `T_context_resolveTab_race` — phase-2 of `tabs_context_mcp` records `live`; concurrent `resolveTab` lands a stale mark between phases; phase 3 must NOT revert it back to `live`.
+- `T_context_no_write_when_clean` — `tabs_context_mcp` against an all-live group performs zero `storage.session.set` calls (skipWrite hot path).
+- `T_currentGroupId_all_stale_fallback` — when every group is all-stale, the highest-ID group is selected as last resort.
 - All existing T1–T9 and T_prune1–T_prune4 cases continue to pass without behavioral change.
 
 ### Coverage gaps (intentional)

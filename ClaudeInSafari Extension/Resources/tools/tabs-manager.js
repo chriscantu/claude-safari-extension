@@ -289,8 +289,20 @@ async function handleTabsContextMcp(args) {
             // it became empty). Surface the standard no-group message.
             return withTabGroupLock.skipWrite(NO_GROUP_MESSAGE);
         }
+        // Only flip entries TO stale, never back to live. Under Safari's
+        // monotonically-increasing tab-ID policy (Spec 030 §Tab-ID reuse
+        // assumption), a closed tab never becomes live again — so a
+        // phase-2 `live` probe result must NOT clear a stale mark set by
+        // a concurrent resolveTab between phases. Track `dirty` so we can
+        // skip writeState entirely in the common all-live / no-change
+        // case (tabs_context_mcp is the hot path).
+        let dirty = false;
         for (const { vtid, isStale } of updates) {
-            if (group.tabs[vtid]) group.tabs[vtid].isStale = isStale;
+            const entry = group.tabs[vtid];
+            if (entry && isStale && !entry.isStale) {
+                entry.isStale = true;
+                dirty = true;
+            }
         }
 
         const lines = [`=== MCP Tab Group (Group ${init.groupId}) ===`, ""];
@@ -301,7 +313,8 @@ async function handleTabsContextMcp(args) {
         }
         lines.push("");
         lines.push(`Total: ${tabEntries.length} tab(s)`);
-        return lines.join("\n");
+        const output = lines.join("\n");
+        return dirty ? output : withTabGroupLock.skipWrite(output);
     });
 }
 

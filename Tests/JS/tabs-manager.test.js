@@ -703,6 +703,89 @@ describe("withTabGroupLock", () => {
         expect(result).toBe("No MCP tab group exists. Use tabs_create_mcp to create a new tab.");
     });
 
+    test("T_context_resolveTab_race: phase-3 must not clear a stale mark set by concurrent resolveTab", async () => {
+        // Setup: vtid 1 is live initially. tabs_context_mcp's phase-2 probe
+        // sees it live → records {vtid:1, isStale:false}. Between phase 2 and
+        // phase 3, resolveTab acquires the lock, observes the tab is gone,
+        // sets isStale=true, releases. Phase 3 must then NOT overwrite back
+        // to false (Spec 030: monotonic IDs → tabs don't un-stale).
+        const bm = makeBrowserMock({
+            existingRealTabs: { 1300: { id: 1300, url: "https://r.com", title: "R" } },
+            storageData: {
+                __claudeTabGroups: {
+                    nextGroupId: 2, nextTabId: 2,
+                    groups: {
+                        "1": {
+                            tabs: {
+                                "1": { realTabId: 1300, url: "https://r.com", title: "R", isStale: false },
+                            },
+                        },
+                    },
+                },
+            },
+        });
+        // First tabs.get (phase-2 probe) → live. Subsequent calls (resolveTab) → gone.
+        let getCalls = 0;
+        bm.tabs.get = jest.fn(async (id) => {
+            getCalls++;
+            if (getCalls === 1) return { id, url: "https://r.com", title: "R" };
+            throw new Error(`No tab with id: ${id}`);
+        });
+
+        jest.resetModules();
+        globalThis.browser = bm;
+        const registrations = {};
+        globalThis.registerTool = (name, handler) => { registrations[name] = handler; };
+        require("../../ClaudeInSafari Extension/Resources/tools/tabs-manager.js");
+
+        const [, resolveOutcome] = await Promise.all([
+            registrations["tabs_context_mcp"]({}),
+            globalThis.resolveTab(1).catch((e) => e),
+        ]);
+
+        // resolveTab observed the gone state and threw "Tab not found".
+        expect(resolveOutcome).toBeInstanceOf(Error);
+        expect(resolveOutcome.message).toContain("Tab not found: 1");
+
+        // Critical: phase 3 of tabs_context_mcp must not have reverted isStale.
+        const after = bm.storage.session._raw.__claudeTabGroups;
+        expect(after.groups["1"].tabs["1"].isStale).toBe(true);
+    });
+
+    test("T_context_no_write_when_clean: tabs_context_mcp on all-live group skips storage write", async () => {
+        // Hot-path optimization (Spec 030): if no isStale flag flipped, the
+        // phase-3 callback must take the skipWrite path so no storage churn
+        // occurs on read-only `tabs_context_mcp` calls.
+        const bm = makeBrowserMock({
+            existingRealTabs: { 1400: { id: 1400, url: "https://l.com", title: "L" } },
+            storageData: {
+                __claudeTabGroups: {
+                    nextGroupId: 2, nextTabId: 2,
+                    groups: {
+                        "1": {
+                            tabs: {
+                                "1": { realTabId: 1400, url: "https://l.com", title: "L", isStale: false },
+                            },
+                        },
+                    },
+                },
+            },
+        });
+
+        jest.resetModules();
+        globalThis.browser = bm;
+        const registrations = {};
+        globalThis.registerTool = (name, handler) => { registrations[name] = handler; };
+        require("../../ClaudeInSafari Extension/Resources/tools/tabs-manager.js");
+
+        bm.storage.session.set.mockClear();
+        const result = await registrations["tabs_context_mcp"]({});
+        expect(result).toContain("Tab 1:");
+        expect(result).not.toContain("[STALE]");
+        // No storage write — no isStale flag changed.
+        expect(bm.storage.session.set).not.toHaveBeenCalled();
+    });
+
     test("T_currentGroupId_all_stale_fallback: prefers highest-ID group when every group is all-stale", async () => {
         // Two groups, all tabs in both are isStale: true. currentGroupId
         // must fall through the live-group preference loop and return the
