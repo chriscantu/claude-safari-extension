@@ -464,6 +464,18 @@ async function pruneStaleGroups() {
     if (staleEntries.length === 0) return;
 
     await withTabGroupLock(async (state) => {
+        // Visibility on probe→lock race: if the fresh state under the lock
+        // has fewer groups than the snapshot, a concurrent caller (another
+        // prune, a tab close cascade, etc.) drained groups in between.
+        // applyStaleRemovals will silently no-op for those entries; log so
+        // missed prunes don't disappear from the trail.
+        const snapshotGroupCount = Object.keys(snapshot.groups).length;
+        const freshGroupCount = state.groups ? Object.keys(state.groups).length : 0;
+        if (freshGroupCount < snapshotGroupCount) {
+            console.warn(
+                `prune: race observed — snapshot had ${snapshotGroupCount} group(s), fresh state has ${freshGroupCount}; some staleEntries may be no-ops`
+            );
+        }
         const removed = applyStaleRemovals(state, staleEntries);
         // Skip writeState if every staleEntry was already removed by a
         // concurrent caller between probe and lock acquisition — avoids a
