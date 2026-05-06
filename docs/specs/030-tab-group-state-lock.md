@@ -79,7 +79,9 @@ All four mutation sites (`handleTabsContextMcp`, `handleTabsCreateMcp`, `resolve
 
 `browser.tabs.get` can reject for reasons other than "tab closed" — extension context invalidated, native bridge dropped a message, focus transition. Treating every rejection as a tombstone would corrupt the virtual group on transient errors.
 
-All probe sites (`findStaleEntries`, `resolveTab`, `handleTabsContextMcp`'s phase-2 loop) call the shared `probeRealTab(realTabId)` helper, which classifies the result as `live` / `gone` / `transient`. Only `gone` (rejection message matches `TAB_GONE_PATTERN` — `/no tab with id|invalid tab/i`, same shape used by `tool-registry.js::classifyExecuteScriptError`) tombstones an entry. `transient` results are logged via `console.warn` and the entry is preserved; the next probe re-applies the policy.
+All probe sites (`findStaleEntries`, `resolveTab`, `handleTabsContextMcp`'s phase-2 loop) call the shared `probeRealTab(realTabId)` helper, which classifies the result as `live` / `gone` / `transient`. Only `gone` (rejection message matches `TAB_GONE_PATTERN` — `/no tab with id|invalid tab/i`) tombstones an entry. `transient` results are logged via `console.warn` and the entry is preserved; the next probe re-applies the policy.
+
+`TAB_GONE_PATTERN` is defined once in `tool-registry.js` and exposed via `globalThis.TAB_GONE_PATTERN` so the same shape is used by both `classifyExecuteScriptError` (synthesizing the user-visible error message) and the probe sites in `tabs-manager.js` (deciding whether to tombstone). Manifest load order (`tool-registry.js` before `tabs-manager.js`) guarantees the global is populated before consumers read it.
 
 In `resolveTab`, a transient probe surfaces the original error to the caller (wrapped as `"resolveTab: vtid=N unreachable (transient): ..."`) instead of `"Tab not found"`, so callers can distinguish a closed tab from a temporarily unreachable one.
 

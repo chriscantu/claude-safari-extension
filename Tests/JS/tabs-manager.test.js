@@ -59,6 +59,16 @@ function makeBrowserMock(opts = {}) {
 }
 
 // ---------------------------------------------------------------------------
+// Cross-module pattern (real source: tool-registry.js, exported via globalThis
+// per manifest.json load order). Tests load tabs-manager.js in isolation, so
+// we install the pattern on globalThis before each test to mirror runtime.
+// ---------------------------------------------------------------------------
+
+beforeEach(() => {
+    globalThis.TAB_GONE_PATTERN = /no tab with id|invalid tab/i;
+});
+
+// ---------------------------------------------------------------------------
 // Module loader helper — re-requires module fresh per test
 // ---------------------------------------------------------------------------
 

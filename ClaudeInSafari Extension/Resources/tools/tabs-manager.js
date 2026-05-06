@@ -14,12 +14,14 @@ const ABOUT_BLANK = "about:blank";
 const DEFAULT_TAB_TITLE = "New Tab";
 const NO_GROUP_MESSAGE = "No MCP tab group exists. Use tabs_create_mcp to create a new tab.";
 
-// Definitive "tab is gone" error shape from browser.tabs.get. Mirrors the
-// pattern in tool-registry.js::classifyExecuteScriptError. Other errors
-// (extension context invalidated, focus transition, throttling) are
-// transient and MUST NOT be treated as tombstones — see findStaleEntries
-// and resolveTab.
-const TAB_GONE_PATTERN = /no tab with id|invalid tab/i;
+// Definitive "tab is gone" error shape from browser.tabs.get. Sourced from
+// tool-registry.js (loaded before this file per manifest.json background.scripts
+// order — see load-order comment in background.js) and exposed via
+// globalThis.TAB_GONE_PATTERN. Single source of truth so the transient-vs-gone
+// classification stays in sync across modules. Other errors (extension context
+// invalidated, focus transition, throttling) are transient and MUST NOT be
+// treated as tombstones — see findStaleEntries and resolveTab.
+const TAB_GONE_PATTERN = globalThis.TAB_GONE_PATTERN;
 
 // ---------------------------------------------------------------------------
 // Storage helpers
