@@ -310,6 +310,15 @@ async function handleTabsContextMcp(args) {
 // ---------------------------------------------------------------------------
 
 async function handleTabsCreateMcp(_args) {
+    // KNOWN LOCK-HOLD HOTSPOT: this handler holds the mutex across
+    // browser.tabs.create. The vtid assignment (state.nextTabId++) must be
+    // atomic with the new realTabId being recorded — otherwise a concurrent
+    // tabs_create_mcp could observe the same nextTabId and overwrite. The
+    // trade-off is that any concurrent tabs_context_mcp / resolveTab /
+    // pruneStaleGroups acquirer queues behind Safari's tab-open latency
+    // (typically tens of ms; multi-second under cold start / heavy load).
+    // Accepted per Spec 030; revisit if profile shows this becoming a
+    // latency hotspot in real use.
     return await withTabGroupLock(async (state) => {
         let groupId = currentGroupId(state.groups);
         if (groupId === null) {

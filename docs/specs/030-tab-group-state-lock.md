@@ -68,7 +68,7 @@ All four mutation sites (`handleTabsContextMcp`, `handleTabsCreateMcp`, `resolve
 - **Phase 2 (no lock):** call `probeRealTab(realTabId)` for each pair. Concurrent tool calls can acquire the lock during this phase.
 - **Phase 3 (under lock):** re-read fresh state, apply the per-vtid result (delete or update `isStale`) only if the entry still exists.
 
-`handleTabsCreateMcp` holds the lock through `browser.tabs.create` because the `nextTabId++` increment must be atomic with tab creation — bounded to a single async call per invocation.
+`handleTabsCreateMcp` holds the lock through `browser.tabs.create` because the `nextTabId++` increment must be atomic with the new `realTabId` being recorded — otherwise two concurrent calls would observe the same `nextTabId` and one record would overwrite the other. The cost: concurrent `tabs_context_mcp` / `resolveTab` / `pruneStaleGroups` acquirers queue behind Safari's tab-open latency (typically tens of milliseconds; multi-second under cold start or heavy load). This trade-off is accepted; revisit if profile data shows tab-create stalls becoming a real latency hotspot.
 
 `resolveTab` keeps a single locked region but uses `probeRealTab` so a transient probe error releases the lock without writing.
 
