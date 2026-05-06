@@ -59,13 +59,21 @@ function makeBrowserMock(opts = {}) {
 }
 
 // ---------------------------------------------------------------------------
-// Cross-module pattern (real source: tool-registry.js, exported via globalThis
-// per manifest.json load order). Tests load tabs-manager.js in isolation, so
-// we install the pattern on globalThis before each test to mirror runtime.
+// Cross-module bootstrap: load tool-registry.js so the TAB_GONE_PATTERN
+// global lands on globalThis exactly as it does in production (manifest
+// load order: tool-registry.js → tabs-manager.js). Avoids duplicating the
+// regex shape in the test file — if the pattern tightens in
+// tool-registry.js, these tests pick it up automatically.
+//
+// Side effects: tool-registry also installs registerTool / executeTool /
+// classifyExecuteScriptError on globalThis. Per-test loaders below override
+// globalThis.registerTool with a capture stub before requiring tabs-manager,
+// so the production registerTool is shadowed cleanly.
 // ---------------------------------------------------------------------------
 
 beforeEach(() => {
-    globalThis.TAB_GONE_PATTERN = /no tab with id|invalid tab/i;
+    jest.resetModules();
+    require("../../ClaudeInSafari Extension/Resources/tools/tool-registry.js");
 });
 
 // ---------------------------------------------------------------------------

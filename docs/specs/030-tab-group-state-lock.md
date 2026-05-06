@@ -109,6 +109,10 @@ The same monotonic assumption underpins `handleTabsContextMcp`'s phase-3 update 
 - `T_currentGroupId_all_stale_fallback` — when every group is all-stale, the highest-ID group is selected as last resort.
 - All existing T1–T9 and T_prune1–T_prune4 cases continue to pass without behavioral change.
 
+### Sharp edges for future contributors
+
+- **Falsy callback returns trigger writeState.** The `withTabGroupLock` skipWrite check is `out && out.__skipWrite === SKIP_WRITE_MARK`. Returning any falsy value (`undefined`, `null`, `false`, `0`, `""`) bypasses the check and falls through to `writeState`. This is intentional and exploited by `pruneStaleGroups` (`return removed ? undefined : withTabGroupLock.skipWrite(undefined)`) — `undefined` means "I mutated, please write." The trap: a future read-only callback that forgets to wrap its return value with `withTabGroupLock.skipWrite(...)` will silently produce a spurious storage write on the hot path. Always wrap the return when no mutation occurred. The contract is restated in the function's JSDoc.
+
 ### Coverage gaps (intentional)
 
 - **Slow-create latency.** `T_concurrent` and `T_lock_fifo` mock `browser.tabs.create` with `setTimeout(0)` (resolves on next microtask). A multi-second `tabs.create` would queue every other lock acquirer for that duration — accepted per Spec 030 §Design and `handleTabsCreateMcp`'s inline comment. No automated test exercises this latency profile; observable behavior surfaces only in live Safari under cold-start / heavy-load conditions and is captured by manual regression §14.3.
