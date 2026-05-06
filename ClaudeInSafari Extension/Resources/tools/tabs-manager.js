@@ -22,6 +22,15 @@ const NO_GROUP_MESSAGE = "No MCP tab group exists. Use tabs_create_mcp to create
 // invalidated, focus transition, throttling) are transient and MUST NOT be
 // treated as tombstones — see findStaleEntries and resolveTab.
 const TAB_GONE_PATTERN = globalThis.TAB_GONE_PATTERN;
+// Startup guard: fail-fast on load-order violation. Without this, a missing
+// global silently falls through to `undefined.test(...)` deep inside
+// probeRealTab on the first tab-gone rejection — an opaque TypeError that
+// hides the real cause (manifest.json background.scripts reorder).
+if (!TAB_GONE_PATTERN) {
+    throw new Error(
+        "tabs-manager: TAB_GONE_PATTERN not set — tool-registry.js must be loaded before tabs-manager.js (check manifest.json background.scripts order)"
+    );
+}
 
 // ---------------------------------------------------------------------------
 // Storage helpers
