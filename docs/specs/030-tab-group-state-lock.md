@@ -62,13 +62,23 @@ Contract:
 
 All four mutation sites (`handleTabsContextMcp`, `handleTabsCreateMcp`, `resolveTab`'s stale-mark path, `pruneStaleGroups`) route through the helper.
 
-`pruneStaleGroups` keeps a two-phase shape, but for a different reason than the original: the probe phase (N sequential `browser.tabs.get` calls) runs **outside** the lock so concurrent tool calls aren't queued behind it. The mutation phase (`applyStaleRemovals`) runs inside the lock. Each deletion is guarded by a fresh existence check, so concurrent additions to other vtids between scan and apply are preserved.
+`pruneStaleGroups` and `handleTabsContextMcp` each use a three-phase shape so the lock is never held across N sequential `browser.tabs.get` round-trips:
+
+- **Phase 1 (under lock):** read state, decide groupId / mutations that don't depend on liveness, snapshot `(vtid, realTabId)` pairs to probe.
+- **Phase 2 (no lock):** call `probeRealTab(realTabId)` for each pair. Concurrent tool calls can acquire the lock during this phase.
+- **Phase 3 (under lock):** re-read fresh state, apply the per-vtid result (delete or update `isStale`) only if the entry still exists.
+
+`handleTabsCreateMcp` holds the lock through `browser.tabs.create` because the `nextTabId++` increment must be atomic with tab creation — bounded to a single async call per invocation.
+
+`resolveTab` keeps a single locked region but uses `probeRealTab` so a transient probe error releases the lock without writing.
 
 ### Transient-error policy
 
 `browser.tabs.get` can reject for reasons other than "tab closed" — extension context invalidated, native bridge dropped a message, focus transition. Treating every rejection as a tombstone would corrupt the virtual group on transient errors.
 
-Both `findStaleEntries` and `resolveTab` only mark an entry stale when the rejection message matches `TAB_GONE_PATTERN` (`/no tab with id|invalid tab/i` — same shape used by `tool-registry.js::classifyExecuteScriptError`). Other errors are logged via `console.warn` and the entry is preserved; the next prune cycle re-probes and applies the policy again.
+All probe sites (`findStaleEntries`, `resolveTab`, `handleTabsContextMcp`'s phase-2 loop) call the shared `probeRealTab(realTabId)` helper, which classifies the result as `live` / `gone` / `transient`. Only `gone` (rejection message matches `TAB_GONE_PATTERN` — `/no tab with id|invalid tab/i`, same shape used by `tool-registry.js::classifyExecuteScriptError`) tombstones an entry. `transient` results are logged via `console.warn` and the entry is preserved; the next probe re-applies the policy.
+
+In `resolveTab`, a transient probe surfaces the original error to the caller (wrapped as `"resolveTab: vtid=N unreachable (transient): ..."`) instead of `"Tab not found"`, so callers can distinguish a closed tab from a temporarily unreachable one.
 
 ### Tab-ID reuse assumption
 
@@ -83,6 +93,9 @@ Both `findStaleEntries` and `resolveTab` only mark an entry stale when the rejec
 - `T_lock_fifo` — three serial `tabs_create_mcp` calls with decreasing mock delays still produce vtids `1, 2, 3` in dispatch order.
 - `T_resolveTab_no_write_on_success` — successful resolution exercises the `skipWrite` path; zero `browser.storage.session.set` calls observed.
 - `T_resolveTab_persists_stale` — definitive tab-gone rejection causes `isStale: true` to be persisted via the non-`skipWrite` return path.
+- `T_resolveTab_transient` — non-`TAB_GONE_PATTERN` rejection through `resolveTab` does NOT flip `isStale`, does NOT write storage, and surfaces the underlying error message to the caller.
+- `T_prune_ghost_group` — `applyStaleRemovals` tolerates a group disappearing between phase-1 snapshot and phase-3 lock acquisition (the `if (!group) continue` guard).
+- `T_prune_corrupt` — `findStaleEntries` flags entries with non-numeric `realTabId` for removal so corrupt records don't accumulate.
 - All existing T1–T9 and T_prune1–T_prune4 cases continue to pass without behavioral change.
 
 ## Origin

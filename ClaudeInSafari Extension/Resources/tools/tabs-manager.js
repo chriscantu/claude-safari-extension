@@ -122,15 +122,29 @@ function currentGroupId(groups) {
 // ---------------------------------------------------------------------------
 
 /**
- * Checks whether a real tab still exists and marks it stale in-place if not.
- * Mutates tabEntry.isStale.
+ * Probe whether a real tab still exists. Classifies the result under the
+ * shared transient-error policy so all sites (resolveTab, prune,
+ * tabs_context_mcp) treat tab-gone vs transient errors uniformly.
+ *
+ * @param {number} realTabId
+ * @returns {Promise<{live:true} | {live:false, gone:true} | {live:false, gone:false, err:Error}>}
+ *   - `live:true` → tab exists.
+ *   - `live:false, gone:true` → tab definitively gone (rejection matched
+ *     TAB_GONE_PATTERN). Safe to tombstone.
+ *   - `live:false, gone:false, err` → transient failure (extension context
+ *     invalidated, native bridge hiccup, focus transition). Caller MUST
+ *     preserve the entry; do not mark stale.
  */
-async function refreshStaleness(tabEntry) {
+async function probeRealTab(realTabId) {
     try {
-        await browser.tabs.get(tabEntry.realTabId);
-        tabEntry.isStale = false;
-    } catch (_) {
-        tabEntry.isStale = true;
+        await browser.tabs.get(realTabId);
+        return { live: true };
+    } catch (err) {
+        const msg = (err && err.message) || String(err);
+        if (TAB_GONE_PATTERN.test(msg)) {
+            return { live: false, gone: true };
+        }
+        return { live: false, gone: false, err };
     }
 }
 
@@ -186,26 +200,38 @@ async function resolveTab(virtualTabId) {
             const entry = group.tabs[virtualTabId];
             if (!entry) continue;
 
-            try {
-                await browser.tabs.get(entry.realTabId);
+            const probe = await probeRealTab(entry.realTabId);
+            if (probe.live) {
                 return withTabGroupLock.skipWrite({ ok: true, realTabId: entry.realTabId });
-            } catch (err) {
-                console.warn(
-                    `resolveTab: tabs.get rejected for vtid=${virtualTabId} (realTabId=${entry.realTabId}); marking stale:`,
-                    err
-                );
-                // Persist the stale flag intentionally — the non-skipWrite
-                // return triggers writeState. A later "fix" to skipWrite
-                // here would silently lose the staleness marker.
-                entry.isStale = true;
-                return { ok: false };
             }
+            if (probe.gone) {
+                // Definitive: tab is gone. Persist isStale=true intentionally —
+                // the non-skipWrite return triggers writeState. A later "fix"
+                // to skipWrite here would silently lose the staleness marker.
+                console.warn(
+                    `resolveTab: tab definitively gone for vtid=${virtualTabId} (realTabId=${entry.realTabId})`
+                );
+                entry.isStale = true;
+                return { ok: false, gone: true };
+            }
+            // Transient — do NOT tombstone. Skip the writeState path and
+            // surface the original error so the caller can distinguish
+            // "tab gone" from "tab unreachable right now".
+            console.warn(
+                `resolveTab: transient tabs.get error for vtid=${virtualTabId} (realTabId=${entry.realTabId}); preserving entry:`,
+                probe.err
+            );
+            return withTabGroupLock.skipWrite({ ok: false, gone: false, err: probe.err });
         }
-        return withTabGroupLock.skipWrite({ ok: false });
+        return withTabGroupLock.skipWrite({ ok: false, gone: true });
     });
 
     if (outcome.ok) return outcome.realTabId;
-    throw new Error(`Tab not found: ${virtualTabId}`);
+    if (outcome.gone) throw new Error(`Tab not found: ${virtualTabId}`);
+    // Transient: rethrow original error with context.
+    throw new Error(
+        `resolveTab: vtid=${virtualTabId} unreachable (transient): ${(outcome.err && outcome.err.message) || String(outcome.err)}`
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -215,24 +241,59 @@ async function resolveTab(virtualTabId) {
 async function handleTabsContextMcp(args) {
     const { createIfEmpty = false } = args || {};
 
-    return await withTabGroupLock(async (state) => {
+    // Phase 1 (under lock): determine the target group, optionally creating
+    // an empty one. Snapshot the (vtid, realTabId) pairs we'll probe.
+    const init = await withTabGroupLock(async (state) => {
         let groupId = currentGroupId(state.groups);
-
         if (groupId === null) {
             if (!createIfEmpty) {
-                return withTabGroupLock.skipWrite(NO_GROUP_MESSAGE);
+                return withTabGroupLock.skipWrite({ done: NO_GROUP_MESSAGE });
             }
             groupId = String(state.nextGroupId++);
             state.groups[groupId] = { tabs: {} };
-            return `=== MCP Tab Group (Group ${groupId}) ===\n\nTotal: 0 tab(s)`;
+            return { done: `=== MCP Tab Group (Group ${groupId}) ===\n\nTotal: 0 tab(s)` };
+        }
+        const probes = Object.entries(state.groups[groupId].tabs).map(
+            ([vtid, entry]) => ({ vtid, realTabId: entry.realTabId })
+        );
+        return withTabGroupLock.skipWrite({ groupId, probes });
+    });
+
+    if (init.done !== undefined) return init.done;
+
+    // Phase 2 (no lock): probe staleness for each tab. The lock is released
+    // here so concurrent tabs_create_mcp / resolveTab calls aren't blocked
+    // by N sequential browser.tabs.get round-trips.
+    const updates = [];
+    for (const { vtid, realTabId } of init.probes) {
+        const probe = await probeRealTab(realTabId);
+        if (probe.live) {
+            updates.push({ vtid, isStale: false });
+        } else if (probe.gone) {
+            updates.push({ vtid, isStale: true });
+        } else {
+            // Transient — preserve current isStale value (don't flip).
+            console.warn(
+                `tabs_context_mcp: transient probe error for vtid=${vtid} (realTabId=${realTabId}); preserving prior isStale:`,
+                probe.err
+            );
+        }
+    }
+
+    // Phase 3 (under lock): re-read fresh state, apply staleness updates to
+    // entries that still exist, and build the output.
+    return await withTabGroupLock(async (state) => {
+        const group = state.groups[init.groupId];
+        if (!group) {
+            // Group was concurrently removed (e.g., prune deleted it after
+            // it became empty). Surface the standard no-group message.
+            return withTabGroupLock.skipWrite(NO_GROUP_MESSAGE);
+        }
+        for (const { vtid, isStale } of updates) {
+            if (group.tabs[vtid]) group.tabs[vtid].isStale = isStale;
         }
 
-        const group = state.groups[groupId];
-        for (const entry of Object.values(group.tabs)) {
-            await refreshStaleness(entry);
-        }
-
-        const lines = [`=== MCP Tab Group (Group ${groupId}) ===`, ""];
+        const lines = [`=== MCP Tab Group (Group ${init.groupId}) ===`, ""];
         const tabEntries = Object.entries(group.tabs);
         for (const [vtid, entry] of tabEntries) {
             const staleTag = entry.isStale ? " [STALE]" : "";
@@ -308,18 +369,14 @@ async function findStaleEntries(state) {
             stale.push({ groupId, vtid });
             continue;
         }
-        try {
-            await browser.tabs.get(entry.realTabId);
-        } catch (err) {
-            const msg = (err && err.message) || String(err);
-            if (TAB_GONE_PATTERN.test(msg)) {
-                stale.push({ groupId, vtid });
-            } else {
-                console.warn(
-                    `prune: transient error probing vtid=${vtid} (realTabId=${entry.realTabId}); preserving entry:`,
-                    err
-                );
-            }
+        const probe = await probeRealTab(entry.realTabId);
+        if (probe.gone) {
+            stale.push({ groupId, vtid });
+        } else if (!probe.live) {
+            console.warn(
+                `prune: transient error probing vtid=${vtid} (realTabId=${entry.realTabId}); preserving entry:`,
+                probe.err
+            );
         }
     }
     return stale;

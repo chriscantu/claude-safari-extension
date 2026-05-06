@@ -563,4 +563,103 @@ describe("withTabGroupLock", () => {
         // Sanity: realTabId unchanged.
         expect(after.groups[groupId].tabs[vtid].realTabId).toBe(realId);
     });
+
+    test("T_resolveTab_transient: transient tabs.get error does not mark entry stale", async () => {
+        // Spec 030: resolveTab MUST NOT tombstone on non-TAB_GONE_PATTERN errors.
+        const bm = makeBrowserMock({ nextRealTabId: 1200 });
+        jest.resetModules();
+        globalThis.browser = bm;
+        const registrations = {};
+        globalThis.registerTool = (name, handler) => { registrations[name] = handler; };
+        require("../../ClaudeInSafari Extension/Resources/tools/tabs-manager.js");
+
+        await registrations["tabs_create_mcp"]({});
+        const stored = bm.storage.session._raw.__claudeTabGroups;
+        const groupId = Object.keys(stored.groups)[0];
+        const vtid = Number(Object.keys(stored.groups[groupId].tabs)[0]);
+
+        // Transient (non-pattern) rejection — extension context invalidated.
+        bm.tabs.get.mockImplementation(async () => {
+            throw new Error("Extension context invalidated");
+        });
+        bm.storage.session.set.mockClear();
+
+        await expect(globalThis.resolveTab(vtid))
+            .rejects.toThrow(/unreachable \(transient\).*Extension context invalidated/);
+
+        const after = bm.storage.session._raw.__claudeTabGroups;
+        // isStale must NOT have been flipped to true.
+        expect(after.groups[groupId].tabs[vtid].isStale).toBe(false);
+        // No write happened (skipWrite path).
+        expect(bm.storage.session.set).not.toHaveBeenCalled();
+    });
+
+    test("T_prune_ghost_group: applyStaleRemovals tolerates a group that disappeared between phases", async () => {
+        // Phase-1 readState (outside lock) sees group "1" with a stale tab.
+        // Phase-2 readState (inside lock) sees no groups — concurrent prune
+        // or close removed it. The `if (!group) continue` guard must prevent
+        // a TypeError; storage must remain consistent.
+        const bm = makeBrowserMock({ existingRealTabs: {} });
+        const stalePresent = {
+            __claudeTabGroups: {
+                nextGroupId: 2, nextTabId: 2,
+                groups: {
+                    "1": {
+                        tabs: {
+                            "1": { realTabId: 99, url: "https://gone.com", title: "Gone", isStale: false },
+                        },
+                    },
+                },
+            },
+        };
+        const ghosted = {
+            __claudeTabGroups: { nextGroupId: 2, nextTabId: 2, groups: {} },
+        };
+        let getCalls = 0;
+        bm.storage.session.get = jest.fn(async () => {
+            getCalls++;
+            // Phase-1 snapshot exposes the stale entry; phase-2 (and later)
+            // re-reads see the ghosted state.
+            return getCalls === 1 ? { ...stalePresent } : { ...ghosted };
+        });
+
+        jest.resetModules();
+        globalThis.browser = bm;
+        globalThis.registerTool = jest.fn();
+        require("../../ClaudeInSafari Extension/Resources/tools/tabs-manager.js");
+
+        // Must not throw despite the ghost-group race.
+        await expect(globalThis.pruneStaleGroups()).resolves.toBeUndefined();
+    });
+
+    test("T_prune_corrupt: findStaleEntries flags non-numeric realTabId for removal", async () => {
+        const bm = makeBrowserMock({
+            existingRealTabs: { 10: { id: 10, url: "https://a.com", title: "A" } },
+            storageData: {
+                __claudeTabGroups: {
+                    nextGroupId: 2, nextTabId: 3,
+                    groups: {
+                        "1": {
+                            tabs: {
+                                "1": { realTabId: 10, url: "https://a.com", title: "A", isStale: false },
+                                "2": { realTabId: "bad", url: "https://x.com", title: "Bad", isStale: false },
+                            },
+                        },
+                    },
+                },
+            },
+        });
+        jest.resetModules();
+        globalThis.browser = bm;
+        globalThis.registerTool = jest.fn();
+        require("../../ClaudeInSafari Extension/Resources/tools/tabs-manager.js");
+
+        await globalThis.pruneStaleGroups();
+
+        const state = bm.storage.session._raw.__claudeTabGroups;
+        // Corrupt entry pruned.
+        expect(state.groups["1"].tabs["2"]).toBeUndefined();
+        // Live entry preserved.
+        expect(state.groups["1"].tabs["1"]).toBeDefined();
+    });
 });
