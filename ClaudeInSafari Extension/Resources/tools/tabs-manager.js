@@ -24,6 +24,56 @@ async function writeState(state) {
 }
 
 // ---------------------------------------------------------------------------
+// Transactional lock over tab-group state
+// ---------------------------------------------------------------------------
+//
+// All read-modify-write sequences against __claudeTabGroups MUST go through
+// withTabGroupLock to serialize concurrent tool calls. Without it, two tools
+// can readState() the same snapshot, mutate independently, and writeState()
+// in sequence — losing one set of changes.
+//
+// JS is single-threaded but `await` yields to the event loop, so an
+// in-memory promise chain is sufficient: each acquirer awaits the previous
+// holder's release before reading state.
+
+let lockChain = Promise.resolve();
+
+/**
+ * Run a critical section with exclusive access to tab-group state.
+ *
+ * The callback receives a fresh snapshot of state and may mutate it in place.
+ * On return, the (possibly mutated) state is persisted and the callback's
+ * return value is forwarded to the caller. To skip the persistence step
+ * (read-only critical section), return `LOCK_SKIP_WRITE` via the helper:
+ *
+ *   return withTabGroupLock.skipWrite(myReturnValue);
+ *
+ * @template T
+ * @param {(state: {nextGroupId:number, nextTabId:number, groups:Object}) => Promise<T>|T} fn
+ * @returns {Promise<T>}
+ */
+async function withTabGroupLock(fn) {
+    const prior = lockChain;
+    let release;
+    lockChain = new Promise((r) => { release = r; });
+    try {
+        await prior;
+        const state = await readState();
+        const out = await fn(state);
+        if (out && out.__skipWrite === SKIP_WRITE_MARK) {
+            return out.value;
+        }
+        await writeState(state);
+        return out;
+    } finally {
+        release();
+    }
+}
+
+const SKIP_WRITE_MARK = Symbol("tabGroupLock.skipWrite");
+withTabGroupLock.skipWrite = (value) => ({ __skipWrite: SKIP_WRITE_MARK, value });
+
+// ---------------------------------------------------------------------------
 // Current group resolution
 // ---------------------------------------------------------------------------
 
@@ -113,23 +163,23 @@ async function resolveTab(virtualTabId) {
         throw new Error("No active tab found in the current window");
     }
 
-    const state = await readState();
-    for (const group of Object.values(state.groups)) {
-        const entry = group.tabs[virtualTabId];
-        if (!entry) continue;
+    const outcome = await withTabGroupLock(async (state) => {
+        for (const group of Object.values(state.groups)) {
+            const entry = group.tabs[virtualTabId];
+            if (!entry) continue;
 
-        // Verify the real tab still exists
-        try {
-            await browser.tabs.get(entry.realTabId);
-            return entry.realTabId;
-        } catch (_) {
-            // Mark stale and persist
-            entry.isStale = true;
-            await writeState(state);
-            throw new Error(`Tab not found: ${virtualTabId}`);
+            try {
+                await browser.tabs.get(entry.realTabId);
+                return withTabGroupLock.skipWrite({ ok: true, realTabId: entry.realTabId });
+            } catch (_) {
+                entry.isStale = true;
+                return { ok: false };
+            }
         }
-    }
+        return withTabGroupLock.skipWrite({ ok: false });
+    });
 
+    if (outcome.ok) return outcome.realTabId;
     throw new Error(`Tab not found: ${virtualTabId}`);
 }
 
@@ -140,37 +190,35 @@ async function resolveTab(virtualTabId) {
 async function handleTabsContextMcp(args) {
     const { createIfEmpty = false } = args || {};
 
-    let state = await readState();
-    let groupId = currentGroupId(state.groups);
+    return await withTabGroupLock(async (state) => {
+        let groupId = currentGroupId(state.groups);
 
-    if (groupId === null) {
-        if (!createIfEmpty) {
-            return "No MCP tab group exists. Use tabs_create_mcp to create a new tab.";
+        if (groupId === null) {
+            if (!createIfEmpty) {
+                return withTabGroupLock.skipWrite(
+                    "No MCP tab group exists. Use tabs_create_mcp to create a new tab."
+                );
+            }
+            groupId = String(state.nextGroupId++);
+            state.groups[groupId] = { tabs: {} };
+            return `=== MCP Tab Group (Group ${groupId}) ===\n\nTotal: 0 tab(s)`;
         }
-        // Create an empty group
-        groupId = String(state.nextGroupId++);
-        state.groups[groupId] = { tabs: {} };
-        await writeState(state);
-        return `=== MCP Tab Group (Group ${groupId}) ===\n\nTotal: 0 tab(s)`;
-    }
 
-    // Refresh staleness for all tabs in the current group
-    const group = state.groups[groupId];
-    for (const entry of Object.values(group.tabs)) {
-        await refreshStaleness(entry);
-    }
-    await writeState(state);
+        const group = state.groups[groupId];
+        for (const entry of Object.values(group.tabs)) {
+            await refreshStaleness(entry);
+        }
 
-    // Build output
-    const lines = [`=== MCP Tab Group (Group ${groupId}) ===`, ""];
-    const tabEntries = Object.entries(group.tabs);
-    for (const [vtid, entry] of tabEntries) {
-        const staleTag = entry.isStale ? " [STALE]" : "";
-        lines.push(`Tab ${vtid}: ${entry.title} — ${entry.url}${staleTag}`);
-    }
-    lines.push("");
-    lines.push(`Total: ${tabEntries.length} tab(s)`);
-    return lines.join("\n");
+        const lines = [`=== MCP Tab Group (Group ${groupId}) ===`, ""];
+        const tabEntries = Object.entries(group.tabs);
+        for (const [vtid, entry] of tabEntries) {
+            const staleTag = entry.isStale ? " [STALE]" : "";
+            lines.push(`Tab ${vtid}: ${entry.title} — ${entry.url}${staleTag}`);
+        }
+        lines.push("");
+        lines.push(`Total: ${tabEntries.length} tab(s)`);
+        return lines.join("\n");
+    });
 }
 
 // ---------------------------------------------------------------------------
@@ -178,38 +226,33 @@ async function handleTabsContextMcp(args) {
 // ---------------------------------------------------------------------------
 
 async function handleTabsCreateMcp(_args) {
-    let state = await readState();
+    return await withTabGroupLock(async (state) => {
+        let groupId = currentGroupId(state.groups);
+        if (groupId === null) {
+            groupId = String(state.nextGroupId++);
+            state.groups[groupId] = { tabs: {} };
+        }
 
-    // Ensure a group exists
-    let groupId = currentGroupId(state.groups);
-    if (groupId === null) {
-        groupId = String(state.nextGroupId++);
-        state.groups[groupId] = { tabs: {} };
-    }
+        let newTab;
+        try {
+            newTab = await browser.tabs.create({ url: "about:blank", active: true });
+        } catch (err) {
+            throw new Error(err.message || String(err));
+        }
 
-    // Open a new real tab
-    let newTab;
-    try {
-        newTab = await browser.tabs.create({ url: "about:blank", active: true });
-    } catch (err) {
-        throw new Error(err.message || String(err));
-    }
+        const virtualTabId = state.nextTabId++;
+        state.groups[groupId].tabs[virtualTabId] = {
+            realTabId: newTab.id,
+            url: newTab.url || "about:blank",
+            title: newTab.title || "New Tab",
+            isStale: false,
+        };
 
-    // Assign a virtual tab ID
-    const virtualTabId = state.nextTabId++;
-    state.groups[groupId].tabs[virtualTabId] = {
-        realTabId: newTab.id,
-        url: newTab.url || "about:blank",
-        title: newTab.title || "New Tab",
-        isStale: false,
-    };
-
-    await writeState(state);
-
-    return (
-        `Created new MCP tab (Tab ${virtualTabId}) in Group ${groupId}.\n` +
-        `The new tab is ready for navigation.`
-    );
+        return (
+            `Created new MCP tab (Tab ${virtualTabId}) in Group ${groupId}.\n` +
+            `The new tab is ready for navigation.`
+        );
+    });
 }
 
 // ---------------------------------------------------------------------------
@@ -222,38 +265,39 @@ async function handleTabsCreateMcp(_args) {
  * Called periodically from background.js on a 60-second interval.
  */
 async function pruneStaleGroups() {
-    const state = await readState();
-    if (!state.groups || Object.keys(state.groups).length === 0) return;
+    await withTabGroupLock(async (state) => {
+        if (!state.groups || Object.keys(state.groups).length === 0) {
+            return withTabGroupLock.skipWrite(undefined);
+        }
 
-    // Phase 1: collect stale tab IDs without mutating state (avoids read-modify-write race)
-    const staleEntries = [];
-    for (const [groupId, group] of Object.entries(state.groups)) {
-        for (const [vtid, entry] of Object.entries(group.tabs)) {
-            if (typeof entry.realTabId !== "number") {
-                console.warn("prune: corrupt entry vtid=" + vtid + " in group=" + groupId);
-                staleEntries.push({ groupId, vtid });
-                continue;
-            }
-            try {
-                await browser.tabs.get(entry.realTabId);
-            } catch (_) {
-                staleEntries.push({ groupId, vtid });
+        const staleEntries = [];
+        for (const [groupId, group] of Object.entries(state.groups)) {
+            for (const [vtid, entry] of Object.entries(group.tabs)) {
+                if (typeof entry.realTabId !== "number") {
+                    console.warn("prune: corrupt entry vtid=" + vtid + " in group=" + groupId);
+                    staleEntries.push({ groupId, vtid });
+                    continue;
+                }
+                try {
+                    await browser.tabs.get(entry.realTabId);
+                } catch (_) {
+                    staleEntries.push({ groupId, vtid });
+                }
             }
         }
-    }
-    if (staleEntries.length === 0) return;
+        if (staleEntries.length === 0) {
+            return withTabGroupLock.skipWrite(undefined);
+        }
 
-    // Phase 2: re-read fresh state and apply removals
-    const freshState = await readState();
-    for (const { groupId, vtid } of staleEntries) {
-        if (freshState.groups[groupId]?.tabs[vtid]) {
-            delete freshState.groups[groupId].tabs[vtid];
+        for (const { groupId, vtid } of staleEntries) {
+            if (state.groups[groupId]?.tabs[vtid]) {
+                delete state.groups[groupId].tabs[vtid];
+            }
+            if (state.groups[groupId] && Object.keys(state.groups[groupId].tabs).length === 0) {
+                delete state.groups[groupId];
+            }
         }
-        if (freshState.groups[groupId] && Object.keys(freshState.groups[groupId].tabs).length === 0) {
-            delete freshState.groups[groupId];
-        }
-    }
-    await writeState(freshState);
+    });
 }
 
 // ---------------------------------------------------------------------------
