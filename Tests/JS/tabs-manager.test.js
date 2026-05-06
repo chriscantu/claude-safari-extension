@@ -371,4 +371,196 @@ describe("withTabGroupLock", () => {
         const realIds = Object.values(tabs).map((t) => t.realTabId);
         expect(new Set(realIds).size).toBe(2);
     });
+
+    test("T_lock_release_on_throw: callback throw releases lock, partial mutations not persisted, next acquirer succeeds", async () => {
+        // First tabs_create_mcp call: tabs.create rejects → callback throws.
+        // The lock's try/finally must release so the second call succeeds.
+        // The first call's in-callback mutation (state.groups[<new>] = {tabs:{}})
+        // must NOT be persisted because writeState never runs on throw.
+        const bm = makeBrowserMock({ nextRealTabId: 800 });
+        let attempt = 0;
+        bm.tabs.create = jest.fn(async () => {
+            attempt++;
+            if (attempt === 1) throw new Error("simulated create failure");
+            return { id: 850, url: "about:blank", title: "New Tab" };
+        });
+        jest.resetModules();
+        globalThis.browser = bm;
+        const registrations = {};
+        globalThis.registerTool = (name, handler) => { registrations[name] = handler; };
+        require("../../ClaudeInSafari Extension/Resources/tools/tabs-manager.js");
+
+        await expect(registrations["tabs_create_mcp"]({}))
+            .rejects.toThrow("simulated create failure");
+        // Failed call must not have persisted partial state (no group created).
+        expect(bm.storage.session._raw.__claudeTabGroups).toBeUndefined();
+
+        // Lock released — second call must succeed.
+        const result = await registrations["tabs_create_mcp"]({});
+        expect(result).toMatch(/Created new MCP tab/);
+        const state = bm.storage.session._raw.__claudeTabGroups;
+        expect(Object.keys(state.groups).length).toBe(1);
+    });
+
+    test("T_prune_race_window: tabs_create_mcp racing with prune does not lose the new tab", async () => {
+        // Setup: vtid 1 → live (realTabId 10), vtid 2 → gone (realTabId 99).
+        const bm = makeBrowserMock({
+            existingRealTabs: { 10: { id: 10, url: "https://a.com", title: "A" } },
+            storageData: {
+                __claudeTabGroups: {
+                    nextGroupId: 2, nextTabId: 3,
+                    groups: {
+                        "1": {
+                            tabs: {
+                                "1": { realTabId: 10, url: "https://a.com", title: "A", isStale: false },
+                                "2": { realTabId: 99, url: "https://gone.com", title: "Gone", isStale: false },
+                            },
+                        },
+                    },
+                },
+            },
+        });
+        // Definitive "gone" pattern so findStaleEntries tombstones vtid 2.
+        bm.tabs.get = jest.fn(async (id) => {
+            if (id === 99) throw new Error(`No tab with id: ${id}`);
+            if (id === 10) return { id: 10, url: "https://a.com", title: "A" };
+            // The newly created real tab also resolves.
+            return { id, url: "about:blank", title: "New" };
+        });
+        bm.tabs.create = jest.fn(async () => {
+            // Yield so prune's findStaleEntries loop can interleave.
+            await new Promise((r) => setTimeout(r, 0));
+            return { id: 250, url: "about:blank", title: "New" };
+        });
+
+        jest.resetModules();
+        globalThis.browser = bm;
+        const registrations = {};
+        globalThis.registerTool = (name, handler) => { registrations[name] = handler; };
+        require("../../ClaudeInSafari Extension/Resources/tools/tabs-manager.js");
+
+        await Promise.all([
+            globalThis.pruneStaleGroups(),
+            registrations["tabs_create_mcp"]({}),
+        ]);
+
+        const state = bm.storage.session._raw.__claudeTabGroups;
+        // Stale vtid 2 removed by prune.
+        expect(state.groups["1"].tabs["2"]).toBeUndefined();
+        // Live vtid 1 preserved.
+        expect(state.groups["1"].tabs["1"]).toBeDefined();
+        // Newly created vtid 3 from the racing tabs_create_mcp must survive.
+        expect(state.groups["1"].tabs["3"]).toBeDefined();
+        expect(state.groups["1"].tabs["3"].realTabId).toBe(250);
+    });
+
+    test("T_findStaleEntries_transient: transient tabs.get error preserves entry (not tombstoned)", async () => {
+        // Non-tab-gone error (simulates extension context invalidation,
+        // bridge hiccup) must NOT cause the vtid to be evicted.
+        const bm = makeBrowserMock({
+            existingRealTabs: {},
+            storageData: {
+                __claudeTabGroups: {
+                    nextGroupId: 2, nextTabId: 2,
+                    groups: {
+                        "1": {
+                            tabs: {
+                                "1": { realTabId: 77, url: "https://x.com", title: "X", isStale: false },
+                            },
+                        },
+                    },
+                },
+            },
+        });
+        bm.tabs.get = jest.fn(async () => {
+            throw new Error("Extension context invalidated");
+        });
+
+        jest.resetModules();
+        globalThis.browser = bm;
+        globalThis.registerTool = jest.fn();
+        require("../../ClaudeInSafari Extension/Resources/tools/tabs-manager.js");
+
+        await globalThis.pruneStaleGroups();
+
+        const state = bm.storage.session._raw.__claudeTabGroups;
+        // Entry preserved despite probe error.
+        expect(state.groups["1"].tabs["1"]).toBeDefined();
+    });
+
+    test("T_lock_fifo: serial dispatch preserves order across varying callback delays", async () => {
+        // Three tabs_create_mcp calls dispatched in order. Even with varying
+        // mock-create delays, FIFO acquisition must yield virtual IDs 1, 2, 3
+        // in dispatch order.
+        const bm = makeBrowserMock({ nextRealTabId: 900 });
+        let calls = 0;
+        bm.tabs.create = jest.fn(async () => {
+            calls++;
+            const id = 900 + calls;
+            // Decreasing delay — without FIFO, later calls would land first.
+            await new Promise((r) => setTimeout(r, (4 - calls) * 5));
+            return { id, url: "about:blank", title: "New Tab" };
+        });
+        jest.resetModules();
+        globalThis.browser = bm;
+        const registrations = {};
+        globalThis.registerTool = (name, handler) => { registrations[name] = handler; };
+        require("../../ClaudeInSafari Extension/Resources/tools/tabs-manager.js");
+
+        const [r1, r2, r3] = await Promise.all([
+            registrations["tabs_create_mcp"]({}),
+            registrations["tabs_create_mcp"]({}),
+            registrations["tabs_create_mcp"]({}),
+        ]);
+        const ids = [r1, r2, r3].map((r) => Number(r.match(/Tab (\d+)/)[1]));
+        expect(ids).toEqual([1, 2, 3]);
+    });
+
+    test("T_resolveTab_no_write_on_success: successful resolveTab does not write storage", async () => {
+        const bm = makeBrowserMock({ nextRealTabId: 1000 });
+        jest.resetModules();
+        globalThis.browser = bm;
+        const registrations = {};
+        globalThis.registerTool = (name, handler) => { registrations[name] = handler; };
+        require("../../ClaudeInSafari Extension/Resources/tools/tabs-manager.js");
+
+        await registrations["tabs_create_mcp"]({});
+        const stored = bm.storage.session._raw.__claudeTabGroups;
+        const groupId = Object.keys(stored.groups)[0];
+        const vtid = Number(Object.keys(stored.groups[groupId].tabs)[0]);
+        const expectedRealId = stored.groups[groupId].tabs[vtid].realTabId;
+
+        bm.storage.session.set.mockClear();
+        const realId = await globalThis.resolveTab(vtid);
+        expect(realId).toBe(expectedRealId);
+        // skipWrite path: no storage write.
+        expect(bm.storage.session.set).not.toHaveBeenCalled();
+    });
+
+    test("T_resolveTab_persists_stale: definitive tab-gone marks isStale=true in storage", async () => {
+        const bm = makeBrowserMock({ nextRealTabId: 1100 });
+        jest.resetModules();
+        globalThis.browser = bm;
+        const registrations = {};
+        globalThis.registerTool = (name, handler) => { registrations[name] = handler; };
+        require("../../ClaudeInSafari Extension/Resources/tools/tabs-manager.js");
+
+        await registrations["tabs_create_mcp"]({});
+        const stored = bm.storage.session._raw.__claudeTabGroups;
+        const groupId = Object.keys(stored.groups)[0];
+        const vtid = Number(Object.keys(stored.groups[groupId].tabs)[0]);
+        const realId = stored.groups[groupId].tabs[vtid].realTabId;
+
+        // Simulate the real tab being closed (definitive tab-gone shape).
+        bm.tabs.get.mockImplementation(async (id) => {
+            throw new Error(`No tab with id: ${id}`);
+        });
+
+        await expect(globalThis.resolveTab(vtid)).rejects.toThrow(`Tab not found: ${vtid}`);
+        const after = bm.storage.session._raw.__claudeTabGroups;
+        // Stale flag persisted via the non-skipWrite return path.
+        expect(after.groups[groupId].tabs[vtid].isStale).toBe(true);
+        // Sanity: realTabId unchanged.
+        expect(after.groups[groupId].tabs[vtid].realTabId).toBe(realId);
+    });
 });

@@ -14,6 +14,13 @@ const ABOUT_BLANK = "about:blank";
 const DEFAULT_TAB_TITLE = "New Tab";
 const NO_GROUP_MESSAGE = "No MCP tab group exists. Use tabs_create_mcp to create a new tab.";
 
+// Definitive "tab is gone" error shape from browser.tabs.get. Mirrors the
+// pattern in tool-registry.js::classifyExecuteScriptError. Other errors
+// (extension context invalidated, focus transition, throttling) are
+// transient and MUST NOT be treated as tombstones — see findStaleEntries
+// and resolveTab.
+const TAB_GONE_PATTERN = /no tab with id|invalid tab/i;
+
 // ---------------------------------------------------------------------------
 // Storage helpers
 // ---------------------------------------------------------------------------
@@ -50,9 +57,14 @@ let lockChain = Promise.resolve();
  * The callback receives a fresh snapshot of state and may mutate it in place.
  * On return, the (possibly mutated) state is persisted and the callback's
  * return value is forwarded to the caller. To skip the persistence step
- * (read-only critical section), return `LOCK_SKIP_WRITE` via the helper:
+ * (read-only critical section), wrap the return value with
+ * `withTabGroupLock.skipWrite(...)`:
  *
  *   return withTabGroupLock.skipWrite(myReturnValue);
+ *
+ * Throws inside the callback propagate to the caller; partial mutations
+ * to `state` are NOT persisted because `writeState` is only reached on
+ * successful return.
  *
  * @template T
  * @param {(state: {nextGroupId:number, nextTabId:number, groups:Object}) => Promise<T>|T} fn
@@ -177,7 +189,14 @@ async function resolveTab(virtualTabId) {
             try {
                 await browser.tabs.get(entry.realTabId);
                 return withTabGroupLock.skipWrite({ ok: true, realTabId: entry.realTabId });
-            } catch (_) {
+            } catch (err) {
+                console.warn(
+                    `resolveTab: tabs.get rejected for vtid=${virtualTabId} (realTabId=${entry.realTabId}); marking stale:`,
+                    err
+                );
+                // Persist the stale flag intentionally — the non-skipWrite
+                // return triggers writeState. A later "fix" to skipWrite
+                // here would silently lose the staleness marker.
                 entry.isStale = true;
                 return { ok: false };
             }
@@ -237,12 +256,9 @@ async function handleTabsCreateMcp(_args) {
             state.groups[groupId] = { tabs: {} };
         }
 
-        let newTab;
-        try {
-            newTab = await browser.tabs.create({ url: ABOUT_BLANK, active: true });
-        } catch (err) {
-            throw new Error(err.message || String(err));
-        }
+        // Let browser.tabs.create rejections propagate with original stack
+        // and error metadata. The lock's try/finally still releases.
+        const newTab = await browser.tabs.create({ url: ABOUT_BLANK, active: true });
 
         const virtualTabId = state.nextTabId++;
         state.groups[groupId].tabs[virtualTabId] = {
@@ -277,6 +293,12 @@ function flattenTabEntries(groups) {
  * Read-only — does not mutate state. Safe to run outside the lock so that
  * the (potentially N sequential `browser.tabs.get`) probe phase does not
  * block concurrent tool calls.
+ *
+ * Only definitive "tab gone" errors (matching TAB_GONE_PATTERN) tombstone
+ * a vtid. Transient failures — extension context invalidated, native bridge
+ * hiccups, focus transitions — are logged via console.warn and the vtid is
+ * preserved. Treating every rejection as a tombstone would corrupt the
+ * virtual group on transient errors.
  */
 async function findStaleEntries(state) {
     const stale = [];
@@ -288,8 +310,16 @@ async function findStaleEntries(state) {
         }
         try {
             await browser.tabs.get(entry.realTabId);
-        } catch (_) {
-            stale.push({ groupId, vtid });
+        } catch (err) {
+            const msg = (err && err.message) || String(err);
+            if (TAB_GONE_PATTERN.test(msg)) {
+                stale.push({ groupId, vtid });
+            } else {
+                console.warn(
+                    `prune: transient error probing vtid=${vtid} (realTabId=${entry.realTabId}); preserving entry:`,
+                    err
+                );
+            }
         }
     }
     return stale;
@@ -299,6 +329,12 @@ async function findStaleEntries(state) {
  * Apply removals from a previously-collected stale list. Each deletion is
  * guarded by an existence check, so concurrent additions to other vtids
  * between scan and apply are preserved.
+ *
+ * Assumption: Safari assigns monotonically increasing tab IDs per session
+ * (empirically observed). If a future Safari behavior reuses real tab IDs
+ * within a session, a closed-and-replaced tab could be evicted by a stale
+ * entry from a prior probe. If this invariant breaks, switch to scan→apply
+ * inside a single locked region.
  */
 function applyStaleRemovals(state, staleEntries) {
     for (const { groupId, vtid } of staleEntries) {

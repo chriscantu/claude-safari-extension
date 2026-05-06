@@ -64,9 +64,25 @@ All four mutation sites (`handleTabsContextMcp`, `handleTabsCreateMcp`, `resolve
 
 `pruneStaleGroups` keeps a two-phase shape, but for a different reason than the original: the probe phase (N sequential `browser.tabs.get` calls) runs **outside** the lock so concurrent tool calls aren't queued behind it. The mutation phase (`applyStaleRemovals`) runs inside the lock. Each deletion is guarded by a fresh existence check, so concurrent additions to other vtids between scan and apply are preserved.
 
+### Transient-error policy
+
+`browser.tabs.get` can reject for reasons other than "tab closed" — extension context invalidated, native bridge dropped a message, focus transition. Treating every rejection as a tombstone would corrupt the virtual group on transient errors.
+
+Both `findStaleEntries` and `resolveTab` only mark an entry stale when the rejection message matches `TAB_GONE_PATTERN` (`/no tab with id|invalid tab/i` — same shape used by `tool-registry.js::classifyExecuteScriptError`). Other errors are logged via `console.warn` and the entry is preserved; the next prune cycle re-probes and applies the policy again.
+
+### Tab-ID reuse assumption
+
+`applyStaleRemovals` deletes the tombstoned vtid unconditionally (after an existence guard). This is safe under Safari's empirical behavior of monotonically increasing per-session tab IDs. If a future Safari behavior reuses real tab IDs within a session, scan→apply must run inside a single locked region.
+
 ## Tests
 
-- T_concurrent: two `tabs_create_mcp` calls launched via `Promise.all` produce two distinct virtual tabs and two distinct real tabs in one group. Without the lock, the `nextTabId++` race produces only one tab. (`Tests/JS/tabs-manager.test.js`)
+- `T_concurrent` — two parallel `tabs_create_mcp` calls produce two distinct virtual tabs and two distinct real tabs in one group. Without the lock, `nextTabId++` races and one tab is lost.
+- `T_lock_release_on_throw` — first call throws via failing `browser.tabs.create`; lock releases, partial state not persisted, second call succeeds.
+- `T_prune_race_window` — `pruneStaleGroups` and `tabs_create_mcp` run concurrently; new vtid added during prune is preserved, stale vtid is removed, live vtid is preserved.
+- `T_findStaleEntries_transient` — non-`TAB_GONE_PATTERN` error preserves the entry instead of evicting it.
+- `T_lock_fifo` — three serial `tabs_create_mcp` calls with decreasing mock delays still produce vtids `1, 2, 3` in dispatch order.
+- `T_resolveTab_no_write_on_success` — successful resolution exercises the `skipWrite` path; zero `browser.storage.session.set` calls observed.
+- `T_resolveTab_persists_stale` — definitive tab-gone rejection causes `isStale: true` to be persisted via the non-`skipWrite` return path.
 - All existing T1–T9 and T_prune1–T_prune4 cases continue to pass without behavioral change.
 
 ## Origin
