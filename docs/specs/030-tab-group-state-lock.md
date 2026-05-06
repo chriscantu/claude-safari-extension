@@ -28,6 +28,7 @@ Only `pruneStaleGroups` previously used a manual two-phase compute-then-reapply 
 
 - Cross-process synchronization (only one extension JS context exists at a time)
 - Locking other `browser.storage.session` keys (e.g., `computer-wait-alarmName` in `computer.js`) — those are owned by a single tool and have no read-modify-write pattern
+- **Lock cancellation / timeout.** `withTabGroupLock` has no timeout or cancel hook. If the callback's awaited work hangs indefinitely (e.g., `browser.tabs.create` never resolves because Safari is unresponsive), the lock chain stalls until the runtime tears down the extension context. This matches the rest of the codebase's approach to native-bridge calls (one-shot, no per-call timeout — see `tool-registry.js`). Adding a cancellation path would require a deadline-aware wrapper around every awaited browser API call inside critical sections; out of scope for this PR. Revisit if hangs are observed in practice.
 
 ## Design
 
@@ -97,6 +98,11 @@ In `resolveTab`, a transient probe surfaces the original error to the caller (wr
 - `T_prune_ghost_group` — `applyStaleRemovals` tolerates a group disappearing between phase-1 snapshot and phase-3 lock acquisition (the `if (!group) continue` guard).
 - `T_prune_corrupt` — `findStaleEntries` flags entries with non-numeric `realTabId` for removal so corrupt records don't accumulate.
 - All existing T1–T9 and T_prune1–T_prune4 cases continue to pass without behavioral change.
+
+### Coverage gaps (intentional)
+
+- **Slow-create latency.** `T_concurrent` and `T_lock_fifo` mock `browser.tabs.create` with `setTimeout(0)` (resolves on next microtask). A multi-second `tabs.create` would queue every other lock acquirer for that duration — accepted per Spec 030 §Design and `handleTabsCreateMcp`'s inline comment. No automated test exercises this latency profile; observable behavior surfaces only in live Safari under cold-start / heavy-load conditions and is captured by manual regression §14.3.
+- **Hung-callback recovery.** No test simulates a `browser.tabs.create` (or any in-callback await) that never resolves. The lock chain has no timeout — see Non-Goals above.
 
 ## Origin
 
