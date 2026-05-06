@@ -786,6 +786,47 @@ describe("withTabGroupLock", () => {
         expect(bm.storage.session.set).not.toHaveBeenCalled();
     });
 
+    test("T_prune_no_write_when_already_removed: applyStaleRemovals no-op skips storage write", async () => {
+        // Probe phase identifies a stale vtid; before lock acquisition,
+        // a concurrent caller has already deleted it. applyStaleRemovals
+        // becomes a no-op — the prune commit must skip writeState rather
+        // than churn storage with the unmodified fresh state.
+        const bm = makeBrowserMock({ existingRealTabs: {} });
+
+        // First read returns the populated state (probe phase).
+        // Second+ reads see the already-cleaned state (lock phase).
+        const populated = {
+            __claudeTabGroups: {
+                nextGroupId: 2, nextTabId: 2,
+                groups: {
+                    "1": {
+                        tabs: {
+                            "1": { realTabId: 99, url: "https://gone.com", title: "Gone", isStale: false },
+                        },
+                    },
+                },
+            },
+        };
+        const cleaned = {
+            __claudeTabGroups: { nextGroupId: 2, nextTabId: 2, groups: {} },
+        };
+        let getCalls = 0;
+        bm.storage.session.get = jest.fn(async () => {
+            getCalls++;
+            return getCalls === 1 ? { ...populated } : { ...cleaned };
+        });
+
+        jest.resetModules();
+        globalThis.browser = bm;
+        globalThis.registerTool = jest.fn();
+        require("../../ClaudeInSafari Extension/Resources/tools/tabs-manager.js");
+
+        bm.storage.session.set.mockClear();
+        await globalThis.pruneStaleGroups();
+        // applyStaleRemovals was a no-op (entry already gone) → no write.
+        expect(bm.storage.session.set).not.toHaveBeenCalled();
+    });
+
     test("T_currentGroupId_all_stale_fallback: prefers highest-ID group when every group is all-stale", async () => {
         // Two groups, all tabs in both are isStale: true. currentGroupId
         // must fall through the live-group preference loop and return the

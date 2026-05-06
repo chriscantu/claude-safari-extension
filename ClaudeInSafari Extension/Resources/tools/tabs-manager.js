@@ -422,16 +422,24 @@ async function findStaleEntries(state) {
  * within a session, a closed-and-replaced tab could be evicted by a stale
  * entry from a prior probe. If this invariant breaks, switch to scan→apply
  * inside a single locked region.
+ *
+ * Returns true if at least one entry was actually removed (caller can skip
+ * writeState when nothing changed — relevant when every staleEntry was
+ * already removed between probe and lock acquisition by a concurrent caller).
  */
 function applyStaleRemovals(state, staleEntries) {
+    let removed = false;
     for (const { groupId, vtid } of staleEntries) {
         const group = state.groups[groupId];
         if (!group) continue;
+        if (group.tabs[vtid] === undefined) continue;
         delete group.tabs[vtid];
+        removed = true;
         if (Object.keys(group.tabs).length === 0) {
             delete state.groups[groupId];
         }
     }
+    return removed;
 }
 
 /**
@@ -444,6 +452,11 @@ function applyStaleRemovals(state, staleEntries) {
  * lock and apply removals.
  */
 async function pruneStaleGroups() {
+    // Read outside the lock intentionally — cheap early-out before the
+    // N-probe findStaleEntries phase. A concurrent tabs_create_mcp adding
+    // a group between this read and the next prune cycle is fine: those
+    // groups are processed on the following 60-second tick. The fresh
+    // readState() inside withTabGroupLock below is what enforces correctness.
     const snapshot = await readState();
     if (!snapshot.groups || Object.keys(snapshot.groups).length === 0) return;
 
@@ -451,7 +464,11 @@ async function pruneStaleGroups() {
     if (staleEntries.length === 0) return;
 
     await withTabGroupLock(async (state) => {
-        applyStaleRemovals(state, staleEntries);
+        const removed = applyStaleRemovals(state, staleEntries);
+        // Skip writeState if every staleEntry was already removed by a
+        // concurrent caller between probe and lock acquisition — avoids a
+        // spurious storage write on the race window.
+        if (!removed) return withTabGroupLock.skipWrite(undefined);
     });
 }
 

@@ -71,6 +71,8 @@ All four mutation sites (`handleTabsContextMcp`, `handleTabsCreateMcp`, `resolve
 
 `handleTabsCreateMcp` holds the lock through `browser.tabs.create` because the `nextTabId++` increment must be atomic with the new `realTabId` being recorded — otherwise two concurrent calls would observe the same `nextTabId` and one record would overwrite the other. The cost: concurrent `tabs_context_mcp` / `resolveTab` / `pruneStaleGroups` acquirers queue behind Safari's tab-open latency (typically tens of milliseconds; multi-second under cold start or heavy load). This trade-off is accepted; revisit if profile data shows tab-create stalls becoming a real latency hotspot.
 
+`resolveTab` holds the lock through one `browser.tabs.get` call (via `probeRealTab`). Unlike `handleTabsContextMcp` and `pruneStaleGroups`, which release the lock during their probe phases, `resolveTab` uses a single locked region so the entry lookup, probe result, and optional staleness write are all atomic — a concurrent `pruneStaleGroups` must not see a stale entry as live between our find and our write. The cost: every other lock acquirer queues behind one `browser.tabs.get` round-trip on every `resolveTab` call. Accepted because (a) it is exactly one IPC call per invocation, not N sequential, and (b) splitting into three phases would require two lock acquisitions per `resolveTab`, adding latency to the success path which is the hot path (every tab-consuming tool — navigate, click, type, screenshot — goes through this function). The inline LOCK-HOLD NOTE in `tabs-manager.js::resolveTab` mirrors this rationale at the call site.
+
 `resolveTab` keeps a single locked region but uses `probeRealTab` so a transient probe error releases the lock without writing.
 
 ### Transient-error policy
@@ -101,6 +103,7 @@ The same monotonic assumption underpins `handleTabsContextMcp`'s phase-3 update 
 - `T_prune_corrupt` — `findStaleEntries` flags entries with non-numeric `realTabId` for removal so corrupt records don't accumulate.
 - `T_context_resolveTab_race` — phase-2 of `tabs_context_mcp` records `live`; concurrent `resolveTab` lands a stale mark between phases; phase 3 must NOT revert it back to `live`.
 - `T_context_no_write_when_clean` — `tabs_context_mcp` against an all-live group performs zero `storage.session.set` calls (skipWrite hot path).
+- `T_prune_no_write_when_already_removed` — `applyStaleRemovals` no-op (every staleEntry already removed by a concurrent caller) takes the `skipWrite` path; no storage churn on the race window.
 - `T_currentGroupId_all_stale_fallback` — when every group is all-stale, the highest-ID group is selected as last resort.
 - All existing T1–T9 and T_prune1–T_prune4 cases continue to pass without behavioral change.
 
