@@ -703,6 +703,51 @@ describe("withTabGroupLock", () => {
         expect(result).toBe("No MCP tab group exists. Use tabs_create_mcp to create a new tab.");
     });
 
+    test("T_currentGroupId_all_stale_fallback: prefers highest-ID group when every group is all-stale", async () => {
+        // Two groups, all tabs in both are isStale: true. currentGroupId
+        // must fall through the live-group preference loop and return the
+        // highest-ID group ("2"). Without the fallback, tabs_context_mcp
+        // would report no group and create a stale-context surprise.
+        const bm = makeBrowserMock({
+            existingRealTabs: {},
+            storageData: {
+                __claudeTabGroups: {
+                    nextGroupId: 3, nextTabId: 5,
+                    groups: {
+                        "1": {
+                            tabs: {
+                                "1": { realTabId: 901, url: "https://a.com", title: "A", isStale: true },
+                            },
+                        },
+                        "2": {
+                            tabs: {
+                                "2": { realTabId: 902, url: "https://b.com", title: "B", isStale: true },
+                            },
+                        },
+                    },
+                },
+            },
+        });
+        // Probe rejects with TAB_GONE_PATTERN — entries stay tombstoned.
+        bm.tabs.get = jest.fn(async (id) => {
+            throw new Error(`No tab with id: ${id}`);
+        });
+
+        jest.resetModules();
+        globalThis.browser = bm;
+        const registrations = {};
+        globalThis.registerTool = (name, handler) => { registrations[name] = handler; };
+        require("../../ClaudeInSafari Extension/Resources/tools/tabs-manager.js");
+
+        const result = await registrations["tabs_context_mcp"]({});
+        // Highest-ID group selected by the all-stale fallback.
+        expect(result).toContain("Group 2");
+        expect(result).not.toContain("Group 1");
+        // Tab from the selected group surfaced with its [STALE] tag.
+        expect(result).toContain("Tab 2:");
+        expect(result).toContain("[STALE]");
+    });
+
     test("T_context_transient_probe: handleTabsContextMcp transient probe preserves prior isStale", async () => {
         // Tab starts with isStale: true. Probe rejects with a non-TAB_GONE_PATTERN
         // error. The phase-2 transient branch must NOT push an update, and phase 3
