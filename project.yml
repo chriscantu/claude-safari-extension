@@ -46,7 +46,7 @@ targets:
         CFBundleName: "Claude in Safari"
         CFBundleDisplayName: "Claude in Safari"
         CFBundleShortVersionString: "1.2.6"
-        CFBundleVersion: "1"
+        CFBundleVersion: "6"
         LSMinimumSystemVersion: "13.0"
         LSUIElement: true
         NSMainStoryboardFile: ""
@@ -73,7 +73,7 @@ targets:
         CFBundleName: "ClaudeInSafari Extension"
         CFBundleDisplayName: "Claude in Safari Extension"
         CFBundleShortVersionString: "1.2.6"
-        CFBundleVersion: "1"
+        CFBundleVersion: "6"
         NSExtension:
           NSExtensionPointIdentifier: com.apple.Safari.web-extension
           NSExtensionPrincipalClass: "$(PRODUCT_MODULE_NAME).SafariWebExtensionHandler"

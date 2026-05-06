@@ -31,7 +31,10 @@ done
 MANIFEST="ClaudeInSafari Extension/Resources/manifest.json"
 sed -i '' "s/\"version\": \"$CURRENT\"/\"version\": \"$NEW_VERSION\"/" "$MANIFEST"
 
-# Update project.yml (both occurrences)
+# Update project.yml (both occurrences for both fields). Keeps the XcodeGen
+# source-of-truth in sync with the generated Info.plist files so a regen
+# doesn't silently revert the build number.
 sed -i '' "s/CFBundleShortVersionString: \"$CURRENT\"/CFBundleShortVersionString: \"$NEW_VERSION\"/" project.yml
+sed -i '' "s/CFBundleVersion: \"$BUILD\"/CFBundleVersion: \"$NEW_BUILD\"/" project.yml
 
 echo "$NEW_VERSION"

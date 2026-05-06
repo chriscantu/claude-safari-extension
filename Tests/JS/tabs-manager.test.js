@@ -402,7 +402,27 @@ describe("withTabGroupLock", () => {
         // The lock's try/finally must release so the second call succeeds.
         // The first call's in-callback mutation (state.groups[<new>] = {tabs:{}})
         // must NOT be persisted because writeState never runs on throw.
-        const bm = makeBrowserMock({ nextRealTabId: 800 });
+        //
+        // Seed storage with a sentinel pre-existing state so a partial-write
+        // regression would be detectable: if the throwing callback ever
+        // persisted its in-flight mutation, the sentinel state would be
+        // overwritten and the post-throw assertions below would fail.
+        const sentinel = {
+            __claudeTabGroups: {
+                nextGroupId: 5, nextTabId: 7,
+                groups: {
+                    "4": {
+                        tabs: {
+                            "6": { realTabId: 999, url: "https://sentinel.test", title: "S", isStale: false },
+                        },
+                    },
+                },
+            },
+        };
+        const bm = makeBrowserMock({
+            existingRealTabs: { 999: { id: 999, url: "https://sentinel.test", title: "S" } },
+            storageData: sentinel,
+        });
         let attempt = 0;
         bm.tabs.create = jest.fn(async () => {
             attempt++;
@@ -417,14 +437,25 @@ describe("withTabGroupLock", () => {
 
         await expect(registrations["tabs_create_mcp"]({}))
             .rejects.toThrow("simulated create failure");
-        // Failed call must not have persisted partial state (no group created).
-        expect(bm.storage.session._raw.__claudeTabGroups).toBeUndefined();
+
+        // Sentinel state must be intact: the throwing callback's in-flight
+        // mutation (incremented nextTabId, possible new group entry) was
+        // discarded because writeState never ran.
+        const afterThrow = bm.storage.session._raw.__claudeTabGroups;
+        expect(afterThrow.nextTabId).toBe(7);
+        expect(afterThrow.nextGroupId).toBe(5);
+        expect(Object.keys(afterThrow.groups).sort()).toEqual(["4"]);
+        expect(afterThrow.groups["4"].tabs["6"].url).toBe("https://sentinel.test");
 
         // Lock released — second call must succeed.
         const result = await registrations["tabs_create_mcp"]({});
         expect(result).toMatch(/Created new MCP tab/);
-        const state = bm.storage.session._raw.__claudeTabGroups;
-        expect(Object.keys(state.groups).length).toBe(1);
+        const after = bm.storage.session._raw.__claudeTabGroups;
+        // Second call advances counters from the unmutated sentinel baseline.
+        expect(after.nextTabId).toBe(8);
+        // New tab landed under the existing group "4" (currentGroupId picked it).
+        expect(after.groups["4"].tabs["7"]).toBeDefined();
+        expect(after.groups["4"].tabs["7"].realTabId).toBe(850);
     });
 
     test("T_prune_race_window: tabs_create_mcp racing with prune does not lose the new tab", async () => {
