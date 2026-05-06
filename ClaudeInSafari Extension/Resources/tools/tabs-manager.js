@@ -195,6 +195,14 @@ async function resolveTab(virtualTabId) {
         throw new Error("No active tab found in the current window");
     }
 
+    // LOCK-HOLD NOTE: the mutex is held across probeRealTab (one
+    // browser.tabs.get call) because the entry lookup and stale-mark
+    // must be atomic — a concurrent pruneStaleGroups must not observe
+    // a stale entry as live between our find and our write. Cost: one
+    // IPC round-trip (typically tens of ms) while the lock is held;
+    // concurrent acquirers queue for that window. Acceptable because
+    // resolveTab probes exactly one tab per call (not N sequential
+    // ones). See Spec 030 §Design.
     const outcome = await withTabGroupLock(async (state) => {
         for (const group of Object.values(state.groups)) {
             const entry = group.tabs[virtualTabId];
