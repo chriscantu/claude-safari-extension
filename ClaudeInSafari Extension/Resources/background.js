@@ -5,7 +5,7 @@
  *
  * Load order (declared in manifest.json background.scripts):
  *   1. tools/constants.js      — defines NATIVE_APP_ID
- *   2. tools/tool-registry.js  — defines registerTool / executeTool on globalThis
+ *   2. tools/tool-registry.js  — defines registerTool / executeTool / TAB_GONE_PATTERN on globalThis
  *   3. tools/tabs-manager.js   — registers tabs_context_mcp, tabs_create_mcp; exports resolveTab
  *   4. tools/navigate.js       — registers navigate
  *   5. tools/read-page.js      — registers read_page

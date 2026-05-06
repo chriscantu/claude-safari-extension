@@ -500,10 +500,13 @@ async function pruneStaleGroups() {
             );
         }
         const removed = applyStaleRemovals(state, staleEntries);
-        // Skip writeState if every staleEntry was already removed by a
-        // concurrent caller between probe and lock acquisition — avoids a
-        // spurious storage write on the race window.
-        if (!removed) return withTabGroupLock.skipWrite(undefined);
+        // Symmetric returns to keep the skipWrite contract obvious at the
+        // call site: explicit skipWrite when nothing changed (avoids a
+        // spurious storage write on the probe→lock race window), explicit
+        // falsy `undefined` when something changed so withTabGroupLock
+        // persists the removals via writeState. See withTabGroupLock JSDoc
+        // for the falsy-triggers-write contract.
+        return removed ? undefined : withTabGroupLock.skipWrite(undefined);
     });
 }
 
