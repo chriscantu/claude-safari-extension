@@ -62,6 +62,12 @@ async function writeState(state) {
 
 let lockChain = Promise.resolve();
 
+// Sentinel for the skipWrite escape hatch. Declared before withTabGroupLock
+// so source order matches the dependency: the function below closes over
+// SKIP_WRITE_MARK at call time. (Hoisted-function-over-later-const works at
+// runtime, but reading top-to-bottom shouldn't require knowing that.)
+const SKIP_WRITE_MARK = Symbol("tabGroupLock.skipWrite");
+
 /**
  * Run a critical section with exclusive access to tab-group state.
  *
@@ -72,6 +78,13 @@ let lockChain = Promise.resolve();
  * `withTabGroupLock.skipWrite(...)`:
  *
  *   return withTabGroupLock.skipWrite(myReturnValue);
+ *
+ * Contract — skipWrite detection: the check is `out && out.__skipWrite ===
+ * SKIP_WRITE_MARK`. Returning any falsy value (including `false`, `0`, `""`,
+ * `null`, `undefined`) bypasses skipWrite and triggers writeState — even if
+ * the callback intended a read-only path. To opt out of the write, ALWAYS
+ * wrap the value via `withTabGroupLock.skipWrite(...)`, which produces a
+ * truthy sentinel object regardless of `value`.
  *
  * Throws inside the callback propagate to the caller; partial mutations
  * to `state` are NOT persisted because `writeState` is only reached on
@@ -99,7 +112,6 @@ async function withTabGroupLock(fn) {
     }
 }
 
-const SKIP_WRITE_MARK = Symbol("tabGroupLock.skipWrite");
 withTabGroupLock.skipWrite = (value) => ({ __skipWrite: SKIP_WRITE_MARK, value });
 
 // ---------------------------------------------------------------------------
