@@ -855,6 +855,15 @@ final class ToolRouterDispatchTests: XCTestCase {
         XCTAssertEqual(router.parseTabId(arguments), 5)
     }
 
+    // kCFBooleanFalse bridges through the NSNumber branch with intValue == 0.
+    // Documenting this explicitly: `tabId: false` resolves to 0 (not nil, not -1).
+    // Both 0 and -1 are invalid Safari tab IDs (Safari tabs start at 1), but they
+    // are different dictionary keys for GIF recording — keep the behaviour pinned.
+    func testParseTabId_cfBooleanFalse_returnsZero() {
+        let arguments: [String: Any] = ["tabId": kCFBooleanFalse as Any]
+        XCTAssertEqual(router.parseTabId(arguments), 0)
+    }
+
     // MARK: - Startup Cleanup (Spec 023 H1 + M1)
 
     func testPerformStartupCleanup_truncatesQueue() throws {
