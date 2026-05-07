@@ -679,13 +679,13 @@ describe("withTabGroupLock", () => {
         const ghosted = {
             __claudeTabGroups: { nextGroupId: 2, nextTabId: 2, groups: {} },
         };
-        let getCalls = 0;
-        bm.storage.session.get = jest.fn(async () => {
-            getCalls++;
-            // Phase-1 snapshot exposes the stale entry; phase-2 (and later)
-            // re-reads see the ghosted state.
-            return getCalls === 1 ? { ...stalePresent } : { ...ghosted };
-        });
+        // Phase-1 snapshot exposes the stale entry; phase-2 (and later)
+        // re-reads see the ghosted state. mockResolvedValueOnce + a fallback
+        // is robust to extra readState() calls (a future defensive early-out
+        // wouldn't silently advance the mock past the intended race).
+        bm.storage.session.get = jest.fn()
+            .mockResolvedValueOnce({ ...stalePresent })
+            .mockResolvedValue({ ...ghosted });
 
         jest.resetModules();
         globalThis.browser = bm;
@@ -750,12 +750,13 @@ describe("withTabGroupLock", () => {
         const ghosted = {
             __claudeTabGroups: { nextGroupId: 2, nextTabId: 2, groups: {} },
         };
-        let getCalls = 0;
-        bm.storage.session.get = jest.fn(async () => {
-            getCalls++;
-            // Phase 1 reads the populated state; later reads see the ghost.
-            return getCalls === 1 ? { ...phase1State } : { ...ghosted };
-        });
+        // Phase 1 reads the populated state; later reads see the ghost.
+        // Use mockResolvedValueOnce so the mock is robust to extra reads
+        // (e.g., a future defensive guard) rather than coupling to an
+        // exact call count.
+        bm.storage.session.get = jest.fn()
+            .mockResolvedValueOnce({ ...phase1State })
+            .mockResolvedValue({ ...ghosted });
 
         jest.resetModules();
         globalThis.browser = bm;
@@ -874,11 +875,12 @@ describe("withTabGroupLock", () => {
         const cleaned = {
             __claudeTabGroups: { nextGroupId: 2, nextTabId: 2, groups: {} },
         };
-        let getCalls = 0;
-        bm.storage.session.get = jest.fn(async () => {
-            getCalls++;
-            return getCalls === 1 ? { ...populated } : { ...cleaned };
-        });
+        // First read returns the populated state (probe phase); subsequent
+        // reads see the already-cleaned state (lock phase). mockResolvedValueOnce
+        // makes intent explicit and is robust to extra reads.
+        bm.storage.session.get = jest.fn()
+            .mockResolvedValueOnce({ ...populated })
+            .mockResolvedValue({ ...cleaned });
 
         jest.resetModules();
         globalThis.browser = bm;
