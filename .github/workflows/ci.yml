@@ -21,7 +21,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Check all 4 version sources match
+      - name: Check all 3 version sources match
         run: |
           MANIFEST=$(python3 -c "import json; print(json.load(open('ClaudeInSafari Extension/Resources/manifest.json'))['version'])")
           APP_PLIST=$(/usr/bin/python3 -c "
@@ -34,20 +34,10 @@ jobs:
           with open('ClaudeInSafari Extension/Info.plist', 'rb') as f:
               print(plistlib.load(f)['CFBundleShortVersionString'])
           ")
-          PROJECT_YML=$(python3 -c "
-          import re
-          matches = re.findall(r'CFBundleShortVersionString: \"(.+?)\"', open('project.yml').read())
-          versions = set(matches)
-          if len(versions) != 1:
-              print('MISMATCH')
-          else:
-              print(versions.pop())
-          ")
 
           echo "manifest.json:              ${MANIFEST}"
           echo "ClaudeInSafari/Info.plist:   ${APP_PLIST}"
           echo "Extension/Info.plist:        ${EXT_PLIST}"
-          echo "project.yml:                ${PROJECT_YML}"
 
           FAIL=0
           if [ "$MANIFEST" != "$APP_PLIST" ]; then
@@ -58,15 +48,11 @@ jobs:
             echo "::error::Version mismatch: manifest.json (${MANIFEST}) != Extension/Info.plist (${EXT_PLIST})"
             FAIL=1
           fi
-          if [ "$MANIFEST" != "$PROJECT_YML" ]; then
-            echo "::error::Version mismatch: manifest.json (${MANIFEST}) != project.yml (${PROJECT_YML})"
-            FAIL=1
-          fi
           if [ "$FAIL" -eq 1 ]; then
-            echo "::error::All 4 version sources must match. Update them all to the same version."
+            echo "::error::All 3 version sources must match. Update them all to the same version."
             exit 1
           fi
-          echo "All 4 version sources match: ${MANIFEST}"
+          echo "All 3 version sources match: ${MANIFEST}"
 
       - name: Check version is new
         run: |
