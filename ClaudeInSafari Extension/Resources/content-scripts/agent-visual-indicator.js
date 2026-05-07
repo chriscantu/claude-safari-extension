@@ -223,7 +223,9 @@
 
   chatBtn.addEventListener('click', function () {
     // browser.tabs is unavailable in content scripts — route through background.
-    browser.runtime.sendMessage({ type: 'OPEN_CLAUDE_TAB' }).catch(function () {});
+    browser.runtime.sendMessage({ type: 'OPEN_CLAUDE_TAB' }).catch(function (err) {
+      console.warn('agent-indicator: failed to open Claude tab via background:', err);
+    });
   });
 
   dismissBtn.addEventListener('click', function () {
