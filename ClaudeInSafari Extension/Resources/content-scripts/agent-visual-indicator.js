@@ -230,7 +230,9 @@
 
   dismissBtn.addEventListener('click', function () {
     hideStaticIndicator();
-    browser.runtime.sendMessage({ type: 'DISMISS_STATIC_INDICATOR_FOR_GROUP' }).catch(function () {});
+    browser.runtime.sendMessage({ type: 'DISMISS_STATIC_INDICATOR_FOR_GROUP' }).catch(function () {
+      // Background page suspended — indicator already hidden locally above
+    });
   });
 
   // ── Message listener ──────────────────────────────────────────────────────
