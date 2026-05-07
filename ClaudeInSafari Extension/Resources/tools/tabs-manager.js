@@ -290,7 +290,7 @@ async function handleTabsContextMcp(args) {
         return withTabGroupLock.skipWrite({ groupId, probes });
     });
 
-    if (init.done !== undefined) return init.done;
+    if ("done" in init) return init.done;
 
     // Phase 2 (no lock): probe staleness for each tab. The lock is released
     // here so concurrent tabs_create_mcp / resolveTab calls aren't blocked
@@ -500,13 +500,12 @@ async function pruneStaleGroups() {
             );
         }
         const removed = applyStaleRemovals(state, staleEntries);
-        // Symmetric returns to keep the skipWrite contract obvious at the
-        // call site: explicit skipWrite when nothing changed (avoids a
-        // spurious storage write on the probe→lock race window), explicit
-        // falsy `undefined` when something changed so withTabGroupLock
-        // persists the removals via writeState. See withTabGroupLock JSDoc
-        // for the falsy-triggers-write contract.
-        return removed ? undefined : withTabGroupLock.skipWrite(undefined);
+        // Skip the write when nothing changed (avoids a spurious storage
+        // write on the probe→lock race window). Otherwise fall through —
+        // the implicit `undefined` return is falsy, which withTabGroupLock
+        // treats as "please writeState" (see JSDoc on the falsy-triggers-write
+        // contract).
+        if (!removed) return withTabGroupLock.skipWrite(undefined);
     });
 }
 
