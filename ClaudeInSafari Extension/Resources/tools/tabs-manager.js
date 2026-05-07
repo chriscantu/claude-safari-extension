@@ -295,15 +295,18 @@ async function handleTabsContextMcp(args) {
     // Phase 2 (no lock): probe staleness for each tab. The lock is released
     // here so concurrent tabs_create_mcp / resolveTab calls aren't blocked
     // by N sequential browser.tabs.get round-trips.
-    const updates = [];
+    //
+    // Only definitive-gone results are recorded — phase 3's monotonic-stale
+    // invariant (entries flip TO stale, never back to live) means a `live`
+    // probe is always a no-op on the existing flag. Skipping `live` pushes
+    // here makes phase 3's contract self-evident from the data shape.
+    // Transient errors preserve the prior value and are logged.
+    const staleVtids = [];
     for (const { vtid, realTabId } of init.probes) {
         const probe = await probeRealTab(realTabId);
-        if (probe.live) {
-            updates.push({ vtid, isStale: false });
-        } else if (probe.gone) {
-            updates.push({ vtid, isStale: true });
-        } else {
-            // Transient — preserve current isStale value (don't flip).
+        if (probe.gone) {
+            staleVtids.push(vtid);
+        } else if (!probe.live) {
             console.warn(
                 `tabs_context_mcp: transient probe error for vtid=${vtid} (realTabId=${realTabId}); preserving prior isStale:`,
                 probe.err
@@ -322,15 +325,13 @@ async function handleTabsContextMcp(args) {
         }
         // Only flip entries TO stale, never back to live. Under Safari's
         // monotonically-increasing tab-ID policy (Spec 030 §Tab-ID reuse
-        // assumption), a closed tab never becomes live again — so a
-        // phase-2 `live` probe result must NOT clear a stale mark set by
-        // a concurrent resolveTab between phases. Track `dirty` so we can
-        // skip writeState entirely in the common all-live / no-change
+        // assumption), a closed tab never becomes live again. Track `dirty`
+        // so we can skip writeState entirely in the common no-stale-discovered
         // case (tabs_context_mcp is the hot path).
         let dirty = false;
-        for (const { vtid, isStale } of updates) {
+        for (const vtid of staleVtids) {
             const entry = group.tabs[vtid];
-            if (entry && isStale && !entry.isStale) {
+            if (entry && !entry.isStale) {
                 entry.isStale = true;
                 dirty = true;
             }
