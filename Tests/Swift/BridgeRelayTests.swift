@@ -424,6 +424,8 @@ final class BridgeRelayTests: XCTestCase {
         XCTAssertEqual(reason, .stdinEOF,
             "Zero-byte write must not hang — outer loop continues to next read (EOF)")
         XCTAssertEqual(mock.writeCallCount(Self.mockSocketFD), 1,
-            "Zero-byte write must break the inner loop, not retry")
+            "Zero-byte write must break the inner loop (not retry): write(2) returning 0 " +
+            "on a blocking fd is undefined — break avoids an infinite loop at the cost of " +
+            "dropping the unwritten tail")
     }
 }
