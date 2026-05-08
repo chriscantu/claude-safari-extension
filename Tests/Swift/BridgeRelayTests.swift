@@ -119,4 +119,311 @@ final class BridgeRelayTests: XCTestCase {
         let _: Date? = BridgeRelay.bridgeSessionStart
         let _: Int = BridgeRelay.bridgeReconnectCount
     }
+
+    // MARK: - relay() syscall-injected tests
+    //
+    // Cover the EINTR-retry loops and partial-write advancement in relay().
+    // Real syscalls cannot deterministically produce EINTR / partial writes
+    // under unit test load, so we inject mock read/write closures.
+    //
+    // Fake fds are used (100/101/102). `shutdown()` calls inside relay() will
+    // fail harmlessly on them; relay ignores those return codes by design.
+
+    private static let mockStdinFD: Int32 = 100
+    private static let mockStdoutFD: Int32 = 101
+    private static let mockSocketFD: Int32 = 102
+
+    private final class MockSyscalls {
+        enum ReadOp {
+            case bytes([UInt8])
+            case error(errno: Int32)
+            case eof
+        }
+        enum WriteOp {
+            case full
+            case partial(Int)
+            case error(errno: Int32)
+            case zero
+        }
+
+        private let lock = NSLock()
+        private var reads: [Int32: [ReadOp]] = [:]
+        private var writes: [Int32: [WriteOp]] = [:]
+        private var _written: [Int32: [UInt8]] = [:]
+        private var _readCalls: [Int32: Int] = [:]
+        private var _writeCalls: [Int32: Int] = [:]
+
+        func enqueueReads(fd: Int32, _ ops: ReadOp...) {
+            lock.lock(); defer { lock.unlock() }
+            reads[fd, default: []].append(contentsOf: ops)
+        }
+
+        func enqueueWrites(fd: Int32, _ ops: WriteOp...) {
+            lock.lock(); defer { lock.unlock() }
+            writes[fd, default: []].append(contentsOf: ops)
+        }
+
+        func writtenBytes(_ fd: Int32) -> [UInt8] {
+            lock.lock(); defer { lock.unlock() }
+            return _written[fd] ?? []
+        }
+
+        func readCallCount(_ fd: Int32) -> Int {
+            lock.lock(); defer { lock.unlock() }
+            return _readCalls[fd] ?? 0
+        }
+
+        func writeCallCount(_ fd: Int32) -> Int {
+            lock.lock(); defer { lock.unlock() }
+            return _writeCalls[fd] ?? 0
+        }
+
+        func readFn(_ fd: Int32, _ buf: UnsafeMutableRawPointer, _ n: Int) -> Int {
+            lock.lock()
+            _readCalls[fd, default: 0] += 1
+            let op: ReadOp
+            if let next = reads[fd]?.first {
+                reads[fd]!.removeFirst()
+                op = next
+            } else {
+                // Queue exhausted — default to EOF so threads can exit cleanly.
+                lock.unlock()
+                return 0
+            }
+            lock.unlock()
+            switch op {
+            case .bytes(let bytes):
+                let copyN = min(bytes.count, n)
+                bytes.withUnsafeBufferPointer { src in
+                    if let base = src.baseAddress {
+                        buf.copyMemory(from: base, byteCount: copyN)
+                    }
+                }
+                return copyN
+            case .error(let e):
+                errno = e
+                return -1
+            case .eof:
+                return 0
+            }
+        }
+
+        func writeFn(_ fd: Int32, _ buf: UnsafeRawPointer, _ n: Int) -> Int {
+            lock.lock()
+            _writeCalls[fd, default: 0] += 1
+            let op: WriteOp = (writes[fd]?.first).map { _ in writes[fd]!.removeFirst() } ?? .full
+            switch op {
+            case .full:
+                let typed = buf.assumingMemoryBound(to: UInt8.self)
+                let bp = UnsafeBufferPointer(start: typed, count: n)
+                _written[fd, default: []].append(contentsOf: bp)
+                lock.unlock()
+                return n
+            case .partial(let k):
+                let take = min(max(k, 0), n)
+                let typed = buf.assumingMemoryBound(to: UInt8.self)
+                let bp = UnsafeBufferPointer(start: typed, count: take)
+                _written[fd, default: []].append(contentsOf: bp)
+                lock.unlock()
+                return take
+            case .error(let e):
+                lock.unlock()
+                errno = e
+                return -1
+            case .zero:
+                lock.unlock()
+                return 0
+            }
+        }
+    }
+
+    /// Stdin closes immediately → relay should report `.stdinEOF`.
+    func testRelay_stdinEOF_returnsStdinEOF() {
+        let mock = MockSyscalls()
+        mock.enqueueReads(fd: Self.mockStdinFD, .eof)
+        mock.enqueueReads(fd: Self.mockSocketFD, .eof)
+
+        let reason = BridgeRelay.relay(
+            stdinFD: Self.mockStdinFD,
+            stdoutFD: Self.mockStdoutFD,
+            socketFD: Self.mockSocketFD,
+            readFn: mock.readFn,
+            writeFn: mock.writeFn
+        )
+        XCTAssertEqual(reason, .stdinEOF)
+    }
+
+    /// EINTR on stdin read must `continue` — not break, not error.
+    /// After retry, EOF should produce `.stdinEOF`.
+    func testRelay_stdinReadEINTR_retriesUntilEOF() {
+        let mock = MockSyscalls()
+        mock.enqueueReads(fd: Self.mockStdinFD, .error(errno: EINTR), .error(errno: EINTR), .eof)
+        mock.enqueueReads(fd: Self.mockSocketFD, .eof)
+
+        let reason = BridgeRelay.relay(
+            stdinFD: Self.mockStdinFD,
+            stdoutFD: Self.mockStdoutFD,
+            socketFD: Self.mockSocketFD,
+            readFn: mock.readFn,
+            writeFn: mock.writeFn
+        )
+        XCTAssertEqual(reason, .stdinEOF)
+        XCTAssertGreaterThanOrEqual(mock.readCallCount(Self.mockStdinFD), 3,
+            "EINTR must retry — expected at least 3 read calls (2 EINTR + 1 EOF)")
+    }
+
+    /// EINTR on socket write must `continue` — bytes must still be delivered after retry.
+    func testRelay_socketWriteEINTR_retriesAndCompletes() {
+        let mock = MockSyscalls()
+        let payload: [UInt8] = Array("hello".utf8)
+        mock.enqueueReads(fd: Self.mockStdinFD, .bytes(payload), .eof)
+        mock.enqueueReads(fd: Self.mockSocketFD, .eof)
+        mock.enqueueWrites(fd: Self.mockSocketFD, .error(errno: EINTR), .full)
+
+        let reason = BridgeRelay.relay(
+            stdinFD: Self.mockStdinFD,
+            stdoutFD: Self.mockStdoutFD,
+            socketFD: Self.mockSocketFD,
+            readFn: mock.readFn,
+            writeFn: mock.writeFn
+        )
+        XCTAssertEqual(reason, .stdinEOF)
+        XCTAssertEqual(mock.writtenBytes(Self.mockSocketFD), payload,
+            "All payload bytes must be delivered after EINTR retry")
+        XCTAssertGreaterThanOrEqual(mock.writeCallCount(Self.mockSocketFD), 2,
+            "EINTR must trigger a retry — expected at least 2 write calls")
+    }
+
+    /// Partial-write advancement: a short write must NOT drop the unwritten tail.
+    /// The `while written < n` loop must call writeFn again with an advanced buffer.
+    func testRelay_socketPartialWrite_advancesBuffer() {
+        let mock = MockSyscalls()
+        let payload: [UInt8] = Array(repeating: 0x41, count: 100) // 100 'A's
+        mock.enqueueReads(fd: Self.mockStdinFD, .bytes(payload), .eof)
+        mock.enqueueReads(fd: Self.mockSocketFD, .eof)
+        // First call accepts 30 bytes, second call accepts the remaining 70.
+        mock.enqueueWrites(fd: Self.mockSocketFD, .partial(30), .full)
+
+        let reason = BridgeRelay.relay(
+            stdinFD: Self.mockStdinFD,
+            stdoutFD: Self.mockStdoutFD,
+            socketFD: Self.mockSocketFD,
+            readFn: mock.readFn,
+            writeFn: mock.writeFn
+        )
+        XCTAssertEqual(reason, .stdinEOF)
+        XCTAssertEqual(mock.writtenBytes(Self.mockSocketFD), payload,
+            "Partial write must advance — total bytes delivered must equal payload")
+        XCTAssertEqual(mock.writeCallCount(Self.mockSocketFD), 2,
+            "Partial write must produce exactly 2 write calls (30 + 70)")
+    }
+
+    /// Non-EINTR write error on socket → relay reports `.socketError`.
+    func testRelay_socketWriteError_returnsSocketError() {
+        let mock = MockSyscalls()
+        let payload: [UInt8] = Array("x".utf8)
+        mock.enqueueReads(fd: Self.mockStdinFD, .bytes(payload), .eof)
+        mock.enqueueReads(fd: Self.mockSocketFD, .eof)
+        mock.enqueueWrites(fd: Self.mockSocketFD, .error(errno: EPIPE))
+
+        let reason = BridgeRelay.relay(
+            stdinFD: Self.mockStdinFD,
+            stdoutFD: Self.mockStdoutFD,
+            socketFD: Self.mockSocketFD,
+            readFn: mock.readFn,
+            writeFn: mock.writeFn
+        )
+        XCTAssertEqual(reason, .socketError,
+            "EPIPE on socket write must trigger reconnect path (.socketError)")
+    }
+
+    /// EINTR on socket read must retry rather than aborting the socket→stdout pump.
+    func testRelay_socketReadEINTR_retriesUntilEOF() {
+        let mock = MockSyscalls()
+        mock.enqueueReads(fd: Self.mockStdinFD, .eof)
+        mock.enqueueReads(fd: Self.mockSocketFD, .error(errno: EINTR), .error(errno: EINTR), .eof)
+
+        let reason = BridgeRelay.relay(
+            stdinFD: Self.mockStdinFD,
+            stdoutFD: Self.mockStdoutFD,
+            socketFD: Self.mockSocketFD,
+            readFn: mock.readFn,
+            writeFn: mock.writeFn
+        )
+        // stdin EOF happens first → exitReason = .stdinEOF
+        XCTAssertEqual(reason, .stdinEOF)
+        XCTAssertGreaterThanOrEqual(mock.readCallCount(Self.mockSocketFD), 3,
+            "Socket read EINTR must retry — expected at least 3 read calls")
+    }
+
+    /// EINTR on stdout write must retry without losing socket payload.
+    func testRelay_stdoutWriteEINTR_retriesAndCompletes() {
+        let mock = MockSyscalls()
+        let payload: [UInt8] = Array("payload".utf8)
+        mock.enqueueReads(fd: Self.mockStdinFD, .eof)
+        mock.enqueueReads(fd: Self.mockSocketFD, .bytes(payload), .eof)
+        mock.enqueueWrites(fd: Self.mockStdoutFD, .error(errno: EINTR), .full)
+
+        let reason = BridgeRelay.relay(
+            stdinFD: Self.mockStdinFD,
+            stdoutFD: Self.mockStdoutFD,
+            socketFD: Self.mockSocketFD,
+            readFn: mock.readFn,
+            writeFn: mock.writeFn
+        )
+        XCTAssertEqual(reason, .stdinEOF)
+        XCTAssertEqual(mock.writtenBytes(Self.mockStdoutFD), payload,
+            "All payload bytes must reach stdout after EINTR retry")
+        XCTAssertGreaterThanOrEqual(mock.writeCallCount(Self.mockStdoutFD), 2)
+    }
+
+    /// Partial-write advancement on stdout side mirrors the socket side.
+    func testRelay_stdoutPartialWrite_advancesBuffer() {
+        let mock = MockSyscalls()
+        let payload: [UInt8] = Array(repeating: 0x42, count: 50)
+        mock.enqueueReads(fd: Self.mockStdinFD, .eof)
+        mock.enqueueReads(fd: Self.mockSocketFD, .bytes(payload), .eof)
+        mock.enqueueWrites(fd: Self.mockStdoutFD, .partial(10), .partial(20), .full)
+
+        let reason = BridgeRelay.relay(
+            stdinFD: Self.mockStdinFD,
+            stdoutFD: Self.mockStdoutFD,
+            socketFD: Self.mockSocketFD,
+            readFn: mock.readFn,
+            writeFn: mock.writeFn
+        )
+        XCTAssertEqual(reason, .stdinEOF)
+        XCTAssertEqual(mock.writtenBytes(Self.mockStdoutFD), payload)
+        XCTAssertEqual(mock.writeCallCount(Self.mockStdoutFD), 3,
+            "10 + 20 + 20 = 50 bytes across 3 write calls")
+    }
+
+    /// `w == 0` from a write must `break` the inner loop without infinite-looping.
+    /// Documents the existing behavior: a zero-write drops the unsent tail and the
+    /// outer loop proceeds to the next read.
+    func testRelay_zeroByteWrite_breaksWithoutHang() {
+        let mock = MockSyscalls()
+        let payload: [UInt8] = Array("data".utf8)
+        mock.enqueueReads(fd: Self.mockStdinFD, .bytes(payload), .eof)
+        mock.enqueueReads(fd: Self.mockSocketFD, .eof)
+        mock.enqueueWrites(fd: Self.mockSocketFD, .zero)
+
+        let exp = expectation(description: "relay returns")
+        var reason: BridgeRelay.RelayExitReason = .socketError
+        DispatchQueue.global().async {
+            reason = BridgeRelay.relay(
+                stdinFD: Self.mockStdinFD,
+                stdoutFD: Self.mockStdoutFD,
+                socketFD: Self.mockSocketFD,
+                readFn: mock.readFn,
+                writeFn: mock.writeFn
+            )
+            exp.fulfill()
+        }
+        wait(for: [exp], timeout: 5.0)
+        XCTAssertEqual(reason, .stdinEOF,
+            "Zero-byte write must not hang — outer loop continues to next read (EOF)")
+        XCTAssertEqual(mock.writeCallCount(Self.mockSocketFD), 1,
+            "Zero-byte write must break the inner loop, not retry")
+    }
 }

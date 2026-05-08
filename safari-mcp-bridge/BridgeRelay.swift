@@ -210,8 +210,24 @@ enum BridgeRelay {
         return true
     }
 
+    /// Read syscall closure: matches `Darwin.read(_:_:_:)` shape. Mock by setting
+    /// thread-local `errno` before returning -1.
+    typealias ReadFn = (Int32, UnsafeMutableRawPointer, Int) -> Int
+
+    /// Write syscall closure: matches `Darwin.write(_:_:_:)` shape. Mock by setting
+    /// thread-local `errno` before returning -1.
+    typealias WriteFn = (Int32, UnsafeRawPointer, Int) -> Int
+
     /// Run the stdin↔socket relay. Returns the reason it stopped.
-    private static func relay(stdinFD: Int32, stdoutFD: Int32, socketFD fd: Int32) -> RelayExitReason {
+    /// `readFn`/`writeFn` are injectable for testing the EINTR-retry and
+    /// partial-write paths; defaults call the real syscalls.
+    static func relay(
+        stdinFD: Int32,
+        stdoutFD: Int32,
+        socketFD fd: Int32,
+        readFn: @escaping ReadFn = { Darwin.read($0, $1, $2) },
+        writeFn: @escaping WriteFn = { Darwin.write($0, $1, $2) }
+    ) -> RelayExitReason {
         let group = DispatchGroup()
         let lock = NSLock()
         var exitReason: RelayExitReason = .socketError // default if socket side dies
@@ -223,7 +239,7 @@ enum BridgeRelay {
             let buf = UnsafeMutablePointer<UInt8>.allocate(capacity: bufSize)
             defer { buf.deallocate() }
             while true {
-                let n = Darwin.read(stdinFD, buf, bufSize)
+                let n = readFn(stdinFD, buf, bufSize)
                 if n == 0 {
                     // EOF — stdin closed normally
                     lock.lock()
@@ -241,7 +257,7 @@ enum BridgeRelay {
                 }
                 var written = 0
                 while written < n {
-                    let w = Darwin.write(fd, buf.advanced(by: written), n - written)
+                    let w = writeFn(fd, buf.advanced(by: written), n - written)
                     if w < 0 {
                         if errno == EINTR { continue }
                         fputs("Bridge: write to socket failed: \(String(cString: strerror(errno)))\n", stderr)
@@ -267,7 +283,7 @@ enum BridgeRelay {
             let buf = UnsafeMutablePointer<UInt8>.allocate(capacity: bufSize)
             defer { buf.deallocate() }
             while true {
-                let n = Darwin.read(fd, buf, bufSize)
+                let n = readFn(fd, buf, bufSize)
                 if n == 0 {
                     // Socket closed — shutdown socket writes so the stdin→socket thread's
                     // next write(fd, ...) fails immediately with EPIPE instead of buffering.
@@ -286,7 +302,7 @@ enum BridgeRelay {
                 }
                 var written = 0
                 while written < n {
-                    let w = Darwin.write(stdoutFD, buf.advanced(by: written), n - written)
+                    let w = writeFn(stdoutFD, buf.advanced(by: written), n - written)
                     if w < 0 {
                         if errno == EINTR { continue }
                         fputs("Bridge: write to stdout failed: \(String(cString: strerror(errno)))\n", stderr)
