@@ -469,6 +469,126 @@ final class ToolRouterTests: XCTestCase {
         XCTAssertTrue(msg.contains("not found") || msg.contains("File not found") || msg.contains("security-scoped access"),
                       "Expected file error message, got: \(msg)")
     }
+
+    // MARK: - file_upload sandbox-prompt branches (PR #64 Finding #2)
+
+    /// Mock FAM whose needsAccessPrompt always returns true and requestAccess is configurable.
+    /// Used to drive the DispatchQueue.main.async loop branches that pre-stored bookmarks bypass.
+    private class MockFAMAlwaysNeedsPrompt: FileAccessManager {
+        var requestAccessReturn: Bool = true
+        var requestAccessCallCount = 0
+        var requestAccessPaths: [String] = []
+        init() { super.init(defaults: UserDefaults(suiteName: "test-fam-\(UUID())")!) }
+        override func needsAccessPrompt(for path: String) -> Bool { return true }
+        @MainActor override func requestAccess(for filePath: String) -> Bool {
+            requestAccessCallCount += 1
+            requestAccessPaths.append(filePath)
+            return requestAccessReturn
+        }
+    }
+
+    /// Mock FAM that tracks granted directories — needsAccessPrompt flips false once
+    /// requestAccess has been called for the path's parent dir. Drives the multi-dir loop case.
+    private class MockFAMTrackingGrants: FileAccessManager {
+        var grantedDirs: Set<String> = []
+        var requestAccessCallCount = 0
+        init() { super.init(defaults: UserDefaults(suiteName: "test-fam-\(UUID())")!) }
+        override func needsAccessPrompt(for path: String) -> Bool {
+            let dir = (path as NSString).deletingLastPathComponent
+            return !grantedDirs.contains(dir)
+        }
+        @MainActor override func requestAccess(for filePath: String) -> Bool {
+            requestAccessCallCount += 1
+            let dir = (filePath as NSString).deletingLastPathComponent
+            grantedDirs.insert(dir)
+            return true
+        }
+    }
+
+    /// Run handler and wait for the main-queue async block to drain.
+    /// Asserting after a follow-up `DispatchQueue.main.async` guarantees the handler's
+    /// dispatched block has executed and any sendError/forward call has landed.
+    private func runFileUploadAndWaitForMain(arguments: [String: Any], router: ToolRouter, mock: MockMCPSocketServer, id: Int) {
+        let data = try! JSONSerialization.data(withJSONObject: [
+            "jsonrpc": "2.0", "id": id,
+            "method": "tools/call",
+            "params": ["name": "file_upload", "arguments": arguments]
+        ])
+        router.socketServer(mock, didReceiveMessage: data, from: "client1")
+        let exp = expectation(description: "main queue drained")
+        DispatchQueue.main.async { exp.fulfill() }
+        wait(for: [exp], timeout: 2.0)
+    }
+
+    /// Branch 1: safety limit fires when grants never satisfy needsAccessPrompt.
+    /// Mock keeps reporting "needs prompt" and reports "granted" on every call, so the
+    /// while-loop never makes progress — attempts exceeds paths.count + 1 and the
+    /// safety-limit error is sent.
+    func testHandleFileUpload_safetyLimitFires_whenGrantsNeverSatisfyNeed() {
+        let fam = MockFAMAlwaysNeedsPrompt()
+        fam.requestAccessReturn = true
+        let mock = MockMCPSocketServer()
+        router = ToolRouter(screenshotService: ScreenshotService(), gifService: GifService(),
+                            fileService: FileService(), fileAccessManager: fam)
+        router.setServer(mock)
+
+        runFileUploadAndWaitForMain(
+            arguments: ["paths": ["/tmp/a.txt"], "ref": "upload-ref"],
+            router: router, mock: mock, id: 100
+        )
+
+        let response = mock.lastSentJSON()
+        XCTAssertNotNil(response?["error"], "Expected error response when safety limit fires")
+        let msg = (response?["error"] as? [String: Any])?["message"] as? String ?? ""
+        XCTAssertTrue(msg.contains("File access could not be granted"),
+                      "Expected safety-limit error, got: \(msg)")
+        // Loop bound: attempts > paths.count + 1 → fires at attempts=3 for paths.count=1.
+        // requestAccess called twice before the third iteration trips the guard (no requestAccess
+        // call on the iteration that triggers the limit — the check happens before the call).
+        XCTAssertEqual(fam.requestAccessCallCount, 2, "Expected 2 grants before safety limit fired")
+    }
+
+    /// Branch 2: requestAccess returns false (user cancelled NSOpenPanel) → "user cancelled" error.
+    func testHandleFileUpload_userCancelsPrompt_sendsCancelledError() {
+        let fam = MockFAMAlwaysNeedsPrompt()
+        fam.requestAccessReturn = false
+        let mock = MockMCPSocketServer()
+        router = ToolRouter(screenshotService: ScreenshotService(), gifService: GifService(),
+                            fileService: FileService(), fileAccessManager: fam)
+        router.setServer(mock)
+
+        runFileUploadAndWaitForMain(
+            arguments: ["paths": ["/tmp/a.txt"], "ref": "upload-ref"],
+            router: router, mock: mock, id: 101
+        )
+
+        let response = mock.lastSentJSON()
+        XCTAssertNotNil(response?["error"], "Expected error response when user cancels prompt")
+        let msg = (response?["error"] as? [String: Any])?["message"] as? String ?? ""
+        XCTAssertTrue(msg.contains("user cancelled"),
+                      "Expected cancelled-prompt error, got: \(msg)")
+        XCTAssertEqual(fam.requestAccessCallCount, 1, "Expected single grant attempt before cancel exit")
+    }
+
+    /// Branch 3: paths span two distinct directories → loop iterates twice (one grant per dir).
+    /// After the loop succeeds, readAndForwardFiles runs and produces its own (sandbox) error,
+    /// but the loop iteration count proves the multi-dir path was exercised.
+    func testHandleFileUpload_multipleDirectories_loopIteratesPerDir() {
+        let fam = MockFAMTrackingGrants()
+        let mock = MockMCPSocketServer()
+        router = ToolRouter(screenshotService: ScreenshotService(), gifService: GifService(),
+                            fileService: FileService(), fileAccessManager: fam)
+        router.setServer(mock)
+
+        runFileUploadAndWaitForMain(
+            arguments: ["paths": ["/tmp/dirA/a.txt", "/tmp/dirB/b.txt"], "ref": "upload-ref"],
+            router: router, mock: mock, id: 102
+        )
+
+        XCTAssertEqual(fam.requestAccessCallCount, 2, "Expected one grant per distinct directory")
+        XCTAssertEqual(fam.grantedDirs, ["/tmp/dirA", "/tmp/dirB"],
+                       "Expected loop to request access for both parent directories")
+    }
 }
 
 // MARK: - ToolRouterGifHookTests

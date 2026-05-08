@@ -1,7 +1,7 @@
 {
     "manifest_version": 2,
     "name": "Claude in Safari",
-    "version": "1.2.10",
+    "version": "1.2.11",
     "description": "Claude browser automation for Safari — control Safari from Claude Code CLI.",
 
     "permissions": [

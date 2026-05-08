@@ -5,7 +5,7 @@ import AppKit
 /// Manages security-scoped bookmarks for sandbox-compatible file access.
 /// Presents NSOpenPanel when directory access has not yet been granted.
 /// Stores bookmarks in UserDefaults for persistence across launches.
-final class FileAccessManager {
+class FileAccessManager {
 
     private let defaults: UserDefaults
     private static let bookmarkKeyPrefix = "FileAccessBookmark:"
