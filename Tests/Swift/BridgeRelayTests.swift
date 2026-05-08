@@ -515,4 +515,33 @@ final class BridgeRelayTests: XCTestCase {
             "on a blocking fd is undefined — break avoids an infinite loop at the cost of " +
             "dropping the unwritten tail")
     }
+
+    /// Symmetric to `testRelay_zeroByteWrite_breaksWithoutHang` but on the
+    /// socket→stdout side: `w == 0` from a stdout write must break, not loop.
+    func testRelay_zeroByteStdoutWrite_breaksWithoutHang() {
+        let mock = MockSyscalls()
+        let payload: [UInt8] = Array("data".utf8)
+        mock.enqueueReads(fd: Self.mockStdinFD, .eof)
+        mock.enqueueReads(fd: Self.mockSocketFD, .bytes(payload), .eof)
+        mock.enqueueWrites(fd: Self.mockStdoutFD, .zero)
+
+        let exp = expectation(description: "relay returns")
+        var reason: BridgeRelay.RelayExitReason = .socketError
+        DispatchQueue.global().async {
+            reason = BridgeRelay.relay(
+                stdinFD: Self.mockStdinFD,
+                stdoutFD: Self.mockStdoutFD,
+                socketFD: Self.mockSocketFD,
+                readFn: mock.readFn,
+                writeFn: mock.writeFn
+            )
+            exp.fulfill()
+        }
+        wait(for: [exp], timeout: 5.0)
+        XCTAssertEqual(reason, .stdinEOF,
+            "Zero-byte stdout write must not hang — outer loop continues to next read (EOF)")
+        XCTAssertEqual(mock.writeCallCount(Self.mockStdoutFD), 1,
+            "Zero-byte stdout write must break the inner loop (not retry): same POSIX-undefined " +
+            "trade-off as the socket-side zero-write.")
+    }
 }
