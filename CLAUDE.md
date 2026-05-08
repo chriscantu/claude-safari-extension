@@ -22,7 +22,7 @@ make doctor               # Full diagnostic if something seems off
 - Feature workflow: Spec → Test → Implement → Verify structure
 - **One thing at a time**: always work on a single feature or fix per session; create a dedicated feature branch (`git checkout -b fix/...` or `feature/...`) before touching any code
 - **Implementation plans** live in `docs/plans/` — one file per feature, named `YYYY-MM-DD-<feature>.md`
-- **Version sync**: every PR must bump the version across all 4 sources. Use `scripts/bump-version.sh <new-version>`. CI enforces the match.
+- **Version sync**: every PR must bump the version across all 3 sources (both `Info.plist`s + `manifest.json`). Use `scripts/bump-version.sh <new-version>`. CI enforces the match.
 
 ## Build After Changes
 | What changed | Command |
@@ -79,7 +79,7 @@ Abbreviated checklist: new file in `tools/`, register via `globalThis.registerTo
 
 ## CI Pipeline
 What gets checked on every PR:
-1. **Version sync** — all 4 sources match, tag must not already exist
+1. **Version sync** — all 3 sources match, tag must not already exist
 2. **JS unit tests** — `npm test`
 3. **Injected script syntax** — `node scripts/validate-injected-scripts.js`
 4. **Xcode build** — unsigned build for CI

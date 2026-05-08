@@ -11,11 +11,13 @@ function loadModule() {
     globalThis.registerTool = undefined;
     globalThis.executeTool = undefined;
     globalThis.classifyExecuteScriptError = undefined;
+    globalThis.TAB_GONE_PATTERN = undefined;
     require("../../ClaudeInSafari Extension/Resources/tools/tool-registry.js");
     return {
         registerTool: globalThis.registerTool,
         executeTool: globalThis.executeTool,
         classifyExecuteScriptError: globalThis.classifyExecuteScriptError,
+        TAB_GONE_PATTERN: globalThis.TAB_GONE_PATTERN,
     };
 }
 
@@ -27,6 +29,19 @@ describe("tool-registry", () => {
         const { registerTool, executeTool } = loadModule();
         expect(typeof registerTool).toBe("function");
         expect(typeof executeTool).toBe("function");
+    });
+
+    // ── Cross-module exports ──────────────────────────────────────────────────
+
+    test("exports TAB_GONE_PATTERN on globalThis for tabs-manager.js consumption", () => {
+        const { TAB_GONE_PATTERN } = loadModule();
+        expect(TAB_GONE_PATTERN).toBeInstanceOf(RegExp);
+        // Definitive tab-gone shapes match.
+        expect(TAB_GONE_PATTERN.test("No tab with id: 7")).toBe(true);
+        expect(TAB_GONE_PATTERN.test("invalid tab id")).toBe(true);
+        // Transient errors do NOT match — they must be preserved by callers.
+        expect(TAB_GONE_PATTERN.test("Extension context invalidated")).toBe(false);
+        expect(TAB_GONE_PATTERN.test("Permission denied")).toBe(false);
     });
 
     test("multiple tools can be registered independently", async () => {

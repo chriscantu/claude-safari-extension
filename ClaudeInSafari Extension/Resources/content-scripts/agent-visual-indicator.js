@@ -223,12 +223,16 @@
 
   chatBtn.addEventListener('click', function () {
     // browser.tabs is unavailable in content scripts — route through background.
-    browser.runtime.sendMessage({ type: 'OPEN_CLAUDE_TAB' }).catch(function () {});
+    browser.runtime.sendMessage({ type: 'OPEN_CLAUDE_TAB' }).catch(function (err) {
+      console.warn('agent-indicator: failed to open Claude tab via background:', err);
+    });
   });
 
   dismissBtn.addEventListener('click', function () {
     hideStaticIndicator();
-    browser.runtime.sendMessage({ type: 'DISMISS_STATIC_INDICATOR_FOR_GROUP' }).catch(function () {});
+    browser.runtime.sendMessage({ type: 'DISMISS_STATIC_INDICATOR_FOR_GROUP' }).catch(function () {
+      // Background page suspended — indicator already hidden locally above
+    });
   });
 
   // ── Message listener ──────────────────────────────────────────────────────

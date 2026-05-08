@@ -269,7 +269,7 @@ final class PermissionMonitor {
 
 - [ ] **Step 4: Verify the file is picked up automatically**
 
-`project.yml` uses a directory-level source glob (`path: ClaudeInSafari`), so any `.swift` file placed under `ClaudeInSafari/App/` is included in the app target automatically — no explicit file registration is needed. Do **not** add it manually; a duplicate source entry will cause a build error.
+The checked-in `ClaudeInSafari.xcodeproj` uses an explicit file list (not a folder reference). New `.swift` files under `ClaudeInSafari/App/` must be added to the app target via Xcode (File → Add Files to "ClaudeInSafari", or drag into the project navigator with "Add to target: ClaudeInSafari" checked). A missing target membership shows up as "Cannot find type" link errors at build time.
 
 > **Note:** The extension bundle ID `com.chriscantu.claudeinsafari.extension` must match the actual extension target. Verify in Xcode → ClaudeInSafari Extension target → General → Bundle Identifier if you suspect it has changed.
 
@@ -1303,7 +1303,7 @@ extension OnboardingWindowController: NSWindowDelegate {
 }
 ```
 
-- [ ] **Step 2: Add `OnboardingWindowController.swift` to the app target** (same as Task 4, Step 4 — `project.yml` dir-glob picks it up automatically)
+- [ ] **Step 2: Add `OnboardingWindowController.swift` to the app target** (same as Task 4, Step 4 — must be added to the app target explicitly via Xcode; `.xcodeproj` is an explicit file list, not a folder reference)
 
 - [ ] **Step 3: Build — no unit tests here, verify it compiles**
 

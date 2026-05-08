@@ -827,6 +827,43 @@ final class ToolRouterDispatchTests: XCTestCase {
         XCTAssertNil(router.parseZoomRegion([:]))
     }
 
+    // MARK: - parseTabId
+
+    func testParseTabId_int_returnsValue() {
+        XCTAssertEqual(router.parseTabId(["tabId": 42]), 42)
+    }
+
+    func testParseTabId_double_truncatesToInt() {
+        XCTAssertEqual(router.parseTabId(["tabId": 7.9]), 7)
+    }
+
+    func testParseTabId_missing_returnsNil() {
+        XCTAssertNil(router.parseTabId([:]))
+    }
+
+    // JSONSerialization on the native bridge can deliver integer 1 as __NSCFBoolean
+    // (kCFBooleanTrue), which fails `as? Int` and previously caused tabId to fall
+    // through to -1, silently targeting the wrong tab. parseTabId must handle this.
+    func testParseTabId_cfBoolean_returnsIntValue() {
+        let arguments: [String: Any] = ["tabId": kCFBooleanTrue as Any]
+        XCTAssertEqual(router.parseTabId(arguments), 1,
+                       "parseTabId must resolve kCFBooleanTrue to Int 1, not nil")
+    }
+
+    func testParseTabId_nsNumber_returnsIntValue() {
+        let arguments: [String: Any] = ["tabId": NSNumber(value: 5)]
+        XCTAssertEqual(router.parseTabId(arguments), 5)
+    }
+
+    // kCFBooleanFalse bridges through the NSNumber branch with intValue == 0.
+    // Documenting this explicitly: `tabId: false` resolves to 0 (not nil, not -1).
+    // Both 0 and -1 are invalid Safari tab IDs (Safari tabs start at 1), but they
+    // are different dictionary keys for GIF recording — keep the behaviour pinned.
+    func testParseTabId_cfBooleanFalse_returnsZero() {
+        let arguments: [String: Any] = ["tabId": kCFBooleanFalse as Any]
+        XCTAssertEqual(router.parseTabId(arguments), 0)
+    }
+
     // MARK: - Startup Cleanup (Spec 023 H1 + M1)
 
     func testPerformStartupCleanup_truncatesQueue() throws {

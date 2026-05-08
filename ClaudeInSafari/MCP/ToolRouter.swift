@@ -465,7 +465,7 @@ class ToolRouter: MCPSocketServerDelegate {
     // MARK: - Native Screenshot / Zoom
 
     private func handleScreenshotAction(action: String, arguments: [String: Any], id: Any?, clientId: String) {
-        let tabIdOpt = arguments["tabId"] as? Int
+        let tabIdOpt = parseTabId(arguments)
         let tabId = tabIdOpt ?? -1
         if action == "screenshot" {
             screenshotService.captureScreenshot(tabId: tabIdOpt) { [weak self] result in
@@ -533,7 +533,7 @@ class ToolRouter: MCPSocketServerDelegate {
             sendError(id: id, code: -32000, message: "action parameter is required", to: clientId)
             return
         }
-        let tabId = (arguments["tabId"] as? Int) ?? -1
+        let tabId = parseTabId(arguments) ?? -1
 
         switch action {
         case "start_recording":
@@ -699,6 +699,16 @@ class ToolRouter: MCPSocketServerDelegate {
             }
             if converted.count == 4 { return (converted[0], converted[1], converted[2], converted[3]) }
         }
+        return nil
+    }
+
+    /// Parse `tabId` from tool arguments, tolerating Int, Double, or NSNumber
+    /// (including NSNumber(bool:) which fails `as? Int`). Internal for unit tests.
+    func parseTabId(_ arguments: [String: Any]) -> Int? {
+        guard let raw = arguments["tabId"] else { return nil }
+        if let i = raw as? Int { return i }
+        if let d = raw as? Double { return Int(d) }
+        if let n = raw as? NSNumber { return n.intValue }
         return nil
     }
 
@@ -1060,7 +1070,7 @@ class ToolRouter: MCPSocketServerDelegate {
             }
             sendResult(id: id, result: ["content": contentDicts], to: clientId)
             // Post-action hook: fire-and-forget GIF frame capture on success only
-            let tabId = (arguments["tabId"] as? Int) ?? -1
+            let tabId = parseTabId(arguments) ?? -1
             let action = (arguments["action"] as? String) ?? toolName
             let coordinate = parseCoordinate(arguments["coordinate"])
             maybeAddGifFrame(tabId: tabId, action: action, coordinate: coordinate)

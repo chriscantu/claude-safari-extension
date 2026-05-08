@@ -4,6 +4,14 @@
  */
 const toolHandlers = {};
 
+/**
+ * Definitive "tab is gone" rejection shape from `browser.tabs.get` /
+ * `browser.tabs.executeScript`. Shared with `tabs-manager.js` (and any
+ * future probe site) via `globalThis.TAB_GONE_PATTERN` so that the
+ * transient-vs-gone classification stays consistent across modules.
+ */
+const TAB_GONE_PATTERN = /no tab with id|invalid tab/i;
+
 function registerTool(name, handler) {
     toolHandlers[name] = handler;
 }
@@ -75,7 +83,7 @@ function classifyExecuteScriptError(toolName, realTabId, err) {
             `Navigate to an http/https page first. (${msg})`
         );
     }
-    if (/no tab with id|invalid tab/i.test(msg)) {
+    if (TAB_GONE_PATTERN.test(msg)) {
         return new Error(
             `${toolName}: tab ${realTabId} no longer exists. ` +
             `Use tabs_context_mcp to list available tabs. (${msg})`
@@ -177,4 +185,5 @@ if (typeof globalThis !== "undefined") {
     globalThis.executeTool = executeTool;
     globalThis.classifyExecuteScriptError = classifyExecuteScriptError;
     globalThis.executeScriptWithTabGuard = executeScriptWithTabGuard;
+    globalThis.TAB_GONE_PATTERN = TAB_GONE_PATTERN;
 }

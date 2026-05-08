@@ -386,7 +386,7 @@ test-swift: ## Run Swift unit tests
 		-project $(PROJECT) \
 		-scheme $(TEST_SCHEME) \
 		-destination "$(DEST)" \
-		CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO \
+		CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO \
 		-quiet 2>&1 | tail -5
 
 test-all: test test-swift ## Run all tests (JS + Swift)

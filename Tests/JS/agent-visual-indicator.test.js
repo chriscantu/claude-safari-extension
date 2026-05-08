@@ -174,6 +174,23 @@ describe('agent-visual-indicator content script', function () {
     await Promise.resolve(); // drain rejection microtask (prevent unhandled rejection warning)
   });
 
+  // T16 - chat button rejection: console.warn emitted with error context (no local fallback)
+  test('T16: chat button click warns to console when sendMessage rejects', async function () {
+    var warnSpy = jest.spyOn(console, 'warn').mockImplementation(function () {});
+    var err = new Error('Extension context invalid');
+    var result = loadIndicator({
+      sendMessageImpl: function () { return Promise.reject(err); },
+    });
+    var chatButton = result.host.shadowRoot.querySelector('#claude-static-chat-button');
+    chatButton.click();
+    await Promise.resolve(); // drain rejection microtask
+    expect(warnSpy).toHaveBeenCalledWith(
+      'agent-indicator: failed to open Claude tab via background:',
+      err
+    );
+    warnSpy.mockRestore();
+  });
+
   // T13 - heartbeat: success=false hides static indicator
   test('T13: heartbeat response success=false hides static indicator', async function () {
     jest.useFakeTimers();
