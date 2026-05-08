@@ -268,8 +268,9 @@ final class BridgeRelayTests: XCTestCase {
             writeFn: mock.writeFn
         )
         XCTAssertEqual(reason, .stdinEOF)
-        XCTAssertGreaterThanOrEqual(mock.readCallCount(Self.mockStdinFD), 3,
-            "EINTR must retry — expected at least 3 read calls (2 EINTR + 1 EOF)")
+        XCTAssertEqual(mock.readCallCount(Self.mockStdinFD), 3,
+            "EINTR must retry exactly the queued ops: 2 EINTR + 1 EOF = 3 reads. " +
+            "A higher count would indicate over-retry past EOF.")
     }
 
     /// EINTR on socket write must `continue` — bytes must still be delivered after retry.
@@ -337,6 +338,59 @@ final class BridgeRelayTests: XCTestCase {
             "EPIPE on socket write must trigger reconnect path (.socketError)")
     }
 
+    /// Non-EINTR stdin read error → relay treats stdin as done, returns `.stdinEOF`.
+    /// Covers the `n < 0 && errno != EINTR` branch in the stdin→socket pump
+    /// (BridgeRelay.swift ~line 244).
+    func testRelay_stdinReadError_returnsStdinEOF() {
+        let mock = MockSyscalls()
+        mock.enqueueReads(fd: Self.mockStdinFD, .error(errno: EBADF))
+        mock.enqueueReads(fd: Self.mockSocketFD, .eof)
+
+        let reason = BridgeRelay.relay(
+            stdinFD: Self.mockStdinFD,
+            stdoutFD: Self.mockStdoutFD,
+            socketFD: Self.mockSocketFD,
+            readFn: mock.readFn,
+            writeFn: mock.writeFn
+        )
+        XCTAssertEqual(reason, .stdinEOF,
+            "Non-EINTR stdin read error must be treated as client done (.stdinEOF), " +
+            "not as a socket failure")
+    }
+
+    /// Non-EINTR socket read error → relay reports `.socketError` (default).
+    /// Covers the `n < 0 && errno != EINTR` branch in the socket→stdout pump
+    /// (BridgeRelay.swift ~line 288). The socket thread shutdowns and breaks
+    /// without setting exitReason, leaving the `.socketError` default that
+    /// triggers the outer reconnect loop.
+    func testRelay_socketReadError_returnsSocketError() {
+        let mock = MockSyscalls()
+        // Stdin queue is empty: when the stdin thread reads, it gets the default
+        // EOF (0), sets exitReason = .stdinEOF. We need the socket-error path to
+        // win the race for this test to be meaningful — but exitReason is set
+        // under lock and last-writer-wins is undefined. So instead, hold stdin
+        // open by enqueueing nothing for it and ensure the socket thread is the
+        // only one that mutates state. The test below does that by NOT enqueuing
+        // any stdin ops (default returns 0/EOF immediately) AND accepting either
+        // exit reason — the property under test is "non-EINTR read error does
+        // not retry," asserted via call count.
+        mock.enqueueReads(fd: Self.mockSocketFD, .error(errno: ECONNRESET))
+
+        let reason = BridgeRelay.relay(
+            stdinFD: Self.mockStdinFD,
+            stdoutFD: Self.mockStdoutFD,
+            socketFD: Self.mockSocketFD,
+            readFn: mock.readFn,
+            writeFn: mock.writeFn
+        )
+        // Either exit reason is acceptable depending on which thread settles
+        // first. The property under test is "non-EINTR error does not retry."
+        XCTAssertTrue(reason == .socketError || reason == .stdinEOF,
+            "Either reason is acceptable; non-EINTR semantics asserted via call count")
+        XCTAssertEqual(mock.readCallCount(Self.mockSocketFD), 1,
+            "Non-EINTR read error must NOT retry — exactly 1 read call expected")
+    }
+
     /// EINTR on socket read must retry rather than aborting the socket→stdout pump.
     func testRelay_socketReadEINTR_retriesUntilEOF() {
         let mock = MockSyscalls()
@@ -357,8 +411,9 @@ final class BridgeRelayTests: XCTestCase {
         // this test robust against scheduler reordering.
         XCTAssertTrue(reason == .stdinEOF || reason == .socketError,
             "Either exit reason is acceptable; this test asserts retry behavior, not ordering")
-        XCTAssertGreaterThanOrEqual(mock.readCallCount(Self.mockSocketFD), 3,
-            "Socket read EINTR must retry — expected at least 3 read calls (2 EINTR + 1 EOF)")
+        XCTAssertEqual(mock.readCallCount(Self.mockSocketFD), 3,
+            "Socket read EINTR must retry exactly the queued ops: 2 EINTR + 1 EOF = 3 reads. " +
+            "A higher count would indicate over-retry past EOF.")
     }
 
     /// EINTR on stdout write must retry without losing socket payload.
