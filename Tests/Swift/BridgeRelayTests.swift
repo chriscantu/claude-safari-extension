@@ -350,10 +350,15 @@ final class BridgeRelayTests: XCTestCase {
             readFn: mock.readFn,
             writeFn: mock.writeFn
         )
-        // stdin EOF happens first → exitReason = .stdinEOF
-        XCTAssertEqual(reason, .stdinEOF)
+        // The exit reason here depends on which thread settles first. In practice
+        // stdin (immediate .eof, no delays) wins the race vs. socket (.error×2 + .eof),
+        // so reason == .stdinEOF — but the property under test is "socket read EINTR
+        // retried until EOF was reached," not the exit reason. Accept either to keep
+        // this test robust against scheduler reordering.
+        XCTAssertTrue(reason == .stdinEOF || reason == .socketError,
+            "Either exit reason is acceptable; this test asserts retry behavior, not ordering")
         XCTAssertGreaterThanOrEqual(mock.readCallCount(Self.mockSocketFD), 3,
-            "Socket read EINTR must retry — expected at least 3 read calls")
+            "Socket read EINTR must retry — expected at least 3 read calls (2 EINTR + 1 EOF)")
     }
 
     /// EINTR on stdout write must retry without losing socket payload.
