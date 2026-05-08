@@ -358,22 +358,23 @@ final class BridgeRelayTests: XCTestCase {
             "not as a socket failure")
     }
 
-    /// Non-EINTR socket read error → relay reports `.socketError` (default).
-    /// Covers the `n < 0 && errno != EINTR` branch in the socket→stdout pump
-    /// (BridgeRelay.swift ~line 288). The socket thread shutdowns and breaks
-    /// without setting exitReason, leaving the `.socketError` default that
-    /// triggers the outer reconnect loop.
-    func testRelay_socketReadError_returnsSocketError() {
+    /// Non-EINTR socket read error must NOT retry. Covers the
+    /// `n < 0 && errno != EINTR` branch in the socket→stdout pump
+    /// (BridgeRelay.swift ~line 297).
+    ///
+    /// Determinism note: both threads must `group.leave()` before `relay()`
+    /// returns. The stdin thread (default-EOF) always sets
+    /// `exitReason = .stdinEOF` under lock before leaving; the socket thread
+    /// on a non-EINTR read error does NOT touch `exitReason` (it just
+    /// shutdowns and breaks). So the deterministic outcome is `.stdinEOF`,
+    /// even though the original cause was a socket failure.
+    ///
+    /// In production, the surrounding scenario differs — stdin is held open
+    /// by the live MCP client — so the socket-error path leaves the
+    /// `.socketError` default and triggers the outer reconnect loop. This
+    /// test isolates only the no-retry property.
+    func testRelay_socketReadError_doesNotRetry() {
         let mock = MockSyscalls()
-        // Stdin queue is empty: when the stdin thread reads, it gets the default
-        // EOF (0), sets exitReason = .stdinEOF. We need the socket-error path to
-        // win the race for this test to be meaningful — but exitReason is set
-        // under lock and last-writer-wins is undefined. So instead, hold stdin
-        // open by enqueueing nothing for it and ensure the socket thread is the
-        // only one that mutates state. The test below does that by NOT enqueuing
-        // any stdin ops (default returns 0/EOF immediately) AND accepting either
-        // exit reason — the property under test is "non-EINTR read error does
-        // not retry," asserted via call count.
         mock.enqueueReads(fd: Self.mockSocketFD, .error(errno: ECONNRESET))
 
         let reason = BridgeRelay.relay(
@@ -383,10 +384,9 @@ final class BridgeRelayTests: XCTestCase {
             readFn: mock.readFn,
             writeFn: mock.writeFn
         )
-        // Either exit reason is acceptable depending on which thread settles
-        // first. The property under test is "non-EINTR error does not retry."
-        XCTAssertTrue(reason == .socketError || reason == .stdinEOF,
-            "Either reason is acceptable; non-EINTR semantics asserted via call count")
+        XCTAssertEqual(reason, .stdinEOF,
+            "Stdin thread sets .stdinEOF under lock before leaving; socket-error " +
+            "path does not touch exitReason. See doc-comment for production semantics.")
         XCTAssertEqual(mock.readCallCount(Self.mockSocketFD), 1,
             "Non-EINTR read error must NOT retry — exactly 1 read call expected")
     }
@@ -404,13 +404,11 @@ final class BridgeRelayTests: XCTestCase {
             readFn: mock.readFn,
             writeFn: mock.writeFn
         )
-        // The exit reason here depends on which thread settles first. In practice
-        // stdin (immediate .eof, no delays) wins the race vs. socket (.error×2 + .eof),
-        // so reason == .stdinEOF — but the property under test is "socket read EINTR
-        // retried until EOF was reached," not the exit reason. Accept either to keep
-        // this test robust against scheduler reordering.
-        XCTAssertTrue(reason == .stdinEOF || reason == .socketError,
-            "Either exit reason is acceptable; this test asserts retry behavior, not ordering")
+        // Deterministic: stdin thread sets `.stdinEOF` under lock before leaving;
+        // the socket thread on EOF after EINTR retries does not touch exitReason
+        // (it just shutdowns and breaks). Both threads must `group.leave()` before
+        // `relay()` returns, so the final value is `.stdinEOF`.
+        XCTAssertEqual(reason, .stdinEOF)
         XCTAssertEqual(mock.readCallCount(Self.mockSocketFD), 3,
             "Socket read EINTR must retry exactly the queued ops: 2 EINTR + 1 EOF = 3 reads. " +
             "A higher count would indicate over-retry past EOF.")
@@ -437,9 +435,15 @@ final class BridgeRelayTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(mock.writeCallCount(Self.mockStdoutFD), 2)
     }
 
-    /// Non-EINTR stdout write error → relay reports `.socketError`.
-    /// Covers the `w < 0 && errno != EINTR` branch in the socket→stdout pump.
-    func testRelay_stdoutWriteError_returnsSocketError() {
+    /// Non-EINTR stdout write error must NOT retry. Covers the
+    /// `w < 0 && errno != EINTR` branch in the socket→stdout pump.
+    ///
+    /// Determinism note: same as `testRelay_socketReadError_doesNotRetry` —
+    /// the stdin thread always sets `.stdinEOF` before leaving and the
+    /// stdout-write-error path does not touch `exitReason`, so the
+    /// deterministic outcome is `.stdinEOF`. In production with stdin held
+    /// open the path leaves the `.socketError` default and reconnects.
+    func testRelay_stdoutWriteError_doesNotRetry() {
         let mock = MockSyscalls()
         let payload: [UInt8] = Array("z".utf8)
         mock.enqueueReads(fd: Self.mockStdinFD, .eof)
@@ -453,13 +457,9 @@ final class BridgeRelayTests: XCTestCase {
             readFn: mock.readFn,
             writeFn: mock.writeFn
         )
-        // stdin thread sees EOF and may set .stdinEOF before the socket thread
-        // reaches the stdout-write error path — and the stdout-write error path
-        // does not touch exitReason (leaves the .socketError default). Either
-        // outcome is correct semantically; the property under test is "non-EINTR
-        // write error does not retry," asserted via call count.
-        XCTAssertTrue(reason == .socketError || reason == .stdinEOF,
-            "Either reason is acceptable; non-EINTR semantics asserted via call count")
+        XCTAssertEqual(reason, .stdinEOF,
+            "Stdin thread sets .stdinEOF under lock before leaving; stdout-write-error " +
+            "path does not touch exitReason. See doc-comment for production semantics.")
         XCTAssertEqual(mock.writeCallCount(Self.mockStdoutFD), 1,
             "Non-EINTR stdout write error must NOT retry — exactly 1 write call expected")
     }

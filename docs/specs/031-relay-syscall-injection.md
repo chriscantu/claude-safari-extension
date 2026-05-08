@@ -63,11 +63,12 @@ syscall semantics.
 | 5 | `testRelay_socketPartialWrite_advancesBuffer` | socket partial-write advancement (~L242-257) |
 | 6 | `testRelay_socketWriteError_returnsSocketError` | socket non-EINTR write error → `.socketError` |
 | 7 | `testRelay_socketReadEINTR_retriesUntilEOF` | socket read EINTR retry (~L282) |
-| 8 | `testRelay_socketReadError_returnsSocketError` | socket non-EINTR read error (~L297) |
+| 8 | `testRelay_socketReadError_doesNotRetry` | socket non-EINTR read error (~L297) |
 | 9 | `testRelay_stdoutWriteEINTR_retriesAndCompletes` | stdout write EINTR retry (~L307) |
-| 10 | `testRelay_stdoutWriteError_returnsSocketError` | stdout non-EINTR write error |
+| 10 | `testRelay_stdoutWriteError_doesNotRetry` | stdout non-EINTR write error |
 | 11 | `testRelay_stdoutPartialWrite_advancesBuffer` | stdout partial-write advancement (~L304-315) |
-| 12 | `testRelay_zeroByteWrite_breaksWithoutHang` | `w == 0` break — no infinite loop |
+| 12 | `testRelay_zeroByteWrite_breaksWithoutHang` | `w == 0` break on socket — no infinite loop |
+| 13 | `testRelay_zeroByteStdoutWrite_breaksWithoutHang` | `w == 0` break on stdout — no infinite loop |
 
 EINTR retry tests assert exact call counts (`== 3`) so an over-retry past EOF
 fails the test. Partial-write tests assert exact call counts and cumulative
