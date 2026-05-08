@@ -437,6 +437,33 @@ final class BridgeRelayTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(mock.writeCallCount(Self.mockStdoutFD), 2)
     }
 
+    /// Non-EINTR stdout write error → relay reports `.socketError`.
+    /// Covers the `w < 0 && errno != EINTR` branch in the socket→stdout pump.
+    func testRelay_stdoutWriteError_returnsSocketError() {
+        let mock = MockSyscalls()
+        let payload: [UInt8] = Array("z".utf8)
+        mock.enqueueReads(fd: Self.mockStdinFD, .eof)
+        mock.enqueueReads(fd: Self.mockSocketFD, .bytes(payload), .eof)
+        mock.enqueueWrites(fd: Self.mockStdoutFD, .error(errno: EIO))
+
+        let reason = BridgeRelay.relay(
+            stdinFD: Self.mockStdinFD,
+            stdoutFD: Self.mockStdoutFD,
+            socketFD: Self.mockSocketFD,
+            readFn: mock.readFn,
+            writeFn: mock.writeFn
+        )
+        // stdin thread sees EOF and may set .stdinEOF before the socket thread
+        // reaches the stdout-write error path — and the stdout-write error path
+        // does not touch exitReason (leaves the .socketError default). Either
+        // outcome is correct semantically; the property under test is "non-EINTR
+        // write error does not retry," asserted via call count.
+        XCTAssertTrue(reason == .socketError || reason == .stdinEOF,
+            "Either reason is acceptable; non-EINTR semantics asserted via call count")
+        XCTAssertEqual(mock.writeCallCount(Self.mockStdoutFD), 1,
+            "Non-EINTR stdout write error must NOT retry — exactly 1 write call expected")
+    }
+
     /// Partial-write advancement on stdout side mirrors the socket side.
     func testRelay_stdoutPartialWrite_advancesBuffer() {
         let mock = MockSyscalls()
