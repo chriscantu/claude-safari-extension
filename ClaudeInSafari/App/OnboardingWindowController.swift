@@ -281,23 +281,14 @@ final class OnboardingWindowController: NSWindowController {
     }
 
     @objc private func openSafariSettings() {
-        // Try SFSafariApplication.showPreferencesForExtension first — opens Safari Settings
-        // directly to the Extensions pane. Falls back to opening Safari.app if it fails.
-        //
-        // History: this API was broken in early macOS 26 betas (SFErrorDomain error 4), so an
-        // AppleScript/osascript workaround was used instead. That workaround was removed because
-        // it requires Automation permission for System Events, which triggers a TCC dialog on
-        // every launch under App Sandbox. showPreferencesForExtension works on macOS 26.3+;
-        // on older versions that still have the bug, the fallback opens Safari.app directly.
+        // showPreferencesForExtension opens Safari Settings directly to the Extensions pane.
+        // If it fails (unsigned dev build, or macOS bug), we do NOT fall back to opening
+        // Safari.app generically — that lands on Safari's start page (e.g. SpeedReader),
+        // which is confusing. The onboarding UI already shows manual steps.
         let extensionBundleID = "com.chriscantu.claudeinsafari.extension"
         SFSafariApplication.showPreferencesForExtension(withIdentifier: extensionBundleID) { error in
             if let error = error {
-                NSLog("OnboardingWindowController: showPreferencesForExtension failed: %@ — falling back to Safari.app", error.localizedDescription)
-                DispatchQueue.main.async {
-                    if !NSWorkspace.shared.open(URL(fileURLWithPath: "/Applications/Safari.app")) {
-                        NSLog("OnboardingWindowController: Safari.app fallback also failed")
-                    }
-                }
+                NSLog("OnboardingWindowController: showPreferencesForExtension failed: %@ — user should follow the manual steps shown in onboarding", error.localizedDescription)
             }
         }
     }
