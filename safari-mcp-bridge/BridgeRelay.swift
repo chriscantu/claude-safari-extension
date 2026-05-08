@@ -268,6 +268,9 @@ enum BridgeRelay {
                         group.leave()
                         return
                     }
+                    // write(2) returning 0 on a blocking fd is undefined per POSIX; break
+                    // (rather than continue) to avoid an infinite loop. The unwritten tail
+                    // is dropped — acceptable because this path is unreachable in practice.
                     if w == 0 { break }
                     written += w
                 }
@@ -310,6 +313,9 @@ enum BridgeRelay {
                         group.leave()
                         return
                     }
+                    // write(2) returning 0 on a blocking fd is undefined per POSIX; break
+                    // (rather than continue) to avoid an infinite loop. The unwritten tail
+                    // is dropped — acceptable because this path is unreachable in practice.
                     if w == 0 { break }
                     written += w
                 }
